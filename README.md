@@ -81,20 +81,27 @@
 
 ## 自分で動かす
 
-ビルド工程や依存ライブラリはありません。ES Modules を使っているため、`file://` で直接開くのではなく、ローカルの HTTP サーバー経由で開いてください。
+タスクは [Lask](https://lask-task-runner.github.io/) で定義しています（`main.lask`）。必要なのは Lask と Docker だけで、Node や Python を入れる必要はありません。各コマンドは `lask.lock.json` で固定したコンテナの中で動きます。
 
 ```sh
 cd the-building
-python3 -m http.server 8000
-# ブラウザで http://localhost:8000/ を開く
+lask sync            # 初回のみ: イメージを取得する
+lask run test        # シミュレーションの自動テスト
+lask run build       # テストを通してから dist/ に公開用ファイルを組み立てる
+lask run serve       # ソースのままローカルで遊ぶ → http://localhost:8000/
+lask run preview     # build した dist/ をローカルで確かめる
+lask run deploy      # dist/ を gh-pages ブランチに push して公開する
 ```
+
+ポートは `--port 8080` のように変えられます。各タスクの説明は `lask run <タスク名> --help` で見られます。
+
+ゲーム自体にビルド工程や依存ライブラリはありません。ES Modules を使っているため、`file://` で直接開くのではなく、HTTP サーバー経由で開いてください（`python3 -m http.server 8000` でも動きます）。
 
 ## GitHub Pages で公開する
 
-1. このフォルダをそのまま GitHub のリポジトリに push します（`index.html` がリポジトリのルートにある状態）。
-2. リポジトリの **Settings → Pages** を開きます。
-3. **Build and deployment** の **Source** で「Deploy from a branch」を選び、Branch に `main`、フォルダに `/ (root)` を指定して **Save** します。
-4. 1〜2分待つと `https://<ユーザー名>.github.io/<リポジトリ名>/` で公開されます。このリンクを貼れば、誰でもすぐに遊べます。
+`lask run deploy` は、`dist/` の中身（`index.html`・`manifest.json`・`css/`・`js/` のみ。`dev/`・`tests/`・`docs/` は含めない）を `gh-pages` ブランチに push します。push には手元の git の認証情報を使います。
+
+初回だけ、リポジトリの **Settings → Pages** で **Source** を「Deploy from a branch」、Branch を `gh-pages`、フォルダを `/ (root)` にしてください。1〜2分待つと `https://<ユーザー名>.github.io/<リポジトリ名>/` で公開されます。
 
 すべて相対パスで読み込んでいるので、サブパス（`/<リポジトリ名>/`）でもそのまま動きます。
 

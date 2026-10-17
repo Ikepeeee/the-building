@@ -1,0 +1,21 @@
+{
+    "images": {
+        "#alpine:3.22": {
+            "digest": "sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8",
+            "kind": "registry",
+            "ref": "alpine:3.22"
+        },
+        "#node:24-alpine": {
+            "digest": "sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba15ed4a8602e937f",
+            "kind": "registry",
+            "ref": "node:24-alpine"
+        },
+        "#python:3.12-alpine": {
+            "digest": "sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4",
+            "kind": "registry",
+            "ref": "python:3.12-alpine"
+        }
+    },
+    "lock_version": 1,
+    "modules": {}
+}

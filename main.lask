@@ -1,0 +1,76 @@
+// The Building のタスク。必要なのは Lask と Docker だけ（Node や Python は不要）。
+//
+//   lask sync           # 初回のみ: イメージを取得し lask.lock.json に固定する
+//   lask run test       # シミュレーションの自動テスト
+//   lask run build      # テストを通してから、公開用のファイルを dist/ に組み立てる
+//   lask run serve      # ソースのままローカルで遊ぶ http://localhost:8000
+//   lask run preview    # build した dist/ をローカルで確かめる
+//   lask run deploy     # dist/ を gh-pages ブランチに push し、GitHub Pages に公開する
+
+node_image = #node:24-alpine
+alpine = #alpine:3.22
+python = #python:3.12-alpine
+
+command { "node" } on node_image
+// 公開は手元の git の認証情報で push するため、ホストの git を使う。
+command { "git" } on #local
+
+// コンテナの 8000 番をホストの port に公開する静的サーバー。
+internal web(port: Number): Runnable = runnable(python, publish = ["#{port}:8000"])
+
+// シミュレーションの自動テストを実行する。
+//
+// @example lask run test
+test() = $ node tests/sim.test.mjs
+
+// テストを通してから、公開に必要なファイルだけを dist/ に組み立てる。
+//
+// dev/・tests/・docs/ は含めない。ビルド工程のない静的サイトなので、
+// コピーするだけで dist/ がそのまま公開物になる。
+//
+// @example lask run build
+build() = do {
+  test()
+  $[alpine] sh -c 'rm -rf dist && mkdir -p dist && cp -R index.html manifest.json css js dist/ && touch dist/.nojekyll'
+  log("dist/ を組み立てました")
+}
+
+// ソースのままローカルで遊ぶ。止めるまで動き続ける。
+//
+// ファイルを書き換えたらブラウザを再読み込みするだけで反映される。
+//
+// @param port  ホスト側のポート番号。
+// @example lask run serve --port 8080
+serve(--port: Number = 8000) = do {
+  log("open http://localhost:#{port}")
+  $[web(port)] python -m http.server 8000
+}
+
+// build してから dist/ をローカルで確かめる。止めるまで動き続ける。
+//
+// @param port  ホスト側のポート番号。
+// @example lask run preview
+preview(--port: Number = 8000) = do {
+  build()
+  log("open http://localhost:#{port}")
+  $[web(port)] python -m http.server 8000 -d dist
+}
+
+// build した dist/ を gh-pages ブランチに push して公開する。
+//
+// GitHub Pages は gh-pages ブランチのルートから配信する設定にしておくこと。
+// push 先は origin と同じリポジトリで、手元の git の認証情報を使う。
+//
+// @example lask run deploy
+deploy() = do {
+  build()
+  remote = $ git remote get-url origin
+    |> trim
+  rev = $ git rev-parse --short HEAD
+    |> trim
+  $ git -C dist init -q -b gh-pages
+  $ git -C dist add -A
+  $ git -C dist commit -q -m #{shell_quote("Deploy #{rev}")}
+  $ git -C dist push -q -f #{shell_quote(remote)} gh-pages
+  log("公開しました: #{rev} → gh-pages")
+}
