@@ -30,25 +30,33 @@ if (q.get('real') === '1') {
     sim.money = 1e9; sim.star = 5;
     const fails = [];
     const B = (tool, p) => { const r = sim.build(tool, p); if (!r || !r.ok) fails.push(tool + JSON.stringify(p) + ':' + (r && r.reason)); return r; };
-    B('lobby', { f: 0, x: 30, x2: 109 });
-    for (let f = 1; f <= 16; f++) B('floor', { f, x: 30, x2: 109 });
-    for (let f = -1; f >= -4; f--) B('floor', { f, x: 30, x2: 109 });
+    B('lobby', { f: 0, x: 30, x2: 119 });
+    for (let f = 1; f <= 16; f++) B('floor', { f, x: 30, x2: 119 });
+    for (let f = -1; f >= -4; f--) B('floor', { f, x: 30, x2: 119 });
     B('elevator', { f: 0, x: 66, f2: 16 }); B('elevator', { f: -4, x: 70, f2: 12 });
     B('express', { f: -3, x: 74, f2: 14 });
     B('stairs', { f: 0, x: 32 }); B('escalator', { f: 0, x: 100 }); B('stairs', { f: 1, x: 32 });
-    for (const [t, f, x] of [['fastfood', 1, 40], ['shop', 1, 80], ['restaurant', 1, 92 - 12]]) B(t, { f, x });
+    for (const [t, f, x] of [['fastfood', 1, 40], ['shop', 1, 80], ['restaurant', 1, 92]]) B(t, { f, x });
     B('cinema', { f: 2, x: 34 }); B('partyHall', { f: 2, x: 80 });
     B('security', { f: 4, x: 30 }); B('housekeeping', { f: 4, x: 46 }); B('medical', { f: 4, x: 80 });
-    for (let f = 5; f <= 8; f++) { for (let i = 0; i < 4; i++) B('office', { f, x: 30 + i * 9 }); for (let i = 0; i < 3; i++) B('office', { f, x: 80 + i * 9 }); }
+    for (let f = 5; f <= 8; f++) { for (let i = 0; i < 4; i++) B('office', { f, x: 30 + i * 10 }); for (let i = 0; i < 3; i++) B('office', { f, x: 80 + i * 10 }); }
     for (let f = 9; f <= 11; f++) { B('condo', { f, x: 30 }); B('condo', { f, x: 46 }); B('condo', { f, x: 80 }); }
     for (let f = 12; f <= 13; f++) { for (let i = 0; i < 6; i++) B('hotelSingle', { f, x: 30 + i * 4 }); for (let i = 0; i < 4; i++) B('hotelTwin', { f, x: 80 + i * 6 }); }
     B('hotelSuite', { f: 14, x: 30 }); B('hotelSuite', { f: 14, x: 80 });
     B('metro', { f: -4, x: 32 }); B('recycling', { f: -4, x: 80 });
+    B('garbage', { f: 9, x: 96 }); B('garbage', { f: 6, x: 110 }); B('garbage', { f: 12, x: 54 });
     window.__fails = fails;
   }
   if (q.has('steps')) for (let i = 0; i < +q.get('steps'); i++) sim.step(1);
+  // 実 sim で事件を起こす（確認用）: ev=bomb|fire, evSteps=分
+  if (q.get('ev') === 'bomb' && sim.plantBomb) { sim.plantBomb(num('bf', 7), num('bx', 45)); sim.explodeBomb(); }
+  if (q.get('ev') === 'fire' && sim.startFire) {
+    const o = sim.objAt(num('bf', 7), num('bx', 45));
+    if (o && sim.startFire(o)) { sim._answer_fire && sim._answer_fire('heli'); }
+  }
+  if (q.has('evSteps')) for (let i = 0; i < +q.get('evSteps'); i++) sim.step(0.5);
 } else {
-  sim = new MockTower({ hour, people: num('people', 160), bombFound: q.get('bombFound') === '1', santa: q.get('santa') !== '0', santaF: q.has('santaF') ? +q.get('santaF') : undefined, bomb: q.get('bomb') !== '0' });
+  sim = new MockTower({ hour, people: num('people', 160), bombFound: q.get('bombFound') === '1', santa: q.get('santa') !== '0', santaF: q.has('santaF') ? +q.get('santaF') : undefined, heli: q.get('heli') === '1', heliT: num('heliT', 0), bomb: q.get('bomb') !== '0' });
 }
 window.sim = sim;
 const canvas = document.getElementById('c');
@@ -69,6 +77,9 @@ if (q.get('ghost') === '1') {
 }
 if (q.get('ghost') === '2') view.ghost = { x: 100, w: 16, f: 6, h: 1, ok: false, label: 'ここには建てられません' };
 if (q.get('ghost') === '3') view.ghost = { x: 50, w: 4, lo: 2, hi: 12, ok: true, label: 'エレベーター 2F〜13F' };
+if (q.get('ghosts') === '1') view.ghosts = [
+  { x: 150, w: 9, f: 13, h: 1, ok: true, type: 'office', label: 'コピー 3件 $480,000' }, { x: 159, w: 16, f: 13, h: 1, ok: true, type: 'condo' },
+  { x: 175, w: 4, lo: 13, hi: 16, ok: true }, { x: 179, w: 12, f: 13, h: 1, ok: false, type: 'shop' }];
 if (q.get('sel') === '1') { const o = sim.objAt ? sim.objAt(1, 20) : null; if (o) view.selectedId = o.id; }
 if (q.has('hx')) view.hover = { f: num('hf', 0), x: num('hx', 0) };
 

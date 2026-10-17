@@ -1,7 +1,8 @@
 // node tests/sim.test.mjs
 // シミュレーション（js/sim/）の自動テスト。依存ライブラリなし。
 import assert from 'node:assert/strict';
-import { Tower, TYPES, DAY, W, LOBBY_FLOORS, AutoPlayer, autoPlay, buildMegaTower, mustBuild, stepTo, smallTower, bombTrial, fireTrial, securityTower } from './helpers.mjs';
+import { Tower, TYPES, DAY, W, LOBBY_FLOORS, AutoPlayer, autoPlay, buildMegaTower, mustBuild, stepTo, smallTower, bombTrial, fireTrial, securityTower, elevatorStress } from './helpers.mjs';
+import { VARIANTS } from '../js/sim/constants.js';
 import { runStrategy } from './balance.mjs';
 import { SIM } from '../js/sim/rules.js';
 import { MIN_F, MAX_F, START_MONEY } from '../js/sim/constants.js';
@@ -9,6 +10,7 @@ import { MIN_F, MAX_F, START_MONEY } from '../js/sim/constants.js';
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
 const ACTIVE_STATES = new Set(['walk', 'wait', 'ride', 'stairs']);
+const OW = TYPES.office.w;
 
 // 内部の整合性チェック（エレベーターの待ち列・カゴ・在室人数・active）
 function checkInvariants(s) {
@@ -61,8 +63,8 @@ test('建設: 支え・フロア代・地下', () => {
   assert.ok(s.build('floor', { f: -2, x: 10, x2: 12 }).ok);
   // 空マスへの施設はフロア代込み
   const c = s.check('office', { f: 0, x: 30 });
-  assert.ok(c.ok); assert.equal(c.cost, TYPES.office.cost + 9 * 500);
-  assert.deepEqual(c.ghost, { x: 30, w: 9, f: 0, h: 1 });
+  assert.ok(c.ok); assert.equal(c.cost, TYPES.office.cost + OW * 500);
+  assert.deepEqual(c.ghost, { x: 30, w: OW, f: 0, h: 1 });
   assert.equal(s.check('office', { f: 2, x: 40 }).ok, false, '3F の下に何もない');
   assert.ok(s.check('office', { f: 1, x: 10 }).ok);
   assert.equal(s.check('office', { f: 0, x: W - 3 }).ok, false, '範囲外');
@@ -94,7 +96,7 @@ test('建設: h>1 施設と階段', () => {
   s.star = 3;
   for (let f = 0; f <= 3; f++) mustBuild(s, 'floor', { f, x: 0, x2: 80 });
   const r = mustBuild(s, 'cinema', { f: 1, x: 0 });
-  assert.deepEqual(r.ghost, { x: 0, w: 31, f: 1, h: 2 });
+  assert.deepEqual(r.ghost, { x: 0, w: TYPES.cinema.w, f: 1, h: 2 });
   const o = s.objAt(1, 5);
   assert.equal(o.type, 'cinema');
   assert.equal(s.objAt(2, 30), o, '上の段にも同じ id');
@@ -111,7 +113,7 @@ test('建設: h>1 施設と階段', () => {
   assert.equal(s.grid[2][5], -1);
 });
 
-test('建設: エレベーター（スパン・急行の停止階・ロビーへの重ね置き・延長）', () => {
+test('建設: エレベーター（スパン・急行の停止階・移動手段の層・機械室とピット・延長）', () => {
   const s = new Tower({ seed: 1 });
   s.money = 1e9; s.star = 3;
   mustBuild(s, 'lobby', { f: 0, x: 0, x2: 100 });
@@ -120,32 +122,45 @@ test('建設: エレベーター（スパン・急行の停止階・ロビーへ
   assert.match(s.check('elevator', { f: 3, f2: 3, x: 10 }).reason, /2フロア/);
   const r = mustBuild(s, 'elevator', { f: 0, f2: 29, x: 10 });
   assert.deepEqual(r.ghost, { x: 10, w: 4, lo: 0, hi: 29 });
-  const e = s.objAt(5, 11);
+  const e = s.transportAt(5, 11);
   assert.equal(e.type, 'elevator');
-  assert.equal(s.grid[0][10], e.id, 'ロビーの上に重ねて置ける');
+  assert.equal(s.objAt(0, 10).type, 'lobby', 'grid には施設だけ');
+  assert.equal(s.tgrid[0][10], e.id);
+  assert.equal(s.tgrid[30][10], e.id, '機械室 hi+1');
+  assert.equal(s.tgrid[-1][10], e.id, 'ピット lo-1（地中）');
+  assert.equal(s.grid[-1][10], 0, 'ピットは構造を要らない');
   assert.equal(e.cars.length, 1);
   assert.equal(e.f, 0); assert.equal(e.h, 30);
+  // 施設と重ねて置ける / 移動手段どうしは重ねられない / 機械室にも重ねられない
+  mustBuild(s, 'office', { f: 5, x: 40 });
+  assert.ok(s.check('elevator', { f: 0, f2: 10, x: 42 }).ok, 'オフィスに重ねられる');
+  assert.match(s.check('elevator', { f: 0, f2: 10, x: 12 }).reason, /移動手段/);
+  assert.match(s.check('stairs', { f: 30, x: 8 }).reason, /移動手段/, '機械室と重なる');
   // 急行: ロビー階と地下のみ
   assert.match(s.check('express', { f: 1, f2: 10, x: 30 }).reason, /停止階/);
   mustBuild(s, 'express', { f: 0, f2: 40, x: 30 });
-  const x = s.objAt(1, 31);
+  const x = s.transportAt(1, 31);
   assert.deepEqual(x.stops, [0, 14, 29]);
   // 延長とカゴ
   assert.equal(s.act(e, 'extendUp').ok, false, '30フロア制限');
-  assert.match(s.act(x, 'extendUp').reason, /空中/, '空中には延長できない');
-  mustBuild(s, 'floor', { f: 41, x: 0, x2: 20 });
+  assert.match(s.act(x, 'extendUp').reason, /フロアがありません/, '空中には延長できない');
+  mustBuild(s, 'floor', { f: 41, x: 0, x2: 40 });
   assert.ok(s.act(x, 'extendUp').ok);
   assert.equal(x.hi, 41);
-  assert.match(s.check('elevator', { f: 30, f2: 45, x: 60 }).reason, /空中/, '設置も同じルール');
+  assert.equal(s.tgrid[42][30], x.id, '機械室も移動');
+  assert.equal(s.tgrid[41][30], x.id);
+  assert.match(s.check('elevator', { f: 30, f2: 45, x: 60 }).reason, /フロアがありません/, '設置も同じルール');
   assert.ok(s.act(e, 'addCar').ok);
   assert.equal(e.cars.length, 2);
   assert.ok(s.act(e, 'removeCar').ok);
   assert.equal(s.act(e, 'removeCar').ok, false);
-  // 撤去するとロビーが戻る
+  // 撤去しても下のロビーはそのまま
   const lobbyId = s.grid[0][0];
   s.act(e, 'remove');
   assert.equal(s.grid[0][10], lobbyId);
-  assert.equal(s.grid[5][10], -1);
+  assert.equal(s.tgrid[0][10], 0);
+  assert.equal(s.tgrid[30][10], 0);
+  assert.equal(s.transportAt(5, 10), null);
 });
 
 test('撤去: 支えている空きフロアは消せない', () => {
@@ -157,7 +172,7 @@ test('撤去: 支えている空きフロアは消せない', () => {
   assert.equal(s.grid[1][3], 0);
   mustBuild(s, 'office', { f: 0, x: 0 });
   const r = s.check('bulldoze', { f: 0, x: 4 });
-  assert.deepEqual(r.ghost, { x: 0, w: 9, f: 0, h: 1 }, '施設をクリックしたらゴーストは施設全体');
+  assert.deepEqual(r.ghost, { x: 0, w: OW, f: 0, h: 1 }, '施設をクリックしたらゴーストは施設全体');
   assert.ok(s.build('bulldoze', { f: 0, x: 4 }).ok);
   assert.equal(s.grid[0][4], -1);
 });
@@ -189,7 +204,7 @@ test('エレベーター: 人が実際に目的階に届く（多数・双方向
   const s = new Tower({ seed: 2 });
   s.money = 1e9;
   smallTower(s, 20);
-  const e = s.objAt(1, 61);
+  const e = s.transportAt(1, 61);
   s.act(e, 'addCar');
   const arrived = [];
   const people = [];
@@ -265,7 +280,7 @@ test('階段・エスカレーター: 移動と drawPos の中間値', () => {
 // 長期シミュレーション・バランス
 // ====================================================================
 test('長期: 自動プレイヤーで 70 日（例外なし・リークなし・資金・★の進行）', () => {
-  const s = new Tower({ seed: 7 });
+  const s = new Tower({ seed: 7, construction: true });
   const ev = collect(s);
   s.on('prompt', (p) => s.answer(p.id, p.kind === 'bomb' ? 'refuse' : p.choices[p.choices.length - 1].value));
   let minMoney = Infinity, maxNight = 0;
@@ -301,7 +316,7 @@ test('評価: エレベーターが足りないと評価が下がり、苦情・
   mustBuild(s, 'lobby', { f: 0, x: 0, x2: 149 });
   for (let f = 1; f <= 29; f++) mustBuild(s, 'floor', { f, x: 0, x2: 149 });
   mustBuild(s, 'elevator', { f: 0, f2: 29, x: 70 });
-  for (let f = 1; f <= 29; f++) for (let x = 0; x + 9 <= 70; x += 9) s.build('office', { f, x });
+  for (let f = 1; f <= 29; f++) for (let x = 0; x + OW <= 70; x += OW) s.build('office', { f, x });
   for (const o of s.byType.office) s.moveIn(o);
   const ev = collect(s);
   stepTo(s, 1, 12);
@@ -421,12 +436,14 @@ function incidentTower(seed, security) {
   mustBuild(s, 'lobby', { f: 0, x: 0, x2: 100 });
   for (let f = 1; f <= 12; f++) mustBuild(s, 'floor', { f, x: 0, x2: 100 });
   mustBuild(s, 'elevator', { f: 0, f2: 12, x: 50 });
-  s.act(s.objAt(1, 50), 'addCar');
+  s.act(s.transportAt(1, 50), 'addCar');
   for (let f = 1; f <= 12; f++) {
-    for (let x = 0; x + 9 <= 50; x += 9) s.build('office', { f, x });
-    for (let x = 54; x + 9 <= 100; x += 9) s.build('office', { f, x });
+    for (let x = 0; x + OW <= 50; x += OW) s.build('office', { f, x });
+    for (let x = 54; x + OW <= 100; x += OW) s.build('office', { f, x });
   }
-  if (security) { s.act(s.objAt(3, 54), 'remove'); s.act(s.objAt(3, 63), 'remove'); mustBuild(s, 'security', { f: 3, x: 54 }); }
+  if (security) {
+    for (const f of [3, 9]) { s.act(s.objAt(f, 54), 'remove'); s.act(s.objAt(f, 54 + OW), 'remove'); mustBuild(s, 'security', { f, x: 54 }); }
+  }
   for (const o of s.byType.office) s.moveIn(o);
   stepTo(s, 0, 10);
   return s;
@@ -555,7 +572,7 @@ test('VIP: 清潔なスイートへ快適に到着 → ★4（条件がそろえ
   const s = new Tower({ seed: 30 });
   buildMegaTower(s);
   s.star = 3;
-  s.act(s.objAt(8, 0), 'remove'); s.act(s.objAt(8, 9), 'remove');
+  s.act(s.objAt(8, 0), 'remove'); s.act(s.objAt(8, OW), 'remove');
   mustBuild(s, 'hotelSuite', { f: 8, x: 0 });
   const ev = collect(s);
   s.on('prompt', (p) => s.answer(p.id, 'ok'));
@@ -642,7 +659,7 @@ test('★: starProgress と条件', () => {
 test('パネル: describe / act', () => {
   const s = new Tower({ seed: 51 });
   smallTower(s, 5);
-  const e = s.objAt(1, 61);
+  const e = s.transportAt(1, 61);
   let d = s.describe(e);
   assert.equal(d.title, 'エレベーター');
   assert.equal(d.subtitle, '1F〜6F');
@@ -685,10 +702,10 @@ test('保存: serialize → JSON → restore の往復', () => {
   if (h) { h.dirty = true; h.dirtySince = s.time - 100; h.infested = true; }
   s.flags.vipNext = 99;
   const data = JSON.parse(JSON.stringify(s.serialize()));
-  assert.equal(data.v, 2);
+  assert.equal(data.v, 3);
   const r = new Tower();
   r.restore(data);
-  for (let f = MIN_F; f <= MAX_F; f++) assert.deepEqual(Array.from(r.grid[f]), Array.from(s.grid[f]), `grid ${f}`);
+  for (let f = MIN_F; f <= MAX_F; f++) { assert.deepEqual(Array.from(r.grid[f]), Array.from(s.grid[f]), `grid ${f}`); assert.deepEqual(Array.from(r.tgrid[f]), Array.from(s.tgrid[f]), `tgrid ${f}`); }
   assert.equal(r.objs.size, s.objs.size);
   for (const k of ['time', 'money', 'star', 'tower', 'pop']) assert.equal(r[k], s[k], k);
   assert.deepEqual(r.flags, s.flags);
@@ -751,7 +768,7 @@ test('保存: 壊れたデータは例外、部分的な破損は読み飛ばす
   smallTower(s, 3);
   const d = s.serialize();
   d.objs.push({ id: 9999, type: 'nonsense', f: 0, x: 0 });
-  d.objs.push({ id: 9998, type: 'office', f: 1, x: 145 });
+  d.objs.push({ id: 9998, type: 'office', f: 1, x: W - 2 });
   r.restore(d);
   assert.equal(r.objs.size, s.objs.size);
 });
@@ -812,7 +829,7 @@ test('経済: 悪い評価で退去したマンションは買い戻し、混雑
   assert.equal(s.money, m - TYPES.condo.sale);
   assert.equal(s.dayLog.buyback, TYPES.condo.sale);
   assert.ok(o.vacantUntil > s.time);
-  const e = s.objAt(1, 61);
+  const e = s.transportAt(1, 61);
   assert.equal(s.serviceFactor(1), 1);
   e.peakWaitRecent = 40;
   assert.ok(s.serviceFactor(1) < 0.1);
@@ -898,9 +915,9 @@ test('エレベーター: avgWait（直近1時間の平均待ち）', () => {
   mustBuild(s, 'lobby', { f: 0, x: 0, x2: 149 });
   for (let f = 1; f <= 20; f++) mustBuild(s, 'floor', { f, x: 0, x2: 149 });
   mustBuild(s, 'elevator', { f: 0, f2: 20, x: 70 });
-  for (let f = 1; f <= 20; f++) for (let x = 0; x + 9 <= 70; x += 9) s.build('office', { f, x });
+  for (let f = 1; f <= 20; f++) for (let x = 0; x + OW <= 70; x += OW) s.build('office', { f, x });
   for (const o of s.byType.office) s.moveIn(o);
-  const e = s.objAt(1, 70);
+  const e = s.transportAt(1, 70);
   assert.equal(e.avgWait, 0);
   stepTo(s, 1, 9);
   assert.ok(e.avgWait > 3, `朝の混雑 ${e.avgWait}`);
@@ -948,6 +965,442 @@ test('カレンダーとサンタ: 0日目は4月1日、12/24 18時からサン�
   assert.equal(s.santa, null);
   s.time = 365 * DAY;
   assert.deepEqual(s.date, { month: 4, day: 1 });
+});
+
+// ====================================================================
+// v2
+// ====================================================================
+test('v2 §1: 横幅150の古いセーブ（移動手段が grid に入っている、旧い幅の施設）を読み込める', () => {
+  const row = (a, b) => { let t = ''; for (let x = 0; x < 150; x++) t += x >= a && x <= b ? '1' : '0'; return t; };
+  const rows = { 0: row(0, 99) };
+  for (let f = 1; f <= 5; f++) rows[f] = row(0, 99);
+  const old = {
+    v: 2, seed: 5, time: 2 * DAY + 600, money: 1234567, star: 2, tower: false, nextId: 20, rows,
+    objs: [
+      { id: 1, type: 'lobby', f: 0, x: 0, w: 100, h: 1 },
+      { id: 2, type: 'elevator', f: 0, x: 50, w: 4, h: 6, lo: 0, hi: 5, cars: [0, 3] },
+      { id: 3, type: 'office', f: 1, x: 0, w: 9, h: 1, occupied: true, eval: 5 },
+      { id: 4, type: 'office', f: 1, x: 9, w: 9, h: 1, occupied: true },   // 新しい幅10だと id3 と重なる → 読み飛ばす
+      { id: 5, type: 'office', f: 2, x: 20, w: 9, h: 1, occupied: false },
+      { id: 6, type: 'stairs', f: 2, x: 80, w: 8, h: 1 },
+      { id: 7, type: 'condo', f: 3, x: 0, w: 16, h: 1, occupied: true },
+    ],
+    flags: { vipOk: false },
+  };
+  const s = new Tower();
+  s.restore(JSON.parse(JSON.stringify(old)));
+  assert.equal(s.grid[0].length, W);
+  assert.equal(s.grid[0][120], 0, '右側は空');
+  assert.equal(s.objAt(0, 50).type, 'lobby', 'grid にはロビー（移動手段の id は入らない）');
+  const e = s.transportAt(3, 51);
+  assert.equal(e.type, 'elevator'); assert.equal(e.cars.length, 2);
+  assert.equal(s.tgrid[6][50], e.id, '機械室');
+  assert.equal(s.objAt(1, 0).w, TYPES.office.w, '新しい幅で置き直す');
+  assert.equal(s.objs.has(4), false, '入らない施設は読み飛ばす');
+  assert.equal(s.objAt(1, 9), s.objAt(1, 0));
+  assert.equal(s.objAt(1, 12), null, '旧 id4 の場所は空きフロア');
+  assert.equal(s.grid[1][12], -1);
+  assert.equal(s.transportAt(2, 82).type, 'stairs');
+  assert.ok(s.objAt(1, 0).brand, '古いセーブにも社名を付ける');
+  s.step(DAY);
+  checkInvariants(s);
+});
+
+test('v2 §2: 移動手段の層（施設との重ね置き・撤去の優先・構造の要否）', () => {
+  const s = new Tower({ seed: 100 });
+  s.money = 1e9;
+  mustBuild(s, 'lobby', { f: 0, x: 0, x2: 60 });
+  for (let f = 1; f <= 3; f++) mustBuild(s, 'floor', { f, x: 0, x2: 60 });
+  mustBuild(s, 'office', { f: 1, x: 0 });
+  mustBuild(s, 'stairs', { f: 1, x: 2 });
+  assert.equal(s.objAt(1, 3).type, 'office');
+  assert.equal(s.transportAt(1, 3).type, 'stairs');
+  assert.match(s.check('escalator', { f: 1, x: 5 }).reason, /移動手段/);
+  assert.match(s.check('stairs', { f: 3, x: 0 }).reason, /上の階/);
+  assert.match(s.check('elevator', { f: 0, f2: 5, x: 30 }).reason, /フロアがありません/, '構造のないマスは不可');
+  // 撤去は移動手段が先
+  assert.ok(s.build('bulldoze', { f: 1, x: 3 }).ok);
+  assert.equal(s.transportAt(1, 3), null);
+  assert.equal(s.objAt(1, 3).type, 'office');
+  // シャフトの通るフロアは撤去できない
+  mustBuild(s, 'elevator', { f: 1, f2: 3, x: 40 });
+  assert.match(s.check('bulldoze', { f: 3, x: 41 }).reason || '', /^$/, '移動手段の撤去が優先される');
+  s.act(s.objAt(1, 0), 'remove');
+  assert.equal(s.floorRemovable(3, 41), '移動手段を先に撤去してください');
+});
+
+test('v2 §4: resizeElevator（check/build・ghost・費用・縮めると乗客を降ろす）', () => {
+  const s = new Tower({ seed: 101 });
+  s.money = 1e9;
+  smallTower(s, 20);
+  const e = s.transportAt(1, 61);
+  let r = s.check('resizeElevator', { id: e.id, lo: 0, hi: 15 });
+  assert.ok(r.ok); assert.deepEqual(r.ghost, { x: 60, w: 4, lo: 0, hi: 15 }); assert.equal(r.cost, 0);
+  r = s.check('resizeElevator', { id: e.id, lo: 0, hi: 25 });
+  assert.match(r.reason, /フロアがありません/);
+  for (let f = 21; f <= 25; f++) mustBuild(s, 'floor', { f, x: 40, x2: 100 });
+  r = s.check('resizeElevator', { id: e.id, lo: 0, hi: 25 });
+  assert.ok(r.ok); assert.equal(r.cost, 5 * SIM.EXTEND_COST.elevator);
+  // 乗客がいるまま縮める
+  const ps = [];
+  for (let i = 0; i < 10; i++) { const p = s.newPerson('visitor', null); s.spawnAt(p, s.entrances[0]); s.startTrip(p, 18, 50, (pp) => s.leave(pp)); ps.push(p); }
+  for (let i = 0; i < 40 && !ps.some((p) => p.state === 'ride'); i++) s.step(0.5);
+  assert.ok(s.build('resizeElevator', { id: e.id, lo: 0, hi: 10 }).ok);
+  assert.equal(e.hi, 10);
+  assert.equal(s.tgrid[11][60], e.id, '機械室は新しい hi+1');
+  assert.equal(s.tgrid[15][60], 0);
+  for (const c of e.cars) for (const p of c.pass) assert.ok(p.legs[p.li].to <= 10);
+  s.step(120);
+  checkInvariants(s);
+});
+
+test('v2 §4: カゴの加速・減速と、ちょうど階に止まること（急行は速い）', () => {
+  const make = (type, cfg) => {
+    const s = new Tower({ seed: 102 });
+    s.money = 1e9; s.star = 3;
+    mustBuild(s, 'lobby', { f: 0, x: 0, x2: 80 });
+    for (let f = 1; f <= 29; f++) mustBuild(s, 'floor', { f, x: 0, x2: 80 });
+    mustBuild(s, type, { f: 0, f2: 29, x: 30 });
+    const e = s.transportAt(5, 31);
+    if (cfg) assert.ok(s.setElevatorConfig(e, cfg).ok);
+    return { s, e };
+  };
+  const ride = ({ s, e }) => {
+    const p = s.newPerson('visitor', null);
+    p.f = 0; p.x = e.x - 0.5; p.state = 'walk'; s.active.add(p);
+    let done = false;
+    s.startTrip(p, 29, e.x - 1, (pp) => { done = true; s.leave(pp); });
+    const vs = [];
+    let t = 0;
+    while (!done && t < 60) {
+      s.step(0.25); t += 0.25;
+      const c = e.cars[0];
+      vs.push(c.v);
+      if (c.state === 'doors') assert.equal(c.pos, Math.round(c.pos), 'ドアが開くのは階ちょうど');
+      assert.ok(c.v <= e.vmax + 1e-9);
+    }
+    assert.ok(done);
+    return { t, vs, vmax: Math.max(...vs) };
+  };
+  const a = ride(make('elevator')), b = ride(make('express'));
+  assert.ok(a.vs.some((v) => v > 0 && v < a.vmax * 0.7), `加速・減速の途中がある ${a.vs.map((v) => v.toFixed(1))}`);
+  assert.ok(b.vmax > a.vmax * 2, `急行のほうが速い ${b.vmax} vs ${a.vmax}`);
+  assert.ok(b.t < a.t, `急行のほうが早く着く ${b.t} < ${a.t}`);
+  // 高速モーター: 速くて維持費2倍
+  const m = make('elevator');
+  const m1 = m.s.carMaint(m.e);
+  assert.ok(m.s.setElevatorConfig(m.e, { speed: 2 }).ok);
+  assert.equal(m.s.carMaint(m.e), m1 * 2);
+  assert.ok(ride(m).t < a.t, '高速モーターで早く着く');
+  // ドア時間
+  assert.ok(m.s.setElevatorConfig(m.e, { door: 'long' }).ok);
+  assert.equal(m.e.doorTime, 0.6);
+  assert.equal(m.s.setElevatorConfig(m.e, { door: 'slow' }).ok, false);
+});
+
+test('v2 §4: 設定 skip・standby・rush が実際に効く', () => {
+  const s = new Tower({ seed: 103 });
+  s.money = 1e9;
+  smallTower(s, 20);
+  const e = s.transportAt(1, 61);
+  s.act(e, 'addCar'); s.act(e, 'addCar');
+  // skip: 通過階は経路にも使われない
+  assert.ok(s.setElevatorConfig(e, { skip: [10] }).ok);
+  assert.equal(e.isStop[10 + 10], 0);
+  assert.equal(s.route(0, 10), null, '止まらない階へは行けない');
+  assert.ok(s.route(0, 11));
+  assert.match(s.setElevatorConfig(e, { skip: Array.from({ length: 20 }, (_, i) => i) }).reason, /2つ以上/);
+  assert.match(s.setElevatorConfig(e, { skip: [40] }).reason, /範囲外/);
+  // standby: lobby → 空きカゴは1Fへ
+  assert.ok(s.setElevatorConfig(e, { skip: [], standby: 'lobby' }).ok);
+  for (const c of e.cars) c.pos = 15;
+  s.step(20);
+  assert.ok(e.cars.every((c) => c.pos === 0), `ロビー待機 ${e.cars.map((c) => c.pos)}`);
+  // spread: 分散
+  assert.ok(s.setElevatorConfig(e, { standby: 'spread' }).ok);
+  s.step(20);
+  assert.equal(new Set(e.cars.map((c) => c.pos)).size, e.cars.length, `分散 ${e.cars.map((c) => c.pos)}`);
+  // rush: 平日の朝はロビーへ
+  assert.ok(s.setElevatorConfig(e, { standby: 'none', rush: true }).ok);
+  for (const c of e.cars) c.pos = 12;
+  stepTo(s, 1, 7); s.step(20);
+  assert.ok(e.cars.every((c) => c.pos === 0), 'ラッシュ運転（朝）');
+  stepTo(s, 1, 17); s.step(30);
+  assert.ok(e.cars.every((c) => c.pos >= 10), `ラッシュ運転（夕方）${e.cars.map((c) => c.pos)}`);
+  assert.ok(s.describe(e).actions.some((a) => a.id === 'cfg:rush'));
+  assert.ok(s.act(e, 'cfg:door').ok);
+});
+
+test('v2 §11: 急行の停止階は既定でロビー階と地下、任意の階を足せる', () => {
+  const s = new Tower({ seed: 104 });
+  s.money = 1e9; s.star = 3;
+  mustBuild(s, 'lobby', { f: 0, x: 0, x2: 80 });
+  for (const f of [-1, -2]) mustBuild(s, 'floor', { f, x: 0, x2: 80 });
+  for (let f = 1; f <= 35; f++) mustBuild(s, 'floor', { f, x: 0, x2: 80 });
+  mustBuild(s, 'express', { f: -2, f2: 35, x: 30 });
+  const e = s.transportAt(3, 31);
+  assert.deepEqual(e.stops, [-2, -1, 0, 14, 29]);
+  assert.equal(e.config.skip.length, 38 - 5);
+  assert.equal(s.route(0, 20), null);
+  const skip = e.config.skip.filter((f) => f !== 20);
+  assert.ok(s.setElevatorConfig(e, { skip }).ok);
+  assert.deepEqual(s.route(0, 20).map((l) => [l.kind, l.to]), [['express', 20]], '足した階に止まる');
+  assert.equal(s.setElevatorConfig(e, { skip: [...Array(38).keys()].map((i) => i - 2).filter((f) => f !== 0) }).ok, false, '停止階1つは不可');
+  // 伸ばした階は既定どおり通過
+  mustBuild(s, 'floor', { f: 36, x: 0, x2: 80 });
+  assert.ok(s.act(e, 'extendUp').ok);
+  assert.ok(e.config.skip.includes(36));
+});
+
+test('v2 §4: 固まる不具合の再現テスト（設定・伸縮・カゴ増減・乗り換えを混ぜた多数のシード）', () => {
+  let bad = 0, trips = 0;
+  for (let seed = 1; seed <= 10; seed++) {
+    const r = elevatorStress(seed, 400, { burst: seed % 2 === 0 });
+    trips += r.trips;
+    if (r.problems.length) { bad++; console.log(`    seed ${seed}: ${r.problems.slice(0, 2).join(' | ')}`); }
+    checkInvariants(r.sim);
+  }
+  console.log(`    10シード × 400分、到着 ${trips.toLocaleString()}回`);
+  assert.equal(bad, 0, '待ちがあるのに止まったままのカゴ・止まらない乗客がない');
+});
+
+test('v2 §5: 店名・社名（入居のたびに引き直し）と describe', () => {
+  const s = new Tower({ seed: 105 });
+  smallTower(s, 3);
+  mustBuild(s, 'fastfood', { f: 1, x: 40 });
+  const ff = s.objAt(1, 40);
+  assert.ok(ff.brand.length > 0);
+  assert.ok(ff.variant >= 0 && ff.variant < VARIANTS.fastfood.length);
+  assert.equal(s.describe(ff).title, ff.brand);
+  mustBuild(s, 'office', { f: 2, x: 40 });
+  const of = s.objAt(2, 40);
+  assert.equal(of.brand, '', '空室には社名がない');
+  const seen = new Set();
+  for (let i = 0; i < 12; i++) { s.moveIn(of); seen.add(of.brand); assert.ok(of.brand); s.vacate(of); assert.equal(of.brand, ''); }
+  assert.ok(seen.size > 3, '入居のたびに変わる');
+  s.moveIn(of);
+  assert.match(s.describe(of).subtitle, /オフィス/);
+  mustBuild(s, 'condo', { f: 3, x: 40 });
+  s.moveIn(s.objAt(3, 40));
+  assert.match(s.objAt(3, 40).brand, /家$/);
+});
+
+test('v2 §6: 爆発・火災で壊れた施設は残り、何にも使われず、撤去だけできる', () => {
+  const s = incidentTower(106, false);
+  const ev = collect(s);
+  s.trigger('bomb');
+  s.answer(ev.prompt[0].id, 'refuse');
+  s.step(181);
+  const ruins = [...s.objs.values()].filter((o) => o.destroyed === 'bomb');
+  assert.ok(ruins.length > 0);
+  const o = ruins[0];
+  assert.equal(o.occupied, false);
+  assert.ok(!s.byType[o.type].includes(o), '索引から外れる');
+  assert.equal(s.objAt(o.f, o.x), o, 'マスには残る');
+  assert.equal(s.evalLevel(o), null, '評価の対象外');
+  const d = s.describe(o);
+  assert.match(d.subtitle, /破壊/); assert.deepEqual(d.actions.map((a) => a.id), ['remove']);
+  s.step(DAY * 2);
+  assert.equal(o.occupied, false, '入居しない');
+  assert.equal(o.inCount, 0);
+  assert.ok(s.build('bulldoze', { f: o.f, x: o.x }).ok);
+  assert.equal(s.objs.has(o.id), false);
+  assert.equal(s.grid[o.f][o.x], -1);
+  // 火災
+  const s2 = incidentTower(107, false);
+  s2.trigger('fire', s2.objAt(6, 0));
+  s2.answer([...s2.pending.keys()][0], 'wait');
+  s2.step(400);
+  assert.ok([...s2.objs.values()].some((x) => x.destroyed === 'fire'));
+  const r = JSON.parse(JSON.stringify(s2.serialize()));
+  const s3 = new Tower(); s3.restore(r);
+  assert.ok([...s3.objs.values()].some((x) => x.destroyed === 'fire'), '保存される');
+});
+
+test('v2 §7: 評価の内訳 reasons', () => {
+  const s = new Tower({ seed: 108 });
+  s.money = 1e9;
+  mustBuild(s, 'lobby', { f: 0, x: 0, x2: 149 });
+  for (let f = 1; f <= 20; f++) mustBuild(s, 'floor', { f, x: 0, x2: 149 });
+  mustBuild(s, 'elevator', { f: 0, f2: 20, x: 70 });
+  for (let f = 1; f <= 20; f++) for (let x = 0; x + OW <= 70; x += OW) s.build('office', { f, x });
+  for (const o of s.byType.office) s.moveIn(o);
+  stepTo(s, 1, 12);
+  const o = s.objAt(15, 0);
+  const d = s.describe(o);
+  assert.ok(Array.isArray(d.reasons) && d.reasons.length);
+  for (const r of d.reasons) assert.ok(['good', 'fair', 'bad'].includes(r.level) && r.label);
+  assert.ok(d.reasons.some((r) => /エレベーター待ち 平均/.test(r.label) && r.level !== 'good'), JSON.stringify(d.reasons));
+  assert.ok(d.reasons.some((r) => /ごみ/.test(r.label)), 'ごみ収集室がない');
+  assert.ok(d.stats.some(([k]) => k === '平均待ち'));
+});
+
+test('v2 §8: 消防ヘリが飛来 → 散水 → 去る（消火は到着後、保存しても続く）', () => {
+  const s = incidentTower(109, false);
+  const ev = collect(s);
+  s.trigger('fire', s.objAt(6, 0));
+  s.answer(ev.prompt[0].id, 'heli');
+  assert.ok(s.heli && s.heli.phase === 'in');
+  assert.ok(s.heli.x < 0 || s.heli.x > W, '画面外から');
+  assert.ok(ev.sound.some((x) => x.name === 'heli'));
+  const phases = new Set();
+  let saved = null;
+  for (let i = 0; i < 400 && s.heli; i++) {
+    s.step(0.25);
+    if (s.heli) phases.add(s.heli.phase);
+    if (s.heli && s.heli.phase === 'in') assert.ok(s.fire, '着く前には消えない');
+    if (!saved && s.heli && s.heli.phase === 'in') saved = JSON.parse(JSON.stringify(s.serialize()));
+  }
+  assert.deepEqual([...phases], ['in', 'spray', 'out']);
+  assert.equal(s.fire, null);
+  assert.ok(ev.message.some((m) => /ヘリが火を消し止め/.test(m.text)));
+  const r = new Tower(); r.restore(saved);
+  assert.ok(r.heli && r.heli.phase === 'in');
+  r.step(60);
+  assert.equal(r.fire, null, '復元後もヘリが消火する');
+});
+
+test('v2 §9: blueprint → buildBatch（アトミック）', () => {
+  const s = new Tower({ seed: 110 });
+  s.money = 1e9; s.star = 3;
+  mustBuild(s, 'lobby', { f: 0, x: 0, x2: 300 });
+  for (let f = 1; f <= 4; f++) mustBuild(s, 'floor', { f, x: 0, x2: 60 });
+  mustBuild(s, 'office', { f: 1, x: 0 }); mustBuild(s, 'fastfood', { f: 2, x: 10 }); mustBuild(s, 'cinema', { f: 3, x: 0 });
+  mustBuild(s, 'elevator', { f: 0, f2: 4, x: 50 });
+  s.act(s.transportAt(1, 50), 'addCar');
+  s.setElevatorConfig(s.transportAt(1, 50), { door: 'short' });
+  mustBuild(s, 'stairs', { f: 1, x: 40 });
+  const bp = s.blueprint({ f1: 1, x1: 0, f2: 4, x2: 60 });
+  assert.equal(bp.w, 61); assert.equal(bp.h, 4);
+  const tools = bp.ops.map((o) => o.tool);
+  assert.ok(tools.indexOf('floor') < tools.indexOf('office'));
+  assert.ok(tools.lastIndexOf('stairs') > tools.indexOf('cinema'), '移動手段は最後');
+  assert.ok(!tools.includes('elevator'), '範囲からはみ出すエレベーターは含めない');
+  const bp2 = s.blueprint({ f1: 0, x1: 0, f2: 4, x2: 60 });
+  const eop = bp2.ops.find((o) => o.tool === 'elevator');
+  assert.equal(eop.p.cars, 2); assert.equal(eop.p.config.door, 'short');
+  // 貼り付け: 1F の 100 マス右に、同じ高さで
+  const before = { money: s.money, n: s.objs.size, rev: s.revision };
+  const ck = s.checkBatch(bp2.ops, { f: 0, x: 100 });
+  assert.equal(ck.ghosts.length, bp2.ops.length);
+  assert.equal(s.money, before.money, 'check は何も変えない');
+  assert.equal(s.objs.size, before.n);
+  assert.ok(!ck.ok, '1F はロビーと重なる'); assert.ok(ck.failedIndex >= 0); assert.equal(ck.ghosts[ck.failedIndex].ok, false);
+  // 2F 以上を空中に貼るのは支えがなくて失敗 → 何も変わらない
+  const bad = s.buildBatch(bp.ops, { f: 1, x: 350 });
+  assert.equal(bad.ok, false);
+  assert.equal(s.money, before.money); assert.equal(s.objs.size, before.n);
+  assert.equal(s.grid[1][360], 0); assert.equal(s.tgrid[1][390], 0);
+  assert.equal(s.revision, before.rev, '失敗しても索引は変わらない');
+  // 下に支えを作ってから
+  mustBuild(s, 'floor', { f: 0, x: 301, x2: 400 });
+  const m0 = s.money;
+  const ok = s.buildBatch(bp.ops, { f: 1, x: 320 });
+  assert.ok(ok.ok, ok.reason);
+  assert.ok(ok.cost > 0);
+  assert.equal(s.objAt(1, 320).type, 'office');
+  assert.equal(s.objAt(3, 320).type, 'cinema');
+  assert.equal(s.transportAt(1, 360).type, 'stairs');
+  assert.ok(s.objAt(2, 330).brand, '店名は新しく付く');
+  assert.equal(s.money, m0 - ok.cost);
+});
+
+test('v2 §12: 工事期間（使えない → 完成で built、保存しても続く）', () => {
+  const s = new Tower({ seed: 111, construction: true });
+  const ev = collect(s);
+  mustBuild(s, 'lobby', { f: 0, x: 0, x2: 60 });
+  mustBuild(s, 'floor', { f: 1, x: 0, x2: 60 });
+  const lobby = s.objAt(0, 0);
+  assert.ok(lobby.constructUntil > s.time && lobby.constructStart === s.time);
+  assert.equal(s.grid[1][5], -1, 'フロアは工事なし');
+  mustBuild(s, 'elevator', { f: 0, f2: 1, x: 40 });
+  mustBuild(s, 'office', { f: 1, x: 0 });
+  const o = s.objAt(1, 0), e = s.transportAt(1, 40);
+  assert.ok(o.constructUntil - o.constructStart >= 30 && e.constructUntil - e.constructStart <= 240);
+  assert.equal(s.entrances.length, 0, '工事中のロビーは出入口にならない');
+  assert.equal(s.route(0, 1), null, '工事中のエレベーターは使えない');
+  assert.match(s.describe(o).subtitle, /工事中/);
+  assert.ok(s.describe(o).construction.progress >= 0);
+  s.tenancy(100);
+  assert.equal(o.occupied, false, '工事中は入居しない');
+  const data = JSON.parse(JSON.stringify(s.serialize()));
+  s.step(250);
+  assert.ok(ev.sound.some((x) => x.name === 'built'));
+  assert.equal(o.constructUntil, 0);
+  assert.ok(s.route(0, 1));
+  assert.equal(s.entrances.length, 1);
+  const r = new Tower({ construction: true }); r.restore(data);
+  assert.ok(r.objAt(1, 0).constructUntil > r.time, '工事中のまま読み込む');
+  const ev2 = collect(r);
+  r.step(250);
+  assert.equal(r.objAt(1, 0).constructUntil, 0, '続きが終わる');
+  assert.ok(ev2.sound.some((x) => x.name === 'built'));
+});
+
+test('v2 §12: ごみ収集室（たまる・5時に回収・リサイクルで安い・無いと評価の内訳と苦情）', () => {
+  const s = new Tower({ seed: 112 });
+  s.money = 1e9; s.star = 3;
+  smallTower(s, 12);
+  for (let f = 1; f <= 12; f++) for (let x = 40; x + OW <= 60; x += OW) s.build('office', { f, x });
+  for (const o of s.byType.office) s.moveIn(o);
+  s.step(70);
+  const far = s.objAt(12, 40), near = s.objAt(2, 40);
+  assert.ok(far.garbageBad && near.garbageBad, '収集室がない');
+  assert.ok(s.evalScore(far) >= SIM.GARBAGE.penalty);
+  s.complaints(true);
+  assert.match(far.complaint, /ごみ/);
+  mustBuild(s, 'garbage', { f: 3, x: 64 });
+  const g = s.objAt(3, 64);
+  stepTo(s, 1, 4);
+  assert.ok(g.bags > 0 && g.fill > 0 && g.fill <= 1);
+  assert.equal(near.garbageBad, false, '範囲内（上下5フロア）');
+  assert.equal(far.garbageBad, true, '範囲外');
+  assert.ok(s.describe(far).reasons.some((r) => /ごみが溜まっている/.test(r.label)));
+  const bags = Math.round(g.bags), m = s.money;
+  stepTo(s, 1, 5); s.step(1);
+  assert.equal(g.bags, 0);
+  assert.ok(Math.abs((m - s.money) - bags * SIM.GARBAGE.fee) < SIM.GARBAGE.fee * 2, '1袋ごとに料金');
+  // リサイクルセンターがあると安い
+  mustBuild(s, 'floor', { f: -1, x: 40, x2: 100 }); mustBuild(s, 'floor', { f: -2, x: 40, x2: 100 });
+  mustBuild(s, 'recycling', { f: -2, x: 40 });
+  stepTo(s, 2, 4);
+  const b2 = Math.round(g.bags), m2 = s.money;
+  stepTo(s, 2, 5); s.step(1);
+  assert.ok(m2 - s.money <= b2 * SIM.GARBAGE.feeRecycle + SIM.MAINT.garbage + 1);
+  // 満杯
+  g.bags = SIM.GARBAGE.cap; g.fill = 1;
+  s.hourlyGarbage();
+  assert.equal(near.garbageBad, true, '満杯なら範囲内でも溜まる');
+  assert.match(s.describe(g).warning || '', /満杯/);
+});
+
+test('性能: 横幅480・30フロア・人口6000超の横長ビルで 1 ゲーム日', () => {
+  const s = new Tower({ seed: 113 });
+  s.money = 1e12; s.star = 3;
+  mustBuild(s, 'floor', { f: 0, x: 0, x2: W - 1 });
+  mustBuild(s, 'lobby', { f: 0, x: 0, x2: W - 1 });
+  for (let f = 1; f <= 29; f++) mustBuild(s, 'floor', { f, x: 0, x2: W - 1 });
+  const banks = [];
+  for (let x = 36; x < W; x += 80) banks.push(x);
+  for (const x of banks) for (const dx of [0, 6]) {
+    mustBuild(s, 'elevator', { f: 0, f2: 29, x: x + dx });
+    const e = s.transportAt(1, x + dx);
+    while (e.cars.length < 8) s.act(e, 'addCar');
+  }
+  for (let f = 1; f <= 29; f++) {
+    for (let x = 0; x + OW <= W; x += OW) s.build(f % 10 === 2 && x % 80 === 0 ? 'garbage' : f % 6 === 3 ? 'condo' : 'office', { f, x });
+  }
+  for (const o of [...s.byType.office, ...s.byType.condo]) s.moveIn(o);
+  s.recalcPop();
+  stepTo(s, 1, 0);
+  const t0 = performance.now();
+  let maxActive = 0;
+  for (let i = 0; i < DAY / 10; i++) { s.step(10); maxActive = Math.max(maxActive, s.active.size); }
+  const ms = performance.now() - t0;
+  console.log(`    人口 ${s.pop}, エレベーター ${s.elevs.length}基, 1日 ${ms.toFixed(0)}ms（8倍速の実時間30秒の ${(ms / 300).toFixed(2)}%）, 同時移動 最大 ${maxActive}人, 救済 ${s.stats.rescues}`);
+  assert.ok(s.pop >= 6000, `人口 ${s.pop}`);
+  assert.ok(ms < 4000);
+  checkInvariants(s);
 });
 
 // ====================================================================

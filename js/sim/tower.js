@@ -1,13 +1,16 @@
 // The Building: シミュレーション本体（DOM 非依存）
 // 契約は docs/SPEC.md の「Sim API」を参照。
-import { W, MIN_F, MAX_F, DAY, START_MONEY, STAR_POP, TYPES, floorName, fmtMoney } from './constants.js';
+import { W, MIN_F, MAX_F, DAY, START_MONEY, STAR_POP, TYPES, VARIANTS, floorName, fmtMoney } from './constants.js';
 import { Heap, makeRng } from './util.js';
 import {
   SAVE_VERSION, NF, FI, LOBBY_SET, TRANSPORT, ELEV, HOTEL, COMMERCE, NOISY, TENANT, TRANSIENT,
-  STAFF_KIND, SIM, STAY, VISIT_RATE, VISIT_CAP, isStopFloor,
+  STAFF_KIND, SIM, STAY, VISIT_RATE, VISIT_CAP,
 } from './rules.js';
 import { EventsMixin } from './events.js';
 import { PanelMixin } from './panel.js';
+import { BuildMixin } from './build.js';
+import { ElevatorMixin, STANDBY } from './elevator.js';
+import { GarbageMixin } from './garbage.js';
 
 const K_ELEV = 1, K_EXP = 2, K_STAIR = 3, K_ESC = 4;
 const KIND_NAMES = [null, 'elev', 'express', 'stairs', 'esc'];
@@ -17,13 +20,15 @@ const LUNCH = ['fastfood', 'restaurant'];
 const DINNER = ['restaurant', 'fastfood'];
 const LEISURE = ['shop', 'restaurant', 'fastfood', 'cinema'];
 // 'sound' 通知の最小間隔（ゲーム分）
-const SOUND_GAP = { cash: 30, ding: 5, complaint: 30, roach: 30 };
+const SOUND_GAP = { cash: 30, ding: 5, complaint: 30, roach: 30, built: 2 };
 const MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
 export class Tower {
   constructor(opts = {}) {
     this.listeners = Object.create(null);
     this.seed = (opts.seed ?? Math.floor(Math.random() * 2 ** 31)) >>> 0;
+    // 工事期間（false にすると建てた瞬間に完成。テスト用）
+    this.construction = opts.construction !== false;
     this.reset();
   }
 
@@ -36,8 +41,9 @@ export class Tower {
     this.pop = 0;
     this.ledger = { income: 0, expense: 0 };
     this.yesterday = null;
-    this.grid = {};
-    for (let f = MIN_F; f <= MAX_F; f++) this.grid[f] = new Int32Array(W);
+    this.grid = {};   // フロアと施設
+    this.tgrid = {};  // 移動手段（エレベーターの機械室・ピットを含む）
+    for (let f = MIN_F; f <= MAX_F; f++) { this.grid[f] = new Int32Array(W); this.tgrid[f] = new Int32Array(W); }
     this.objs = new Map();
     this.active = new Set();
     this.fires = [];
@@ -45,6 +51,7 @@ export class Tower {
     this.fire = null;
     this.effects = [];
     this.santa = null;
+    this.heli = null;
     this.vip = null;
     this.wedding = null;
     this.nextId = 1;   // 施設 id（grid に入る）
@@ -62,7 +69,7 @@ export class Tower {
     this.reindex();
   }
 
-  newDayLog() { return { rent: 0, sale: 0, hotel: 0, shop: 0, inOffice: 0, inCondo: 0, out: 0, buyback: 0 }; }
+  newDayLog() { return { rent: 0, sale: 0, hotel: 0, shop: 0, inOffice: 0, inCondo: 0, out: 0, buyback: 0, garbage: 0, garbageBags: 0 }; }
 
   // ---- カレンダー: 0日目 = 4月1日、1ゲーム日 = 1日（365日周期）----
   get date() {
@@ -111,6 +118,7 @@ export class Tower {
     this.emit('message', m);
   }
   sound(name) {
+    if (this._batch) return;
     const gap = SOUND_GAP[name] || 0;
     const last = this._snd[name];
     if (gap && last !== undefined && this.time - last < gap) return;
@@ -129,20 +137,6 @@ export class Tower {
   rand(n) { return this.rng() * n; }
   pick(a) { return a[Math.floor(this.rng() * a.length)]; }
 
-  cell(f, x) { const row = this.grid[f]; return row && x >= 0 && x < W ? row[x] : 0; }
-  supported(f, x) {
-    if (f === 0) return true;
-    return f > 0 ? this.cell(f - 1, x) !== 0 : this.cell(f + 1, x) !== 0;
-  }
-  objAt(f, x) { const c = this.cell(f, Math.floor(x)); return c > 0 ? this.objs.get(c) || null : null; }
-  // ロビーの上には移動手段（階段・エスカレーター・エレベーター）を重ねて置ける
-  isLobbyCell(c) { if (c <= 0) return false; const o = this.objs.get(c); return !!o && o.type === 'lobby'; }
-  isTransportCell(c) { if (c <= 0) return false; const o = this.objs.get(c); return !!o && TRANSPORT.has(o.type); }
-  baseCell(f, x, except) {
-    for (const o of this.byType.lobby) if (o !== except && !o.dead && o.f === f && x >= o.x && x < o.x + o.w) return o.id;
-    return -1;
-  }
-
   earn(v) { this.money += v; this.ledger.income += v; }
   spend(v) { this.money -= v; this.ledger.expense += v; }
   at(t, fn) { this.events.push(t, fn); }
@@ -160,6 +154,7 @@ export class Tower {
     let s = o.evalN ? (o.eval * 3 + o.evalSum) / (3 + o.evalN) : o.eval;
     if (o.noisy) s += 20;
     if (o.infested) s += 40;
+    if (o.garbageBad) s += SIM.GARBAGE.penalty;
     return s;
   }
   evalLevel(o) {
@@ -172,20 +167,25 @@ export class Tower {
     const l = this.evalLevel(o);
     return l === 'bad' ? 0.25 : l === 'fair' ? 0.6 : 1;
   }
+  newReasons() { return { n: 0, stress: 0, wait: 0, stairs: 0, walk: 0, crowd: 0, fail: 0 }; }
   recordEval(o, p) {
-    if (!o || o.dead) return;
+    if (!o || o.dead || o.destroyed) return;
     o.evalSum += Math.min(100, p.stress);
     o.evalN++;
     o.cWait += p.sWait;
     o.cStair += p.sStair;
+    const r = o.rs;
+    r.n++; r.stress += Math.min(100, p.stress); r.wait += p.waitTot || 0; r.stairs += p.sStair; r.walk += p.walkT || 0; r.crowd += p.sCrowd || 0;
   }
   recordEvalValue(o, v) {
-    if (!o || o.dead) return;
+    if (!o || o.dead || o.destroyed) return;
     o.evalSum += v; o.evalN++; o.cWait += v / 2;
+    o.rs.fail++;
   }
 
   // ================= インデックス・経路グラフ =================
   reindex() {
+    if (this._deferIndex) { this._indexDirty = true; return; }
     const byType = {};
     for (const k in TYPES) byType[k] = [];
     this.byType = byType;
@@ -195,7 +195,11 @@ export class Tower {
     this.facs = [];
     this.hotels = [];
     this.byFloor = new Map();
+    this.ruins = [];
+    this.sites = [];
     for (const o of this.objs.values()) {
+      if (o.destroyed) { o.unreachable = false; this.ruins.push(o); continue; }
+      if (o.constructUntil > 0) { o.unreachable = false; this.sites.push(o); continue; }
       byType[o.type].push(o);
       if (ELEV.has(o.type)) { this.elevs.push(o); continue; }
       if (o.type === 'stairs' || o.type === 'escalator') {
@@ -230,6 +234,7 @@ export class Tower {
     // 到達不能フラグ（どの出入口からもその階へ行けない）
     for (const o of this.facs) o.unreachable = o.type !== 'metro' && this.entranceDist(o.f) === Infinity;
     for (const o of byType.lobby) o.unreachable = false;
+    this.indexGarbage();
     this.revision++;
   }
 
@@ -339,340 +344,6 @@ export class Tower {
     return l.length ? this.pick(l) : null;
   }
 
-  // ================= 建設 =================
-  check(tool, p) {
-    const r = this._plan(tool, p || {});
-    return { ok: r.ok, reason: r.reason, cost: r.cost, ghost: r.ghost };
-  }
-
-  build(tool, p) {
-    const r = this._plan(tool, p || {});
-    if (!r.ok) { this.sound('error'); return { ok: false, reason: r.reason, cost: r.cost, ghost: r.ghost }; }
-    if (r.cost) this.spend(r.cost);
-    r.apply();
-    this.sound(tool === 'bulldoze' ? 'bulldoze' : 'build');
-    this.checkStar();
-    return { ok: true, reason: '', cost: r.cost, ghost: r.ghost };
-  }
-
-  _plan(tool, p) {
-    if (tool === 'bulldoze') return this._planBulldoze(p);
-    const T = TYPES[tool];
-    if (!T) return { ok: false, reason: '不明なツールです', cost: 0, ghost: null };
-    let r;
-    if (T.drag === 'v') r = this._planElevator(tool, T, p);
-    else if (T.drag === 'h') r = this._planHoriz(tool, T, p);
-    else r = this._planFacility(tool, T, p);
-    if (r.ok && T.star > this.star) return { ...r, ok: false, reason: `★${T.star}で解放されます` };
-    if (r.ok && r.cost > this.money) return { ...r, ok: false, reason: `資金が足りません（${fmtMoney(r.cost)}）` };
-    return r;
-  }
-
-  _planHoriz(tool, T, p) {
-    const f = p.f | 0;
-    const xa = Math.floor(p.x), xb = Math.floor(p.x2 ?? p.x);
-    const x1 = Math.max(0, Math.min(xa, xb)), x2 = Math.min(W - 1, Math.max(xa, xb));
-    const w = x2 - x1 + 1;
-    const ghost = { x: x1, w, f, h: 1 };
-    const fail = (reason) => ({ ok: false, reason, cost: 0, ghost });
-    if (f < MIN_F || f > MAX_F) return fail('建設範囲の外です');
-    if (w < 1) return fail('建設範囲の外です');
-    if (tool === 'lobby') {
-      if (!LOBBY_SET.has(f)) return fail('ロビーは1Fと15F・30F…90Fにのみ置けます');
-      if (w < (T.minW || 1)) return fail(`ロビーは幅${T.minW}マス以上必要です`);
-      let fresh = 0;
-      for (let x = x1; x <= x2; x++) {
-        const c = this.cell(f, x);
-        if (c > 0) { if (this.isTransportCell(c)) continue; return fail('他の施設と重なっています'); }
-        if (c === 0) {
-          if (!this.supported(f, x)) return fail(f < 0 ? '上の階に支えがありません' : '下の階に支えがありません');
-          fresh++;
-        }
-      }
-      const cost = T.costPerTile * w + fresh * TYPES.floor.costPerTile;
-      return { ok: true, reason: '', cost, ghost, apply: () => this._place('lobby', f, x1, w, 1) };
-    }
-    // floor: 支えのある空マスだけに張る
-    const cells = [];
-    let unsupported = 0;
-    for (let x = x1; x <= x2; x++) {
-      if (this.cell(f, x) !== 0) continue;
-      if (this.supported(f, x)) cells.push(x); else unsupported++;
-    }
-    if (!cells.length) return fail(unsupported ? (f < 0 ? '上の階に支えがありません' : '下の階に支えがありません') : 'すでにフロアがあります');
-    const cost = cells.length * T.costPerTile;
-    return {
-      ok: true, reason: '', cost, ghost,
-      apply: () => { for (const x of cells) this.grid[f][x] = -1; this.revision++; },
-    };
-  }
-
-  _planFacility(tool, T, p) {
-    const w = T.w, h = T.h || 1, f = p.f | 0, x = Math.floor(p.x);
-    const ghost = { x, w, f, h };
-    const fail = (reason) => ({ ok: false, reason, cost: 0, ghost });
-    if (x < 0 || x + w > W || f < MIN_F || f + h - 1 > MAX_F) return fail('建設範囲の外です');
-    const top = f + h - 1;
-    if (T.only === 'top' && f !== MAX_F) return fail(`${floorName(MAX_F)}にのみ建設できます`);
-    if (T.only === 'basement' && top >= 0) return fail('地下にのみ建設できます');
-    if (T.only === 'aboveGround' && f < 0) return fail('地上にのみ建設できます');
-    if (T.only === 'lobbyFloor' && !LOBBY_SET.has(f)) return fail('ロビー階にのみ建設できます');
-    if (tool === 'stairs' || tool === 'escalator') {
-      if (f + 1 > MAX_F) return fail('上の階がありません');
-      for (let xi = x; xi < x + w; xi++) if (this.cell(f + 1, xi) === 0) return fail('上の階にもフロアが必要です');
-    }
-    let fresh = 0;
-    for (let r = 0; r < h; r++) {
-      for (let xi = x; xi < x + w; xi++) {
-        const c = this.cell(f + r, xi);
-        if (c > 0) { if (TRANSPORT.has(tool) && this.isLobbyCell(c)) continue; return fail('他の施設と重なっています'); }
-        if (c === 0) fresh++;
-      }
-    }
-    if (f > 0) {
-      for (let xi = x; xi < x + w; xi++) if (this.cell(f, xi) === 0 && !this.supported(f, xi)) return fail('下の階に支えがありません');
-    } else if (top < 0) {
-      for (let xi = x; xi < x + w; xi++) if (this.cell(top, xi) === 0 && !this.supported(top, xi)) return fail('上の階に支えがありません');
-    }
-    const cost = T.cost + fresh * TYPES.floor.costPerTile;
-    return { ok: true, reason: '', cost, ghost, apply: () => this._place(tool, f, x, w, h) };
-  }
-
-  _planElevator(tool, T, p) {
-    const fa = p.f | 0, fb = (p.f2 ?? p.f) | 0, x = Math.floor(p.x), w = T.w;
-    const lo = Math.max(MIN_F, Math.min(fa, fb)), hi = Math.min(MAX_F, Math.max(fa, fb));
-    const ghost = { x, w, lo, hi };
-    const fail = (reason) => ({ ok: false, reason, cost: 0, ghost });
-    if (x < 0 || x + w > W) return fail('建設範囲の外です');
-    if (hi - lo + 1 < 2) return fail('上下にドラッグして2フロア以上にしてください');
-    if (hi - lo + 1 > T.maxSpan) return fail(`最大${T.maxSpan}フロアまでです`);
-    let fresh = 0;
-    for (let f = lo; f <= hi; f++) {
-      for (let xi = x; xi < x + w; xi++) {
-        const c = this.cell(f, xi);
-        if (c > 0) { if (this.isLobbyCell(c)) continue; return fail('他の施設と重なっています'); }
-        if (c === 0) fresh++;
-      }
-    }
-    for (let xi = x; xi < x + w; xi++) {
-      if (lo > 0 && this.cell(lo, xi) === 0 && !this.supported(lo, xi)) return fail('下の階に支えがありません');
-      if (hi < 0 && this.cell(hi, xi) === 0 && !this.supported(hi, xi)) return fail('上の階に支えがありません');
-    }
-    for (let f = lo; f <= hi; f++) if (!this.rowBuiltOutside(f, x, w)) return fail(`${floorName(f)}にフロアがありません（空中には通せません）`);
-    let stops = 0;
-    for (let f = lo; f <= hi; f++) if (isStopFloor(tool, f)) stops++;
-    if (stops < 2) return fail('停止階（ロビー階・地下）が2つ以上必要です');
-    const cost = T.cost + fresh * TYPES.floor.costPerTile;
-    return { ok: true, reason: '', cost, ghost, apply: () => this._placeElevator(tool, x, lo, hi) };
-  }
-
-  _planBulldoze(p) {
-    const f = p.f | 0;
-    const xa = Math.floor(p.x), xb = Math.floor(p.x2 ?? p.x);
-    const x1 = Math.max(0, Math.min(xa, xb)), x2 = Math.min(W - 1, Math.max(xa, xb));
-    let ghost = { x: x1, w: x2 - x1 + 1, f, h: 1 };
-    const fail = (reason) => ({ ok: false, reason, cost: 0, ghost });
-    if (f < MIN_F || f > MAX_F) return fail('範囲の外です');
-    const ids = new Set();
-    for (let x = x1; x <= x2; x++) { const c = this.cell(f, x); if (c > 0) ids.add(c); }
-    if (ids.size) {
-      const list = [...ids].map((id) => this.objs.get(id)).filter(Boolean);
-      if (list.length === 1 && x1 === x2) {
-        const o = list[0];
-        ghost = ELEV.has(o.type) ? { x: o.x, w: o.w, lo: o.lo, hi: o.hi } : { x: o.x, w: o.w, f: o.f, h: o.h };
-      }
-      return { ok: true, reason: '', cost: 0, ghost, apply: () => { for (const o of list) if (!o.dead) this.removeObj(o); } };
-    }
-    const cells = [];
-    let blocked = 0, empty = 0;
-    for (let x = x1; x <= x2; x++) {
-      if (this.cell(f, x) !== -1) { empty++; continue; }
-      if (this.canRemoveFloor(f, x)) cells.push(x); else blocked++;
-    }
-    if (!cells.length) return fail(blocked ? '支えている上下の構造を先に撤去してください' : '何もありません');
-    return {
-      ok: true, reason: '', cost: 0, ghost,
-      apply: () => {
-        for (const x of cells) if (this.canRemoveFloor(f, x)) this.grid[f][x] = 0;
-        this.revision++;
-      },
-    };
-  }
-
-  canRemoveFloor(f, x) {
-    if (this.cell(f, x) !== -1) return false;
-    if (f >= 0 && this.cell(f + 1, x) !== 0) return false;
-    if (f <= 0 && this.cell(f - 1, x) !== 0) return false;
-    // 下の階の階段・エスカレーターがこのフロアに通じている
-    const below = this.cell(f - 1, x);
-    if (below > 0) { const o = this.objs.get(below); if (o && (o.type === 'stairs' || o.type === 'escalator')) return false; }
-    return true;
-  }
-
-  makeObj(type, f, x, w, h, id) {
-    const o = {
-      id: id ?? this.nextId++, type, f, x, w, h,
-      occupied: !(TENANT.has(type) || HOTEL.has(type)),
-      inCount: 0, dead: false,
-      eval: 0, evalSum: 0, evalN: 0, badDays: 0, cWait: 0, cStair: 0,
-      members: [], complaintUntil: 0, complaint: '', burnt: 0, burning: false,
-      salesToday: 0, custToday: 0, salesYesterday: 0, custYesterday: 0, noisy: false,
-    };
-    if (HOTEL.has(type)) Object.assign(o, { dirty: false, infested: false, dirtySince: null, cleaner: null, checkedIn: 0, cleanFail: -1e9 });
-    this.objs.set(o.id, o);
-    if (o.id >= this.nextId) this.nextId = o.id + 1;
-    return o;
-  }
-
-  _place(type, f, x, w, h) {
-    const o = this.makeObj(type, f, x, w, h);
-    for (let r = 0; r < h; r++) {
-      for (let xi = x; xi < x + w; xi++) if (type !== 'lobby' || this.grid[f + r][xi] <= 0) this.grid[f + r][xi] = o.id;
-    }
-    if (STAFF_KIND[type]) this.createStaff(o);
-    this.reindex();
-    return o;
-  }
-
-  _placeElevator(type, x, lo, hi, id, carPos) {
-    const T = TYPES[type];
-    const o = this.makeObj(type, lo, x, T.w, hi - lo + 1, id);
-    o.lo = lo; o.hi = hi; o.q = {};
-    o.cap = T.cap; o.speed = SIM.SPEED[type];
-    this.initElevator(o);
-    o.cars = (carPos && carPos.length ? carPos : [o.sLo]).map((f) => this.newCar(o, f));
-    for (let f = lo; f <= hi; f++) for (let xi = x; xi < x + T.w; xi++) this.grid[f][xi] = o.id;
-    this.reindex();
-    return o;
-  }
-
-  // 空中（その階にほかの構造が何もない）にはシャフトを通せない
-  rowBuiltOutside(f, x, w) {
-    const row = this.grid[f];
-    if (!row) return false;
-    for (let i = 0; i < W; i++) if ((i < x || i >= x + w) && row[i] !== 0) return true;
-    return false;
-  }
-
-  initElevator(e) {
-    e.f = e.lo; e.h = e.hi - e.lo + 1;
-    e.stops = [];
-    e.isStop = new Uint8Array(NF);
-    for (let f = e.lo; f <= e.hi; f++) if (isStopFloor(e.type, f)) { e.stops.push(f); e.isStop[FI(f)] = 1; }
-    e.sLo = e.stops[0]; e.sHi = e.stops[e.stops.length - 1];
-    if (!e.qn) { e.qn = new Int32Array(NF); e.waitN = 0; }
-    if (!e.wSum) { e.wSum = new Float64Array(12); e.wN = new Int32Array(12); e.wb = 0; e.avgWait = 0; e.peakWait = 0; e.peakWaitYesterday = 0; e.peakWaitRecent = 0; }
-  }
-
-  newCar(e, f) {
-    let pos = Math.max(e.sLo, Math.min(e.sHi, Math.round(f)));
-    if (!e.isStop[FI(pos)]) pos = e.sLo;
-    return { pos, dir: 0, state: 'idle', pass: [], timer: 0, target: null, drop: new Int16Array(NF) };
-  }
-
-  nearestStop(e, f) {
-    let best = e.sLo, bd = Infinity;
-    for (const s of e.stops) { const d = Math.abs(s - f); if (d < bd) { bd = d; best = s; } }
-    return best;
-  }
-
-  planExtend(e, dir) {
-    const T = TYPES[e.type];
-    const f = dir > 0 ? e.hi + 1 : e.lo - 1;
-    const fail = (reason) => ({ ok: false, reason, cost: 0 });
-    if (f > MAX_F || f < MIN_F) return fail('これ以上延長できません');
-    if (e.hi - e.lo + 2 > T.maxSpan) return fail(`最大${T.maxSpan}フロアまでです`);
-    if (!this.rowBuiltOutside(f, e.x, e.w)) return fail(`${floorName(f)}にフロアがありません（空中には延長できません）`);
-    let fresh = 0;
-    for (let xi = e.x; xi < e.x + e.w; xi++) {
-      const c = this.cell(f, xi);
-      if (c > 0 && !this.isLobbyCell(c)) return fail('他の施設と重なっています');
-      if (c === 0) fresh++;
-      if (dir < 0 && f > 0 && c === 0 && !this.supported(f, xi)) return fail('下の階に支えがありません');
-    }
-    const cost = SIM.EXTEND_COST[e.type] + fresh * TYPES.floor.costPerTile;
-    if (cost > this.money) return { ok: false, reason: '資金が足りません', cost };
-    return { ok: true, reason: '', cost, f };
-  }
-
-  extendElevator(e, dir) {
-    const r = this.planExtend(e, dir);
-    if (!r.ok) return r;
-    this.spend(r.cost);
-    for (let xi = e.x; xi < e.x + e.w; xi++) this.grid[r.f][xi] = e.id;
-    if (dir > 0) e.hi = r.f; else e.lo = r.f;
-    this.initElevator(e);
-    this.reindex();
-    this.sound('build');
-    return { ok: true, reason: '', cost: r.cost };
-  }
-
-  addCar(e) {
-    const T = TYPES[e.type];
-    if (e.cars.length >= T.maxCars) return { ok: false, reason: `カゴは最大${T.maxCars}台です` };
-    if (this.money < T.carCost) return { ok: false, reason: '資金が足りません' };
-    this.spend(T.carCost);
-    // 既存のカゴから最も遠い停止階に置く
-    let best = e.sLo, bd = -1;
-    for (const s of e.stops) {
-      let d = Infinity;
-      for (const c of e.cars) d = Math.min(d, Math.abs(c.pos - s));
-      if (d > bd) { bd = d; best = s; }
-    }
-    e.cars.push(this.newCar(e, best));
-    this.sound('build');
-    return { ok: true, reason: '', cost: T.carCost };
-  }
-
-  removeCar(e) {
-    if (e.cars.length <= 1) return { ok: false, reason: 'カゴは最低1台必要です' };
-    let ci = 0;
-    e.cars.forEach((c, i) => { if (c.pass.length < e.cars[ci].pass.length) ci = i; });
-    const c = e.cars.splice(ci, 1)[0];
-    const f = this.nearestStop(e, Math.round(c.pos));
-    for (const p of c.pass) this.dropOff(e, p, f);
-    c.pass = [];
-    this.sound('bulldoze');
-    return { ok: true, reason: '' };
-  }
-
-  removeObj(o) {
-    if (!o || o.dead) return;
-    o.dead = true;
-    const lo = ELEV.has(o.type) ? o.lo : o.f, hi = ELEV.has(o.type) ? o.hi : o.f + o.h - 1;
-    const tr = TRANSPORT.has(o.type);
-    for (let f = lo; f <= hi; f++) {
-      for (let xi = o.x; xi < o.x + o.w; xi++) if (this.grid[f][xi] === o.id) this.grid[f][xi] = tr ? this.baseCell(f, xi, o) : -1;
-    }
-    for (const p of o.members.slice()) this.purge(p, false);
-    o.members = [];
-    o.occupied = false;
-    this.objs.delete(o.id);
-    if (this.fire && this.fire.burning.has(o)) { this.fire.burning.delete(o); this.updateFires(); }
-    this.reindex();
-    if (ELEV.has(o.type)) {
-      for (const c of o.cars) {
-        const f = Math.max(o.lo, Math.min(o.hi, Math.round(c.pos)));
-        const pass = c.pass; c.pass = [];
-        for (const p of pass) this.dropOff(o, p, f);
-      }
-      for (const k in o.q) {
-        for (const d of ['up', 'down']) {
-          const line = o.q[k][d]; o.q[k][d] = [];
-          for (const p of line) { p.elev = null; p.state = 'walk'; this.reroute(p); }
-        }
-      }
-      o.qn.fill(0); o.waitN = 0;
-    }
-    this.recalcPop();
-  }
-
-  dropOff(e, p, f) {
-    p.f = f; p.x = e.x + e.w / 2;
-    p.car = null; p.elev = null; p.state = 'walk';
-    this.reroute(p);
-  }
-
   // ================= 人口・★ =================
   recalcPop() {
     let pop = 0;
@@ -743,6 +414,7 @@ export class Tower {
     if (p.state === 'in' && p.loc) p.loc.inCount--;
     p.loc = null;
     p.stress = 0; p.sWait = 0; p.sStair = 0; p.tripT = 0; p.patrol = null;
+    p.waitTot = 0; p.walkT = 0; p.sCrowd = 0;
     p.legs = legs; p.li = 0; p.dest = { f, x, cb };
     p.state = 'walk';
     this.active.add(p);
@@ -780,7 +452,7 @@ export class Tower {
     const a = leg.from, b = leg.to, k = dk(b - a);
     let best = null, bs = Infinity;
     for (const e of this.byType[type]) {
-      if (!e.isStop[FI(a)] || !e.isStop[FI(b)] || a < e.lo || a > e.hi || b < e.lo || b > e.hi) continue;
+      if (!this.serves(e, a, b)) continue;
       const q = e.q[a];
       const s = Math.abs(e.x + e.w / 2 - x) * 0.05 + (q ? q[k].length : 0) / e.cars.length;
       if (s < bs) { bs = s; best = e; }
@@ -806,7 +478,17 @@ export class Tower {
       case 'walk': {
         if (p.patrol && this.time >= p.patrol.until) { this.endPatrol(p); return; }
         const d = p.tx - p.x, s = SIM.WALK * dt;
+        if (!p.patrol) {
+          p.walkT += dt;
+          if (p.walkT > SIM.WALK_GRACE) p.stress += SIM.WALK_STRESS * dt;
+        }
         if (d <= s && d >= -s) { p.x = p.tx; this.reached(p); } else p.x += d > 0 ? s : -s;
+        break;
+      }
+      case 'ride': {
+        const c = p.car;
+        p.rideT += dt;
+        if (c && c.pass.length > c.capRef * 0.8) { const inc = SIM.CROWD_STRESS * dt; p.stress += inc; p.sCrowd += inc; }
         break;
       }
       case 'wait':
@@ -839,6 +521,8 @@ export class Tower {
     const leg = p.legs[p.li], o = p.legObj;
     if (!o || o.dead) { this.aimNext(p); return; }
     if (ELEV.has(o.type)) {
+      // 歩いている間に設定・範囲が変わったかもしれない。止まらない階なら選び直す
+      if (!this.serves(o, leg.from, leg.to)) { p.legObj = null; this.aimNext(p); return; }
       const q = o.q[leg.from] || (o.q[leg.from] = { up: [], down: [] });
       q[dk(leg.to - leg.from)].push(p);
       o.qn[FI(leg.from)]++;
@@ -965,7 +649,7 @@ export class Tower {
 
   arriveHome(p) {
     const h = p.home;
-    if (!h || h.dead) return; // finishTrip が leave する
+    if (!h || h.dead || h.destroyed) return; // finishTrip が leave する
     this.recordEval(h, p);
     this.settle(p, h);
     if (HOTEL.has(h.type) && !p.checked) { p.checked = true; h.checkedIn++; }
@@ -1029,7 +713,7 @@ export class Tower {
   }
 
   visit(o) {
-    if (o.dead || !this.isOpen(o) || o.burning) return;
+    if (o.dead || o.destroyed || !this.isOpen(o) || o.burning) return;
     const ent = this.pickVisitorEntrance(o.f);
     if (!ent) return;
     const p = this.newPerson('visitor', null);
@@ -1038,7 +722,7 @@ export class Tower {
   }
 
   atShop(p, o) {
-    if (o.dead) { this.goBack(p); return; }
+    if (o.dead || o.destroyed) { this.goBack(p); return; }
     this.settle(p, o);
     if (this.isOpen(o)) {
       const pr = TYPES[o.type].price;
@@ -1054,130 +738,6 @@ export class Tower {
   afterVisit(p) {
     if (p.state !== 'in') return;
     this.goBack(p);
-  }
-
-  // ================= エレベーター =================
-  updateCar(e, c, dt) {
-    if (c.state === 'doors') {
-      c.timer -= dt;
-      if (c.timer > 0) return;
-      c.state = 'idle';
-    }
-    if (c.state === 'idle' && !this.carDecide(e, c)) return;
-    let rem = e.speed * dt;
-    while (rem > 1e-9) {
-      const next = c.dir > 0 ? Math.floor(c.pos + 1e-6) + 1 : Math.ceil(c.pos - 1e-6) - 1;
-      if (next > e.sHi || next < e.sLo) {
-        c.pos = Math.max(e.sLo, Math.min(e.sHi, Math.round(c.pos)));
-        c.state = 'idle'; c.dir = -c.dir;
-        return;
-      }
-      const d = Math.abs(next - c.pos);
-      if (d > rem) { c.pos += c.dir * rem; return; }
-      c.pos = next; rem -= d;
-      if (this.shouldStop(e, c, next)) { this.serve(e, c, next, c.dir); return; }
-    }
-  }
-
-  passBeyond(c, f, dir) {
-    const d = c.drop;
-    if (dir > 0) { for (let i = FI(f) + 1; i < NF; i++) if (d[i]) return true; } else { for (let i = FI(f) - 1; i >= 0; i--) if (d[i]) return true; }
-    return false;
-  }
-  callBeyond(e, f, dir) {
-    if (!e.waitN) return false;
-    const qn = e.qn;
-    if (dir > 0) { for (let i = FI(f) + 1, end = FI(e.sHi); i <= end; i++) if (qn[i]) return true; } else { for (let i = FI(f) - 1, end = FI(e.sLo); i >= end; i--) if (qn[i]) return true; }
-    return false;
-  }
-
-  carDecide(e, c) {
-    const f = Math.round(c.pos);
-    c.pos = f;
-    if (c.pass.length) {
-      if (!c.dir) c.dir = Math.sign(legTo(c.pass[0]) - f) || 1;
-      if (!this.passBeyond(c, f, c.dir)) c.dir = -c.dir;
-      if (c.target !== null && (c.target - f) * c.dir <= 0) c.target = null;
-      const q = e.q[f];
-      if (q && q[dk(c.dir)].length && c.pass.length < e.cap) { this.serve(e, c, f, c.dir); return false; }
-      c.state = 'moving';
-      return true;
-    }
-    if (!e.waitN) { c.dir = 0; c.target = null; return false; }
-    if (e.qn[FI(f)] > 0) {
-      const q = e.q[f];
-      const d = c.dir && q[dk(c.dir)].length ? c.dir : (q.up.length ? 1 : -1);
-      this.serve(e, c, f, d);
-      return false;
-    }
-    if (c.target !== null && c.target !== f && e.qn[FI(c.target)] > 0) {
-      c.dir = Math.sign(c.target - f); c.state = 'moving';
-      return true;
-    }
-    c.target = null;
-    let best = null, bd = Infinity;
-    for (const g of e.stops) {
-      if (!e.qn[FI(g)]) continue;
-      const d = Math.abs(g - f);
-      if (d >= bd) continue;
-      let taken = false;
-      for (const o of e.cars) if (o !== c && o.target === g) { taken = true; break; }
-      if (!taken) { bd = d; best = g; }
-    }
-    if (best === null) { c.dir = 0; return false; }
-    c.target = best; c.dir = Math.sign(best - f); c.state = 'moving';
-    return true;
-  }
-
-  shouldStop(e, c, g) {
-    const i = FI(g);
-    if (!e.isStop[i]) return false;
-    if (g <= e.sLo || g >= e.sHi) return true;
-    if (c.drop[i]) return true;
-    if (c.target === g) return true;
-    if (!e.qn[i]) return false;
-    const q = e.q[g];
-    if (q[dk(c.dir)].length && c.pass.length < e.cap) return true;
-    if (!c.pass.length && q[dk(-c.dir)].length && !this.callBeyond(e, g, c.dir)) return true;
-    return false;
-  }
-
-  serve(e, c, g, dir) {
-    if (c.target === g) c.target = null;
-    let moved = 0;
-    const i = FI(g);
-    if (c.drop[i]) {
-      const pass = c.pass, stay = [];
-      c.pass = stay;
-      c.drop[i] = 0;
-      for (const p of pass) {
-        if (legTo(p) === g) {
-          p.f = g; p.x = e.x + e.w / 2; p.car = null; p.elev = null;
-          p.li++; p.state = 'walk';
-          this.aimNext(p);
-          moved++;
-        } else stay.push(p);
-      }
-    }
-    if (g >= e.sHi) dir = -1; else if (g <= e.sLo) dir = 1;
-    const q = e.q[g];
-    if (q && e.qn[i]) {
-      if (!c.pass.length && !q[dk(dir)].length && q[dk(-dir)].length && !this.callBeyond(e, g, dir)) dir = -dir;
-      const line = q[dk(dir)];
-      let n = 0;
-      while (n < line.length && c.pass.length < e.cap) {
-        const p = line[n++];
-        e.wSum[e.wb] += p.waitT; e.wN[e.wb]++;
-        p.state = 'ride'; p.car = c;
-        c.pass.push(p);
-        c.drop[FI(legTo(p))]++;
-        moved++;
-      }
-      if (n) { line.splice(0, n); e.qn[i] -= n; e.waitN -= n; }
-    }
-    c.dir = dir;
-    c.state = 'doors';
-    c.timer = SIM.DOOR + moved * SIM.BOARD;
   }
 
   // ================= 時間 =================
@@ -1205,6 +765,7 @@ export class Tower {
     for (const e of this.elevs) for (const c of e.cars) this.updateCar(e, c, h);
     for (const p of this.active) this.updatePerson(p, h);
     if (this.fire) this.fireTick(h);
+    if (this.heli) this.updateHeli(h);
     if (this.bomb && !this.bomb.found && this.time >= this.bomb.deadline) this.explodeBomb();
     if (this._xmas || this.santa) this.updateSanta();
   }
@@ -1219,7 +780,7 @@ export class Tower {
   endDay() {
     // 維持費
     let cost = 0, tiles = 0;
-    for (const e of this.elevs) { cost += e.cars.length * SIM.CAR_MAINT[e.type]; e.peakWaitYesterday = e.peakWait; e.peakWaitRecent = Math.max(e.peakWait, (e.peakWaitRecent || 0) * 0.6); e.peakWait = 0; }
+    for (const e of this.elevs) { cost += this.carMaint(e); e.peakWaitYesterday = e.peakWait; e.peakWaitRecent = Math.max(e.peakWait, (e.peakWaitRecent || 0) * 0.6); e.peakWait = 0; }
     for (const t in SIM.MAINT) cost += this.byType[t].length * SIM.MAINT[t];
     for (let f = MIN_F; f <= MAX_F; f++) { const row = this.grid[f]; for (let x = 0; x < W; x++) if (row[x] !== 0) tiles++; }
     cost += tiles * SIM.FLOOR_MAINT;
@@ -1232,6 +793,7 @@ export class Tower {
       else if (!o.occupied || !TENANT.has(o.type)) o.eval *= 0.7;
       o.evalSum = 0; o.evalN = 0;
       o.cWait *= 0.5; o.cStair *= 0.5;
+      for (const k in o.rs) o.rs[k] *= 0.5;
       o.salesYesterday = o.salesToday; o.custYesterday = o.custToday;
       o.salesToday = 0; o.custToday = 0;
       if (o.burnt > 0 && !o.burning) o.burnt = Math.max(0, o.burnt - 0.2);
@@ -1263,7 +825,7 @@ export class Tower {
     const moves = [];
     if (L.inOffice) moves.push(`オフィス${L.inOffice}件`);
     if (L.inCondo) moves.push(`マンション${L.inCondo}件`);
-    let text = `昨日の収支 ${fmtMoney(y.income - y.expense)}（収入 ${fmtMoney(y.income)}${inc.length ? `: ${inc.join('・')}` : ''} / 支出 ${fmtMoney(y.expense)}: 維持費 ${fmtMoney(maint)}）`;
+    let text = `昨日の収支 ${fmtMoney(y.income - y.expense)}（収入 ${fmtMoney(y.income)}${inc.length ? `: ${inc.join('・')}` : ''} / 支出 ${fmtMoney(y.expense)}: 維持費 ${fmtMoney(maint)}${L.garbage ? `・ごみ回収 ${fmtMoney(L.garbage)}` : ''}）`;
     if (moves.length) text += `。新しい入居: ${moves.join('・')}`;
     if (L.out) text += `。退去 ${L.out}件${L.buyback ? `（買い戻し ${fmtMoney(L.buyback)}）` : ''}`;
     if (!y.income && !y.expense && !moves.length && !L.out) return;
@@ -1277,6 +839,8 @@ export class Tower {
     if (h === 12 && !this.isWeekend()) this.collectRent();
     if (h === 16) this.hotelBookings();
     this.spawnVisitors(h);
+    this.hourlyGarbage();
+    if (h === 5) this.collectGarbage();
     this.hourlyEvents(h);
   }
 
@@ -1285,19 +849,6 @@ export class Tower {
     for (const e of this.elevs) this.updateAvgWait(e);
     if (this.effects.length) this.effects = this.effects.filter((e) => e.t0 + e.dur > this.time);
     if (this.pending.size) this.checkPrompts();
-  }
-
-  // 直近1時間（5分×12区間）の平均待ち時間。乗った人＋いま待っている人
-  updateAvgWait(e) {
-    let sum = 0, n = 0;
-    for (let i = 0; i < 12; i++) { sum += e.wSum[i]; n += e.wN[i]; }
-    if (e.waitN) {
-      for (const k in e.q) for (const d of ['up', 'down']) for (const p of e.q[k][d]) { sum += p.waitT; n++; }
-    }
-    e.avgWait = n ? sum / n : 0;
-    if (e.avgWait > e.peakWait) e.peakWait = e.avgWait;
-    e.wb = (e.wb + 1) % 12;
-    e.wSum[e.wb] = 0; e.wN[e.wb] = 0;
   }
 
   collectRent() {
@@ -1318,7 +869,7 @@ export class Tower {
       this.dayLog.buyback += v;
     }
     for (const p of o.members.slice()) this.purge(p, false);
-    o.members = []; o.occupied = false; o.badDays = 0;
+    o.members = []; o.occupied = false; o.badDays = 0; o.brand = '';
     o.evalSum = 0; o.evalN = 0;
   }
 
@@ -1336,7 +887,7 @@ export class Tower {
         if (o.eval >= 45) f *= 0.3;
         if (o.vacantUntil > this.time) continue; // 悪評で退去した直後は入居が決まらない
         f *= this.serviceFactor(o.f);
-        const p = (t === 'office' ? 0.5 : 0.4) * scale * f;
+        const p = (t === 'office' ? SIM.TENANCY.office : SIM.TENANCY.condo) * scale * f;
         if (this.r() < p) {
           this.moveIn(o);
           moved[t]++;
@@ -1368,6 +919,7 @@ export class Tower {
 
   moveIn(o) {
     const T = TYPES[o.type];
+    this.rollVariant(o);
     o.occupied = true; o.badDays = 0; o.evalSum = 0; o.evalN = 0; o.eval = Math.min(o.eval, 30);
     o.members = [];
     const kind = o.type === 'office' ? 'worker' : 'resident';
@@ -1501,12 +1053,17 @@ export class Tower {
       const row = this.grid[f];
       let any = false, s = '';
       for (let x = 0; x < W; x++) { const c = row[x] !== 0; any = any || c; s += c ? '1' : '0'; }
-      if (any) rows[f] = s;
+      if (any) rows[f] = s.replace(/0+$/, '');
     }
     const objs = [];
     for (const o of this.objs.values()) {
       const s = { id: o.id, type: o.type, f: o.f, x: o.x, w: o.w, h: o.h };
-      if (ELEV.has(o.type)) { s.lo = o.lo; s.hi = o.hi; s.cars = o.cars.map((c) => Math.round(c.pos)); }
+      if (ELEV.has(o.type)) { s.lo = o.lo; s.hi = o.hi; s.cars = o.cars.map((c) => Math.round(c.pos)); s.config = { ...o.config, skip: [...o.config.skip] }; }
+      if (o.variant) s.variant = o.variant;
+      if (o.brand) s.brand = o.brand;
+      if (o.destroyed) s.destroyed = o.destroyed;
+      if (o.constructUntil > 0) { s.constructStart = o.constructStart; s.constructUntil = o.constructUntil; }
+      if (o.type === 'garbage' && o.bags) s.bags = +o.bags.toFixed(2);
       if (this.hasEval(o)) { s.eval = +o.eval.toFixed(2); s.badDays = o.badDays; }
       if (TENANT.has(o.type) || HOTEL.has(o.type)) s.occupied = !!o.occupied;
       if (HOTEL.has(o.type)) {
@@ -1518,17 +1075,19 @@ export class Tower {
       objs.push(s);
     }
     return {
-      v: SAVE_VERSION, seed: this.seed, time: this.time, money: this.money, star: this.star, tower: this.tower,
+      v: SAVE_VERSION, w: W, seed: this.seed, time: this.time, money: this.money, star: this.star, tower: this.tower,
       nextId: this.nextId, ledger: { ...this.ledger }, yesterday: this.yesterday ? { ...this.yesterday } : null,
       dayLog: { ...this.dayLog }, rows, objs, flags: { ...this.flags },
       bomb: this.bomb ? { f: this.bomb.f, x: this.bomb.x, deadline: this.bomb.deadline, searched: [...this.bomb.searched], found: this.bomb.found } : null,
       fire: this.fire ? { start: this.fire.start, nextSpread: this.fire.nextSpread, heli: this.fire.heli, burned: this.fire.burned, saved: this.fire.saved, burning: [...this.fire.burning].map((o) => o.id) } : null,
+      heli: this.heli ? { ...this.heli } : null,
       vip: this.vip ? { stage: this.vip.stage, arrive: this.vip.arrive } : null,
       prompts: [...this.pending.values()].map((p) => ({ id: p.id, kind: p.kind, title: p.title, text: p.text, choices: p.choices, data: p.data, deadline: p.deadline })),
       promptSeq: this.promptSeq,
     };
   }
 
+  // v1/v2（横幅150、grid に移動手段の id が入っていた）も読める
   restore(d) {
     if (!d || typeof d !== 'object' || typeof d.v !== 'number') throw new Error('セーブデータが壊れています');
     if (d.v > SAVE_VERSION) throw new Error('新しいバージョンのセーブデータです');
@@ -1544,56 +1103,80 @@ export class Tower {
     this.yesterday = d.yesterday && typeof d.yesterday === 'object' ? { ...d.yesterday } : null;
     if (d.dayLog && typeof d.dayLog === 'object') for (const k in this.dayLog) this.dayLog[k] = num(d.dayLog[k], 0);
     if (d.flags && typeof d.flags === 'object') Object.assign(this.flags, d.flags);
-    // 空きフロア
+    // 構造（古いセーブでは移動手段のマスも '1'。そのまま空きフロアとして読む。短い行は右側が空）
     for (const k in d.rows || {}) {
       const f = +k, s = d.rows[k];
       if (!this.grid[f] || typeof s !== 'string') continue;
       for (let x = 0; x < W && x < s.length; x++) if (s[x] === '1') this.grid[f][x] = -1;
     }
-    // 施設
-    const fits = (type, f0, f1, x, w) => {
+    const fits = (f0, f1, x, w) => {
       if (x < 0 || x + w > W || f0 < MIN_F || f1 > MAX_F) return false;
-      for (let f = f0; f <= f1; f++) {
-        for (let xi = x; xi < x + w; xi++) {
-          const c = this.grid[f][xi];
-          if (c <= 0) continue;
-          if (TRANSPORT.has(type) && this.isLobbyCell(c)) continue;
-          if (type === 'lobby' && this.isTransportCell(c)) continue;
-          return false;
-        }
-      }
+      for (let f = f0; f <= f1; f++) for (let xi = x; xi < x + w; xi++) if (this.grid[f][xi] > 0) return false;
       return true;
     };
+    const tfits = (type, x, w, lo, hi) => {
+      if (x < 0 || x + w > W || lo < MIN_F || hi > MAX_F) return false;
+      for (let f = lo; f <= hi; f++) for (let xi = x; xi < x + w; xi++) if (this.tgrid[f][xi] !== 0) return false;
+      return true;
+    };
+    this._deferIndex = true;
+    const elevs = [];
     for (const s of Array.isArray(d.objs) ? d.objs : []) {
       try {
         const T = TYPES[s.type];
-        if (!T || typeof s.id !== 'number' || this.objs.has(s.id)) continue;
-        if (ELEV.has(s.type)) {
-          if (!fits(s.type, s.lo, s.hi, s.x, T.w)) continue;
-          const e = this._placeElevator(s.type, s.x, s.lo, s.hi, s.id, Array.isArray(s.cars) ? s.cars.slice(0, T.maxCars) : null);
-          if (!e.stops.length) this.removeObj(e);
+        if (!T || typeof s.id !== 'number' || this.objs.has(s.id) || s.type === 'floor') continue;
+        if (TRANSPORT.has(s.type)) {
+          const lo = ELEV.has(s.type) ? s.lo : s.f, hi = ELEV.has(s.type) ? s.hi : s.f;
+          if (typeof lo !== 'number' || typeof hi !== 'number' || !tfits(s.type, s.x, T.w, lo, hi)) continue;
+          // 機械室・ピットが他と重なる古いセーブは、その部分だけ書かない
+          const cfg = s.config && typeof s.config === 'object' ? {
+            skip: Array.isArray(s.config.skip) ? s.config.skip.filter((v) => typeof v === 'number') : [],
+            standby: STANDBY.includes(s.config.standby) ? s.config.standby : 'none', rush: !!s.config.rush,
+            speed: s.config.speed === 2 ? 2 : 1, door: ['short', 'normal', 'long'].includes(s.config.door) ? s.config.door : 'normal',
+          } : null;
+          const o = this._placeTransport(s.type, s.x, lo, hi, s.id, Array.isArray(s.cars) ? s.cars.slice(0, T.maxCars) : null, cfg);
+          if (ELEV.has(o.type)) elevs.push(o);
+          if (num(s.constructUntil, 0) > 0) { o.constructStart = num(s.constructStart, this.time); o.constructUntil = s.constructUntil; }
           continue;
         }
-        const h = T.h || 1, w = s.type === 'lobby' || s.type === 'floor' ? s.w : T.w;
-        if (s.type === 'floor' || !fits(s.type, s.f, s.f + h - 1, s.x, w)) continue;
+        const h = T.h || 1, w = s.type === 'lobby' ? Math.max(1, s.w | 0) : T.w;
+        if (!fits(s.f, s.f + h - 1, s.x, w)) continue;
         const o = this.makeObj(s.type, s.f, s.x, w, h, s.id);
-        if (o.type === 'lobby') this.byType.lobby.push(o);
-        for (let r = 0; r < h; r++) {
-          for (let xi = o.x; xi < o.x + w; xi++) if (o.type !== 'lobby' || this.grid[o.f + r][xi] <= 0) this.grid[o.f + r][xi] = o.id;
-        }
+        for (let r = 0; r < h; r++) for (let xi = o.x; xi < o.x + w; xi++) this.grid[o.f + r][xi] = o.id;
         o.eval = num(s.eval, 0); o.badDays = num(s.badDays, 0);
         o.burnt = num(s.burnt, 0);
+        const nv = VARIANTS[o.type] ? VARIANTS[o.type].length : 1;
+        o.variant = Math.max(0, Math.min(nv - 1, num(s.variant, 0) | 0));
+        o.brand = typeof s.brand === 'string' ? s.brand.slice(0, 40) : '';
+        if (s.destroyed === 'bomb' || s.destroyed === 'fire') o.destroyed = s.destroyed;
+        if (num(s.constructUntil, 0) > 0) { o.constructStart = num(s.constructStart, this.time); o.constructUntil = s.constructUntil; }
+        if (o.type === 'garbage') { o.bags = Math.max(0, num(s.bags, 0)); o.fill = Math.min(1, o.bags / SIM.GARBAGE.cap); }
         if (s.complaintUntil) { o.complaintUntil = num(s.complaintUntil, 0); o.complaint = String(s.complaint || ''); }
         o.salesToday = num(s.salesToday, 0); o.custToday = num(s.custToday, 0);
-        if (TENANT.has(o.type) || HOTEL.has(o.type)) o.occupied = !!s.occupied;
+        if ((TENANT.has(o.type) || HOTEL.has(o.type)) && !o.destroyed) o.occupied = !!s.occupied;
         if (HOTEL.has(o.type)) {
           o.dirty = !!s.dirty; o.infested = !!s.infested;
           o.dirtySince = s.dirtySince == null ? (o.dirty ? this.time : null) : num(s.dirtySince, this.time);
           o.checkedIn = num(s.checkedIn, 0);
           o._guests = Math.max(1, Math.min(TYPES[o.type].cap, num(s.guests, TYPES[o.type].cap)));
         }
-        if (STAFF_KIND[o.type]) this.createStaff(o);
+        // 古いセーブには個性がない
+        if (!s.brand && !o.destroyed && (COMMERCE.has(o.type) || HOTEL.has(o.type) || (TENANT.has(o.type) && o.occupied))) this.rollVariant(o);
+        if (STAFF_KIND[o.type] && !o.destroyed) this.createStaff(o);
       } catch (e) { /* 壊れた項目は読み飛ばす */ }
+    }
+    // 移動手段の各マスには構造が必要（古いセーブの空中シャフトはフロアとして補う）
+    for (const o of this.objs.values()) {
+      if (!TRANSPORT.has(o.type)) continue;
+      const lo = ELEV.has(o.type) ? o.lo : o.f, hi = ELEV.has(o.type) ? o.hi : o.f + 1;
+      for (let f = lo; f <= Math.min(MAX_F, hi); f++) for (let xi = o.x; xi < o.x + o.w; xi++) if (this.grid[f][xi] === 0) this.grid[f][xi] = -1;
+    }
+    this._deferIndex = false;
+    this._indexDirty = false;
+    // 工事の続き
+    for (const o of this.objs.values()) {
+      if (!(o.constructUntil > 0)) continue;
+      if (o.constructUntil <= this.time) { o.constructStart = 0; o.constructUntil = 0; } else this.queueConstruction(o);
     }
     this.nextId = Math.max(this.nextId, num(d.nextId, 1));
     this.reindex();
@@ -1609,14 +1192,18 @@ export class Tower {
     }
     if (d.fire && typeof d.fire === 'object') {
       const burning = new Set();
-      for (const id of d.fire.burning || []) { const o = this.objs.get(id); if (o) { o.burning = true; burning.add(o); } }
+      for (const id of d.fire.burning || []) { const o = this.objs.get(id); if (o && !o.destroyed) { o.burning = true; burning.add(o); } }
       if (burning.size) {
         const o0 = [...burning][0];
-        this.fire = { start: num(d.fire.start, this.time), nextSpread: num(d.fire.nextSpread, this.time + 10), heli: d.fire.heli ?? null, burning,
+        this.fire = { start: num(d.fire.start, this.time), nextSpread: num(d.fire.nextSpread, this.time + 10), heli: d.fire.heli ? 'called' : null, burning,
           burned: num(d.fire.burned, 0), saved: num(d.fire.saved, 0), f: o0.f, x: o0.x + o0.w / 2 };
         this.updateFires();
       }
     }
+    if (d.heli && typeof d.heli === 'object' && ['in', 'spray', 'out'].includes(d.heli.phase)) {
+      const h = d.heli;
+      this.heli = { x: num(h.x, -20), f: num(h.f, 10), phase: h.phase, targetX: num(h.targetX, W / 2), targetF: num(h.targetF, 10), until: num(h.until, this.time + 5), from: num(h.from, -1) };
+    } else if (this.fire && this.fire.heli) this.dispatchHeli();
     if (d.vip && d.vip.stage === 'announced' && num(d.vip.arrive, 0) > this.time) {
       this.vip = { stage: 'announced', arrive: d.vip.arrive };
       this.at(d.vip.arrive, () => this.vipArrive());
@@ -1710,5 +1297,5 @@ export class Tower {
   }
 }
 
-Object.assign(Tower.prototype, EventsMixin, PanelMixin);
+Object.assign(Tower.prototype, BuildMixin, ElevatorMixin, GarbageMixin, EventsMixin, PanelMixin);
 export default Tower;

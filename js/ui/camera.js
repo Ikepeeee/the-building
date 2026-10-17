@@ -27,11 +27,13 @@ export class Camera {
   }
 
   /** 1F 付近を画面の下寄りに、建物の中央を映す */
-  home() {
+  home(centerX) {
+    this.anim = null;
     this.zoom = this.vw > 1800 && this.vh > 1000 ? 3 : 2;
     const usable = this.vh - this.insetTop - this.insetBottom;
     this.y = -(this.insetTop + usable * 0.72) / this.zoom;
-    this.x = (W * TILE_W) / 2 - this.vw / 2 / this.zoom;
+    const cx = Number.isFinite(centerX) ? centerX : W / 2; // マス単位
+    this.x = cx * TILE_W - this.vw / 2 / this.zoom;
     this.clamp();
   }
 

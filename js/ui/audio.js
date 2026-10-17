@@ -3,9 +3,10 @@ import { storage } from './save.js';
 import { SAVE_KEY } from '../sim/constants.js';
 
 const MUTE_KEY = SAVE_KEY + '.mute';
+const SFX_KEY = SAVE_KEY + '.sfx';
 const N = (s) => 440 * Math.pow(2, (s - 69) / 12); // MIDI ノート番号 → Hz
 
-const THROTTLE = { cash: 140, ding: 120, build: 60, complaint: 400, roach: 300, fire: 600, alarm: 1500, boom: 300, bells: 1500, fanfare: 1500 };
+const THROTTLE = { built: 250, cash: 140, ding: 120, build: 60, complaint: 400, roach: 300, fire: 600, alarm: 1500, boom: 300, bells: 1500, fanfare: 1500 };
 
 export class Sound {
   constructor() {
@@ -13,6 +14,7 @@ export class Sound {
     this.master = null;
     this.noiseBuf = null;
     this.muted = storage.get(MUTE_KEY) === '1';
+    this.sfxOn = storage.get(SFX_KEY) !== '0'; // 効果音（環境音は ambience.js 側で別に切り替え）
     this.last = {};
   }
 
@@ -79,8 +81,13 @@ export class Sound {
     src.start(t, Math.random() * 0.5); src.stop(t + dur + 0.05);
   }
 
+  setSfx(on) {
+    this.sfxOn = !!on;
+    storage.set(SFX_KEY, on ? '1' : '0');
+  }
+
   play(name) {
-    if (this.muted || !this.ctx || this.ctx.state !== 'running') return;
+    if (this.muted || !this.sfxOn || !this.ctx || this.ctx.state !== 'running') return;
     const now = performance.now();
     if (now - (this.last[name] || 0) < (THROTTLE[name] ?? 80)) return;
     this.last[name] = now;
@@ -142,6 +149,12 @@ export class Sound {
         case 'complaint':
           this.tone(N(64), t, 0.16, { type: 'triangle', vol: 0.22, to: N(60) });
           this.tone(N(59), t + 0.18, 0.28, { type: 'triangle', vol: 0.22, to: N(55) });
+          break;
+        case 'built':
+          // 完成: 明るい2音＋きらり
+          this.tone(N(79), t, 0.12, { type: 'triangle', vol: 0.18 });
+          this.tone(N(84), t + 0.1, 0.35, { type: 'triangle', vol: 0.18 });
+          this.tone(N(96), t + 0.18, 0.25, { type: 'sine', vol: 0.06 });
           break;
         case 'click':
           this.tone(1200, t, 0.03, { vol: 0.05 });

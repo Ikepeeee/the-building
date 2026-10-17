@@ -1,8 +1,13 @@
 // テスト用ヘルパー: 自動プレイヤーと大規模ビルの自動建設
-import { Tower } from '../js/sim/tower.js';
+import { Tower as SimTower } from '../js/sim/tower.js';
+import { defaultSkip } from '../js/sim/elevator.js';
 import { TYPES, DAY, W, LOBBY_FLOORS } from '../js/sim/constants.js';
 
-export { Tower, TYPES, DAY, W, LOBBY_FLOORS };
+// テストでは既定で工事期間なし（建てた瞬間に完成）。工事を試すときは {construction: true}
+export class Tower extends SimTower {
+  constructor(opts = {}) { super({ construction: false, ...opts }); }
+}
+export { SimTower, TYPES, DAY, W, LOBBY_FLOORS };
 
 export function mustBuild(sim, tool, p) {
   const r = sim.build(tool, p);
@@ -21,7 +26,7 @@ export function smallTower(sim, floors = 10, x0 = 40, x1 = 100) {
   mustBuild(sim, 'lobby', { f: 0, x: x0, x2: x1 });
   for (let f = 1; f <= floors; f++) mustBuild(sim, 'floor', { f, x: x0, x2: x1 });
   mustBuild(sim, 'elevator', { f: 0, f2: floors, x: 60 });
-  return sim.objAt(1, 60);
+  return sim.transportAt(1, 60);
 }
 
 // ---------------------------------------------------------------
@@ -52,7 +57,7 @@ export class AutoPlayer {
   }
 
   elevatorsFor(tier) {
-    return this.shaftX[tier % 2].map((x) => this.s.objAt(tier * 29 + 1, x)).filter(Boolean);
+    return this.shaftX[tier % 2].map((x) => this.s.transportAt(tier * 29 + 1, x)).filter(Boolean);
   }
 
   roomPlan(f) {
@@ -79,7 +84,9 @@ export class AutoPlayer {
     const r = s.build('floor', { f, x: this.X0, x2: this.X1 });
     if (!r.ok && r.reason !== 'すでにフロアがあります') return false;
     const plan = f <= 2 ? (f === 1 ? 'office' : 'condo') : this.roomPlan(f);
-    const [s1, s2, s3] = this.segs;
+    let [s1, s2, s3] = this.segs;
+    // 10フロアごとにごみ収集室（上下5フロアを担当）
+    if (f % 10 === 2 && s.build('garbage', { f, x: s1[0] }).ok) s1 = [s1[0] + TYPES.garbage.w, s1[1]];
     switch (plan) {
       case 'office': this.place('office', f, s1); this.place('office', f, s2); this.place('office', f, s3); break;
       case 'condo': this.place('condo', f, s1); this.place('condo', f, s2); this.place('condo', f, s3); break;
@@ -108,7 +115,7 @@ export class AutoPlayer {
     const lo = tier * 29;
     for (let i = 0; i < 2; i++) {
       const x = this.shaftX[tier % 2][i];
-      const e = s.objAt(lo + 1, x);
+      const e = s.transportAt(lo + 1, x);
       if (i === 1 && !e && f - lo < 8) continue; // 2基目は高くなってから
       if (!e) {
         const r = s.build('elevator', { f: lo, f2: f, x });
@@ -183,18 +190,18 @@ export function autoPlay(sim, days, opts = {}) {
 export function buildMegaTower(sim, topF = 98) {
   sim.money = 1e12;
   sim.star = 5;
-  const X0 = 0, X1 = W - 1;
+  const X0 = 0, X1 = 149; // 従来の幅150で測る（横長は別テスト）
   const localX = [[40, 106], [46, 112]];
-  const expressX = [72, 78];
+  const expressX = [72, 78, 84];
   // 地下: B1〜B3 フロア、地下鉄・リサイクル
   for (let f = 0; f >= -3; f--) mustBuild(sim, 'floor', { f, x: X0, x2: X1 });
   for (let f = 1; f <= topF; f++) mustBuild(sim, 'floor', { f, x: X0, x2: X1 });
   for (const f of LOBBY_FLOORS) if (f <= topF) mustBuild(sim, 'lobby', { f, x: 40, x2: 117 });
-  if (topF < 99) mustBuild(sim, 'floor', { f: 99, x: 60, x2: 100 });
+  if (topF < 99) mustBuild(sim, 'floor', { f: 99, x: 30, x2: 120 });
   // 急行: B3〜90F（ロビー階と地下に停止）2基
   for (const x of expressX) {
     mustBuild(sim, 'express', { f: -3, f2: 89, x });
-    const e = sim.objAt(0, x);
+    const e = sim.transportAt(0, x);
     while (e.cars.length < 8) sim.act(e, 'addCar');
   }
   // 各段の通常エレベーター（スカイロビー間）
@@ -206,7 +213,7 @@ export function buildMegaTower(sim, topF = 98) {
   tiers.forEach(([lo, hi], i) => {
     for (const x of localX[i % 2]) {
       mustBuild(sim, 'elevator', { f: lo, f2: hi, x });
-      const e = sim.objAt(lo + 1, x);
+      const e = sim.transportAt(lo + 1, x);
       while (e.cars.length < 6) sim.act(e, 'addCar');
     }
   });
@@ -230,8 +237,8 @@ export function buildMegaTower(sim, topF = 98) {
     const k = f % 10;
     let tool = 'office';
     if (k === 3 && f < 50) tool = 'condo';
-    else if (k === 5 && f < 60) tool = 'hotelSingle';
-    else if (k === 9 && f < 60) tool = 'hotelTwin';
+    else if (k === 5 && f < 40) tool = 'hotelSingle';
+    else if (k === 9 && f < 40) tool = 'hotelTwin';
     if (f === 2 || f === 4 || f === 6) tool = 'office';
     fillRow(tool, f);
   }
@@ -240,6 +247,13 @@ export function buildMegaTower(sim, topF = 98) {
     const o2 = sim.objAt(f, 10); if (o2) sim.removeObj(o2);
   }
   sim.build('security', { f: 2, x: 0 });
+  // ごみ収集室（上下5フロアを担当）
+  for (const f of [1, 11, 21, 31, 41, 51, 61, 71, 81, 91, 97]) {
+    for (const x of [0, 140]) {
+      const o = sim.objAt(f, x); if (o && !['security', 'housekeeping', 'lobby'].includes(o.type)) sim.removeObj(o);
+      sim.build('garbage', { f, x });
+    }
+  }
   sim.build('housekeeping', { f: 4, x: 0 });
   sim.build('housekeeping', { f: 6, x: 0 });
   sim.build('medical', { f: -1, x: 0 });
@@ -267,11 +281,12 @@ export class NaivePlayer {
   fill(f) {
     const s = this.s;
     for (let x = this.X0; x + 16 <= 70; x += 16) s.build(f % 2 ? 'office' : 'condo', { f, x });
-    for (let x = 74; x + 9 <= this.X1 + 1; x += 9) s.build(f % 2 ? 'condo' : 'office', { f, x });
+    const w = TYPES[f % 2 ? 'condo' : 'office'].w;
+    for (let x = 74; x + w <= this.X1 + 1; x += w) s.build(f % 2 ? 'condo' : 'office', { f, x });
   }
   act() {
     const s = this.s;
-    const e = s.objAt(0, 70);
+    const e = s.transportAt(0, 70);
     while (this.top < 29 && s.money > 120000) {
       const f = this.top + 1;
       if (!s.build('floor', { f, x: this.X0, x2: this.X1 }).ok) break;
@@ -292,12 +307,13 @@ export function securityTower(seed, secFloors, floors = 30) {
   for (let f = 1; f < floors; f++) mustBuild(s, 'floor', { f, x: 30, x2: 119 });
   for (const x of [56, 90]) {
     mustBuild(s, 'elevator', { f: 0, f2: floors - 1, x });
-    const e = s.objAt(1, x);
+    const e = s.transportAt(1, x);
     while (e.cars.length < 6) s.act(e, 'addCar');
   }
   for (let f = 1; f < floors; f++) {
     if (secFloors.includes(f)) { s.build('security', { f, x: 30 }); s.build('office', { f, x: 60 }); continue; }
-    for (const [a, b] of [[30, 56], [60, 90], [94, 120]]) for (let x = a; x + 9 <= b; x += 9) s.build('office', { f, x });
+    const ow = TYPES.office.w;
+    for (const [a, b] of [[30, 56], [60, 90], [94, 120]]) for (let x = a; x + ow <= b; x += ow) s.build('office', { f, x });
   }
   for (const o of s.byType.office) s.moveIn(o);
   stepTo(s, 0, 10);
@@ -326,4 +342,103 @@ export function fireTrial(seed, secFloors) {
   s.answer(id, 'wait');
   s.step(400);
   return burned;
+}
+
+// ---------------------------------------------------------------
+// エレベーターのストレステスト: 設定・伸縮・カゴ増減・急行の乗り換えを混ぜて、
+// 「待ちがあるのに止まったままのカゴ」を検出する
+// ---------------------------------------------------------------
+export function elevatorStress(seed, minutes = 600, opts = {}) {
+  const s = new Tower({ seed });
+  s.money = 1e12; s.star = 5;
+  let rnd = seed * 7919 + 1;
+  const R = (n) => { rnd = (rnd * 1103515245 + 12345) % 2147483648; return Math.floor((rnd / 2147483648) * n); };
+  mustBuild(s, 'floor', { f: 0, x: 0, x2: 199 });
+  for (let f = -1; f >= -3; f--) mustBuild(s, 'floor', { f, x: 0, x2: 199 });
+  mustBuild(s, 'lobby', { f: 0, x: 0, x2: 199 });
+  for (let f = 1; f <= 45; f++) mustBuild(s, 'floor', { f, x: 0, x2: 199 });
+  mustBuild(s, 'lobby', { f: 14, x: 100, x2: 199 });
+  mustBuild(s, 'lobby', { f: 29, x: 100, x2: 199 });
+  mustBuild(s, 'express', { f: -3, f2: 44, x: 20 });
+  mustBuild(s, 'elevator', { f: 0, f2: 16, x: 40 });
+  mustBuild(s, 'elevator', { f: 12, f2: 30, x: 60 });
+  mustBuild(s, 'elevator', { f: 27, f2: 45, x: 80 });
+  mustBuild(s, 'elevator', { f: -3, f2: 20, x: 120 });
+  mustBuild(s, 'stairs', { f: 0, x: 150 });
+  const elevs = () => s.elevs;
+  const randomConfig = (e) => {
+    const patch = { standby: ['none', 'lobby', 'spread'][R(3)], rush: !!R(2), speed: 1 + R(2), door: ['short', 'normal', 'long'][R(3)] };
+    if (R(2)) {
+      // 急行は既定（ロビー階・地下以外は通過）から少し増減、通常は数階を通過
+      const sk = new Set(e.type === 'express' ? defaultSkip(e.type, e.lo, e.hi) : []);
+      for (let f = e.lo; f <= e.hi; f++) if (R(6) === 0) { if (sk.has(f)) sk.delete(f); else sk.add(f); }
+      patch.skip = [...sk];
+    }
+    s.setElevatorConfig(e, patch);
+  };
+  for (const e of elevs()) { randomConfig(e); for (let i = R(4); i > 0; i--) s.act(e, 'addCar'); }
+  const problems = [];
+  const trip = () => {
+    const p = s.newPerson('visitor', null);
+    const a = R(49) - 3, b = R(49) - 3;
+    if (a === b) return;
+    p.f = a; p.x = 10 + R(180); p.state = 'walk'; s.active.add(p);
+    if (!s.startTrip(p, b, 10 + R(180), (pp) => s.leave(pp))) s.leave(p);
+  };
+  for (let t = 0; t < minutes; t++) {
+    const burst = opts.burst && (t % 120 < 20) ? 25 : 4;
+    for (let i = R(burst); i > 0; i--) trip();
+    if (t % 37 === 0) { const e = elevs()[R(elevs().length)]; if (e) randomConfig(e); }
+    if (t % 53 === 0) { const e = elevs()[R(elevs().length)]; if (e) s.act(e, R(2) ? 'addCar' : 'removeCar'); }
+    if (t % 71 === 0) {
+      const e = elevs()[R(elevs().length)];
+      if (e) {
+        const lo = e.lo + R(5) - 2, hi = e.hi + R(5) - 2;
+        s.build('resizeElevator', { id: e.id, lo, hi });
+      }
+    }
+    // 1分を細かく進めて、降りる人がいる階を通り過ぎていないか見る
+    for (let k = 0; k < 4; k++) {
+      const before = s.elevs.map((e) => e.cars.map((c) => [c, c.pos, c.drop.slice()]));
+      s.step(0.25);
+      for (const list of before) {
+        for (const [c, p0, drop] of list) {
+          const p1 = c.pos, lo = Math.min(p0, p1), hi = Math.max(p0, p1);
+          for (let f = Math.floor(lo) + 1; f < hi - 1e-6; f++) if (f > lo + 1e-6 && drop[f + 10] && c.drop[f + 10] && c.state === 'moving') problems.push(`t${t} overshoot floor ${f} (${p0.toFixed(2)}→${p1.toFixed(2)})`);
+        }
+      }
+    }
+    // 検出
+    for (const e of elevs()) {
+      for (const c of e.cars) {
+        if (!Number.isFinite(c.pos) || !Number.isFinite(c.v)) problems.push(`t${t} e${e.id} NaN`);
+        if (c.pos < e.lo - 1e-6 || c.pos > e.hi + 1e-6) problems.push(`t${t} e${e.id} car out of shaft ${c.pos}`);
+        if (c.state === 'moving') { c._mv = (c._mv || 0) + 1; if (c._mv > 60) problems.push(`t${t} e${e.id} moving for 60min pos=${c.pos.toFixed(2)} v=${c.v.toFixed(2)}`); } else c._mv = 0;
+      }
+      if (!e.waitN) continue;
+      let oldest = 0, at = null;
+      for (const k in e.q) for (const d of ['up', 'down']) for (const p of e.q[k][d]) if (p.waitT > oldest) { oldest = p.waitT; at = `${k}${d}`; }
+      const idle = e.cars.filter((c) => c.state === 'idle' && !c.pass.length && c.idleT > 3);
+      if (oldest > 20 && idle.length) problems.push(`t${t} e${e.id}(${e.type} ${e.lo}..${e.hi}) call ${at} waited ${oldest.toFixed(0)}min while ${idle.length} car(s) idle`);
+      if (oldest > 20 && idle.length && opts.debug && !e._dbg) {
+        e._dbg = 1;
+        console.log('DEBUG', JSON.stringify({ t, lo: e.lo, hi: e.hi, stops: e.stops, waitN: e.waitN, cfg: e.config,
+          qn: Object.keys(e.q).filter((k) => e.q[k].up.length || e.q[k].down.length).map((k) => [k, e.q[k].up.length, e.q[k].down.length, e.isStop[+k + 10], e.qn[+k + 10]]),
+          cars: e.cars.map((c) => ({ pos: c.pos, st: c.state, dir: c.dir, tgt: c.target, park: c.parking, pass: c.pass.length, idleT: c.idleT })) }));
+      }
+    }
+    for (const p of s.active) {
+      if (p.state === 'ride' && p.rideT > 60) {
+        const c = p.car, e = s.elevs.find((x) => x.cars.includes(c));
+        problems.push(`t${t} rider stuck ${p.rideT.toFixed(0)}min to ${p.legs[p.li].to} car pos=${c.pos.toFixed(1)} st=${c.state} e=${e && e.lo}..${e && e.hi} stops=${e && e.sLo}..${e && e.sHi}`);
+        if (opts.debug) {
+          const drops = []; for (let i = 0; i < c.drop.length; i++) if (c.drop[i]) drops.push([i - 10, c.drop[i]]);
+          console.log('RIDER', JSON.stringify({ drops, pass: c.pass.map((q) => q.legs[q.li].to), dir: c.dir, tgt: c.target, stopAt: c.stopAt, cap: e.cap, n: c.pass.length, stops: e.stops, waitN: e.waitN, cfg: e.config }));
+        }
+        break;
+      }
+    }
+    if (problems.length > 5) break;
+  }
+  return { problems, rescues: s.stats.rescues, trips: s.stats.trips, sim: s };
 }

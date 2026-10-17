@@ -47,13 +47,20 @@ export class Renderer {
     }
     g.fillStyle = '#fff'; g.font = '11px sans-serif';
     for (let f = f0; f <= f1; f++) g.fillText(floorName(f), 4, sy(-f * FLOOR_H) - 4);
-    const gh = view.ghost;
-    if (gh) {
+    for (let f = f0; f <= f1; f++) {
+      const row = sim.tgrid && sim.tgrid[f];
+      if (!row) continue;
+      for (let x = 0; x < W; x++) if (row[x]) { g.fillStyle = 'rgba(60,60,60,.85)'; g.fillRect(sx(x * TILE_W), sy(-(f + 1) * FLOOR_H), TILE_W * z + 0.5, FLOOR_H * z + 0.5); }
+    }
+    for (const o of sim.objs.values()) if (o.cars) for (const c of o.cars) { g.fillStyle = '#ddd'; g.fillRect(sx(o.x * TILE_W) + 2, sy(-(c.pos + 1) * FLOOR_H), o.w * TILE_W * z - 4, FLOOR_H * z); }
+    const drawGhost = (gh) => {
       const lo = gh.lo ?? gh.f, hi = gh.hi ?? gh.f + (gh.h || 1) - 1;
       g.fillStyle = gh.ok ? 'rgba(80,160,255,.45)' : 'rgba(255,60,60,.45)';
       const X = sx(gh.x * TILE_W), Y = sy(-(hi + 1) * FLOOR_H);
       g.fillRect(X, Y, gh.w * TILE_W * z, (hi - lo + 1) * FLOOR_H * z);
       if (gh.label) { g.fillStyle = '#000'; g.fillRect(X, Y - 16, g.measureText(gh.label).width + 8, 16); g.fillStyle = gh.ok ? '#fff' : '#f88'; g.fillText(gh.label, X + 4, Y - 4); }
-    }
+    };
+    if (view.ghost) drawGhost(view.ghost);
+    for (const gh of view.ghosts || []) drawGhost(gh);
   }
 }

@@ -1,5 +1,5 @@
 // レンダラー確認用のモック Tower（SPEC の「読み取り用フィールド」だけを持つショーケース）。本番では使わない。
-import { TYPES, W, MIN_F, MAX_F, DAY, LOBBY_FLOORS } from '../js/sim/constants.js';
+import { TYPES, W, MIN_F, MAX_F, DAY, LOBBY_FLOORS, VARIANTS, TRANSPORT_TYPES } from '../js/sim/constants.js';
 
 const rnd = (() => { let s = 12345; return () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; })();
 const pick = (a) => a[(rnd() * a.length) | 0];
@@ -9,8 +9,10 @@ export class MockTower {
     this.hourFixed = opt.hour;
     this.time = (opt.day || 0) * DAY + (opt.hour != null ? opt.hour * 60 : 12 * 60);
     this.money = 12345678; this.pop = 6500; this.star = 5; this.tower = false;
-    this.grid = {};
-    for (let f = MIN_F; f <= MAX_F; f++) this.grid[f] = new Int32Array(W);
+    this.grid = {}; this.tgrid = {};
+    for (let f = MIN_F; f <= MAX_F; f++) { this.grid[f] = new Int32Array(W); this.tgrid[f] = new Int32Array(W); }
+    this.revision = 0;
+    this.heli = null; this.heliOn = !!opt.heli; this.heliOff = opt.heliT || 0;
     this.objs = new Map();
     this.active = new Set();
     this.fires = [];
@@ -34,7 +36,11 @@ export class MockTower {
     const T = TYPES[type];
     const w = extra.w || T.w || 1, h = T.h || 1;
     const o = { id: this.nextId++, type, f, x, w, h, occupied: true, inCount: 0, ...extra };
-    for (let ff = f; ff < f + h; ff++) for (let xx = x; xx < x + w; xx++) this.grid[ff][xx] = o.id;
+    const tr = TRANSPORT_TYPES.includes(type);
+    for (let ff = f; ff < f + h; ff++) for (let xx = x; xx < x + w; xx++) {
+      if (tr) { this.tgrid[ff][xx] = o.id; if (!this.grid[ff][xx]) this.grid[ff][xx] = -1; }
+      else this.grid[ff][xx] = o.id;
+    }
     this.objs.set(o.id, o);
     return o;
   }
@@ -42,10 +48,14 @@ export class MockTower {
   elev(type, x, lo, hi, cars) {
     const T = TYPES[type];
     const o = { id: this.nextId++, type, f: lo, x, w: T.w, h: hi - lo + 1, lo, hi, cars: [], q: {} };
-    for (let f = lo; f <= hi; f++) for (let xx = x; xx < x + T.w; xx++) this.grid[f][xx] = o.id;
+    for (let f = lo - 1; f <= hi + 1; f++) for (let xx = x; xx < x + T.w; xx++) {
+      if (!this.tgrid[f]) continue;
+      this.tgrid[f][xx] = o.id;
+      if (f >= lo && f <= hi && !this.grid[f][xx]) this.grid[f][xx] = -1;
+    }
     for (let i = 0; i < cars; i++) {
       const pos = Math.min(hi, lo + 2 + ((i * 5 + Math.floor(rnd() * 3)) % (hi - lo)));
-      o.cars.push({ pos, dir: 1, state: 'moving', pass: [], _t: rnd() * 3, _target: pos + 1 });
+      o.cars.push({ pos, dir: 1, state: 'moving', pass: [], v: 0, _t: rnd() * 3, _target: pos + 1 });
     }
     this.objs.set(o.id, o);
     return o;
@@ -165,6 +175,57 @@ export class MockTower {
     this.santa = opt.santa === false ? null : { x: 20, f: opt.santaF != null ? opt.santaF : 101 };
     for (const [f, x] of [[9, 40], [12, 95], [6, 120]]) { const o = this.objAt(f, x); if (o) o.unreachable = true; }
 
+    // v2: テナントの個性ショーケース（x 150〜）
+    const S0 = 150, S1 = 440;
+    this.add('lobby', 0, S0, { w: S1 - S0 });
+    const cyc = (type, n, extra) => { const a = []; for (let i = 0; i < n; i++) a.push([type, { _vi: i % VARIANTS[type].length, ...(extra ? extra(i) : {}) }]); return a; };
+    this.row(1, S0, S1, cyc('fastfood', 7, (i) => ({ inCount: 2 + i % 6 })).concat(cyc('shop', 7, (i) => ({ inCount: 1 + i % 4 }))));
+    this.row(2, S0, S1, cyc('restaurant', 5, (i) => ({ inCount: 3 + i })).concat(cyc('shop', 7, (i) => ({ inCount: i % 3 }))));
+    for (let f = 3; f <= 5; f++) this.row(f, S0, S1, cyc('office', 32, (i) => ({ inCount: (i * 3 + f) % 7, occupied: (i + f) % 13 !== 0 })));
+    for (let f = 6; f <= 7; f++) this.row(f, S0, S1, cyc('condo', 18, (i) => ({ inCount: (i + f) % 4 })));
+    const hst = [{ inCount: 1 }, { inCount: 2 }, { occupied: true, inCount: 0 }, { dirty: true, occupied: false }, { occupied: false }];
+    for (let f = 8; f <= 9; f++) {
+      const L = [];
+      for (let i = 0; i < 9; i++) L.push(['hotelSuite', { _vi: i % 3, ...hst[(i + f) % 5] }]);
+      for (let i = 0; i < 12; i++) L.push(['hotelTwin', { _vi: i % 3, ...hst[(i + f) % 5] }]);
+      for (let i = 0; i < 12; i++) L.push(['hotelSingle', { _vi: i % 3, ...hst[(i + f) % 5] }]);
+      this.row(f, S0, S1, L);
+    }
+    for (let f = 10; f <= 11; f++) this.row(f, S0, S1, cyc('office', 32, (i) => ({ inCount: (i + f) % 7 })));
+    // §12: 工事中とごみ収集室
+    const D = 100000;
+    const cons = (o, pr) => { if (o) { o.constructStart = this.time - pr * D; o.constructUntil = this.time + (1 - pr) * D; o.inCount = 0; } return o; };
+    this.row(12, S0, S1, [['garbage', { fill: 0 }], ['garbage', { fill: 0.35 }], ['garbage', { fill: 0.7 }], ['garbage', { fill: 1 }], ['garbage', { fill: 1.4 }],
+      ['office', { _c: 0.08 }], ['office', { _c: 0.35 }], ['office', { _c: 0.65 }], ['office', { _c: 0.93 }], ['condo', { _c: 0.5 }], ['shop', { _c: 0.25 }], ['restaurant', { _c: 0.8 }], ['hotelSuite', { _c: 0.45 }]]);
+    this.add('cinema', 13, S0, { _c: 0.5 }); this.add('partyHall', 13, S0 + 40, { _c: 0.15 }); this.floor(13, S0, S0 + 80); this.floor(14, S0, S0 + 80);
+    this.add('lobby', 15, S0, { w: 60, _c: 0.6 });
+    for (const o of this.objs.values()) if (o._c != null) cons(o, o._c);
+    cons(this.add('stairs', 12, S0 + 130), 0.5);
+    const eK = cons(this.elev('elevator', 430, 0, 12, 2), 0.55);
+    this.elevators.push(eK);
+    // 移動手段を施設の上に重ねる（v2）
+    this.add('stairs', 3, 168); this.add('escalator', 4, 200); this.add('stairs', 10, 300);
+    const sE = this.elev('elevator', 240, 0, 11, 2); const sX = this.elev('express', 330, 0, 11, 1);
+    this.elevators.push(sE, sX);
+    // 破壊されたテナント
+    for (const [f, x, k] of [[5, 260, 'bomb'], [5, 269, 'bomb'], [11, 400, 'fire'], [7, 380, 'fire'], [2, 160, 'bomb']]) { const o = this.objAt(f, x); if (o) { o.destroyed = k; o.inCount = 0; } }
+    // variant と brand
+    const BR = {
+      office: ['山田商事', 'ネクスト・ソフト', '桜法律事務所', 'スタジオ彩', 'みらい銀行', '青空出版', 'ピクセル工房', '東西トレーディング'],
+      condo: ['佐藤', '鈴木', '高橋', '田中', '伊藤', '渡辺'],
+      fastfood: ['バーガー王', '麺屋 一番', '回転寿司 波', 'ピザ・ナポリ', '珈琲 こもれび', 'カレーの店 象', 'ドーナツ堂'],
+      restaurant: ['ル・ソレイユ', 'トラットリア・ソーレ', '中華 龍門', '割烹 さくら', 'ステーキ ハウス牛'],
+      shop: ['ブティック・リラ', '本の森', 'デンキのヤマ', '花屋 はなこ', 'おもちゃ箱', 'スポーツ・ゴー', 'まいにちマート'],
+      hotelSingle: [], hotelTwin: [], hotelSuite: [],
+    };
+    for (const o of this.objs.values()) {
+      const V = VARIANTS[o.type];
+      if (!V) continue;
+      o.variant = o._vi != null ? o._vi : (o.id * 7) % V.length;
+      const b = BR[o.type] && BR[o.type][o.variant];
+      if (b) o.brand = b;
+    }
+
     // 歩く人
     const kinds = ['worker', 'worker', 'resident', 'guest', 'visitor', 'visitor', 'guard', 'maid', 'vip', 'resident'];
     const floors = [0, 1, 4, 5, 6, 7, 8, 10, 11, 14, 15, 16, -1, -2, 20, 25, 30, 44, 59, 60, 61, 98];
@@ -241,12 +302,25 @@ export class MockTower {
         } else {
           const sp = (e.type === 'express' ? 14 : 6) * minutes;
           const d = c._target - c.pos;
-          if (Math.abs(d) <= sp) { c.pos = c._target; c.state = 'doors'; c._t = 1.2; if (c.pos >= e.hi) c.dir = -1; if (c.pos <= e.lo) c.dir = 1; }
-          else c.pos += Math.sign(d) * sp;
+          // 加速・減速つき
+          const vmax = e.type === 'express' ? 14 : 6, acc = 12;
+          const brake = Math.sqrt(2 * acc * Math.abs(d));
+          const want = Math.sign(d) * Math.min(vmax, brake);
+          const prev = c.v || 0;
+          c.v = prev + Math.max(-acc * minutes, Math.min(acc * minutes, want - prev));
+          if (Math.abs(d) <= 0.02 || (Math.abs(d) < Math.abs(c.v * minutes) + 0.001)) { c.pos = c._target; c.v = 0; c.state = 'doors'; c._t = 1.2; if (c.pos >= e.hi) c.dir = -1; if (c.pos <= e.lo) c.dir = 1; }
+          else c.pos += c.v * minutes;
         }
       }
     }
     for (const ef of this.effects) if (ef._loop && this.time - ef.t0 > ef.dur) ef.t0 = this.time;
+    if (this.heliOn) {
+      const t = ((this.time + this.heliOff) % 60);
+      const tx = 15, tf = 7;
+      if (t < 15) this.heli = { phase: 'in', x: -30 + (tx + 30) * (t / 15), f: tf + 6 - 2 * (t / 15), targetX: tx, targetF: tf };
+      else if (t < 45) this.heli = { phase: 'spray', x: tx - 3 + Math.sin(t) * 0.5, f: tf + 4, targetX: tx, targetF: tf };
+      else this.heli = { phase: 'out', x: tx + (t - 45) * 8, f: tf + 4 + (t - 45) * 0.4, targetX: tx, targetF: tf };
+    }
     if (this.santa) { this.santa.x += minutes * 3; if (this.santa.x > W + 10) this.santa.x = -10; }
   }
 }

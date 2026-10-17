@@ -2,7 +2,7 @@
 import { Tower, AutoPlayer, NaivePlayer, stepTo } from './helpers.mjs';
 
 export function runStrategy(kind, seed, days) {
-  const s = new Tower({ seed });
+  const s = new Tower({ seed, construction: true });
   s.on('prompt', (p) => s.answer(p.id, p.kind === 'bomb' ? 'refuse' : p.choices[p.choices.length - 1].value));
   const ap = kind === 'naive' ? new NaivePlayer(s) : new AutoPlayer(s);
   ap.setup();

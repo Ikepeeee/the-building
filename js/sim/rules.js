@@ -1,7 +1,7 @@
 // sim 内部で共有するルール定数（constants.js にない、sim 固有の数値）
 import { MIN_F, MAX_F, LOBBY_FLOORS } from './constants.js';
 
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 export const NF = MAX_F - MIN_F + 1;      // フロア数
 export const FI = (f) => f - MIN_F;       // フロア → 配列添字
 export const LOBBY_SET = new Set(LOBBY_FLOORS);
@@ -27,20 +27,26 @@ export const SIM = {
   ESC_TIME: 0.7,        // エスカレーター1階分（分）
   DOOR: 0.35,           // ドア開閉（分）
   BOARD: 0.02,          // 1人の乗降（分）
-  SPEED: { elevator: 6, express: 15 },   // フロア/分
   WAIT_GRACE: 3,        // この時間を超える待ちでストレス増
   WAIT_STRESS: 1.5,     // /分
+  WALK_GRACE: 15,       // 1回の移動でこれ以上歩くとストレス
+  WALK_STRESS: 0.5,     // /分
+  CROWD_STRESS: 0.3,    // 定員の8割を超えたカゴに乗っている間 /分
   STAIR_STRESS: 5,      // /階
   ESC_STRESS: 1,        // /階
   TRIP_LIMIT: 360,      // これを超えた移動は救済（リーク防止）
   EXTEND_COST: { elevator: 10000, express: 20000 },
   EXTERMINATE: 10000,
   HELI: 500000,
+  HELI_SPEED: 60,       // マス/分
+  HELI_CLIMB: 8,        // フロア/分
+  HELI_SPRAY: 5,        // 散水（分）
   BURN_TIME: 150,       // 施設が焼失するまで（分）
   BOMB_TIME: 180,
   CAR_MAINT: { elevator: 1000, express: 2000 },
   FLOOR_MAINT: 5,       // 構造のあるマス1つにつき/日
   LOBBY_MAINT: 20,      // ロビー1マスにつき/日（フロア分に上乗せ）
+  TENANCY: { office: 0.6, condo: 0.45 }, // 空き区画に入居が決まる確率（6時。14時はその半分）
   BAD_COOLDOWN: 3 * 1440, // 悪評で退去した区画に次の入居者が付くまで（分）
   BUYBACK: 1.0,         // マンションの住人が退去したときの買い戻し（販売価格に対する割合）
   SQUAD: 3,             // 警備室1室から出動する警備員
@@ -48,7 +54,13 @@ export const SIM = {
   SEARCH_BASE: 10,      // 1フロアの捜索時間 = BASE + 構造マス数 / PER（分）
   SEARCH_PER: 7,
   FIGHT_TIME: 30,       // 警備員1人が1施設を消火するのにかかる時間（分）
-  MAINT: { escalator: 300, security: 1500, housekeeping: 800, medical: 3000, recycling: 3000, metro: 8000, cathedral: 5000 },
+  GARBAGE: {
+    cap: 200,                 // 収集室1つに置ける袋数（fill = bags / cap）
+    perDay: { office: 2, condo: 1.5, hotel: 1, shop: 6 },
+    fee: 20, feeRecycle: 10,  // 1袋あたりの回収料金
+    penalty: 12,              // 範囲外・満杯のときの評価（ストレス）加算
+  },
+  MAINT: { garbage: 200, escalator: 300, security: 1500, housekeeping: 800, medical: 3000, recycling: 3000, metro: 8000, cathedral: 5000 },
   STAFF: { security: 6, housekeeping: 6 },
   // 経路コスト（ダイクストラ）
   COST: { elevBase: 5, elevPer: 0.12, expBase: 5, expPer: 0.04, stairs: 2.2, esc: 1.6 },

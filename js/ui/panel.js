@@ -60,17 +60,29 @@ export class Panel {
     try { d = this.app.sim.describe(o); } catch (e) { console.error(e); d = null; }
     if (!d) { this.close(); return; }
     const unreachable = !!o.unreachable;
-    const sig = JSON.stringify(d) + unreachable;
+    // 工事中（describe が書いていなければ UI で出す）
+    const sim = this.app.sim;
+    let cons = null;
+    if (Number.isFinite(o.constructUntil) && sim.time < o.constructUntil && !JSON.stringify(d).includes('工事')) {
+      const left = Math.max(0, o.constructUntil - sim.time);
+      const start = Number.isFinite(o.constructStart) ? o.constructStart : o.constructUntil - Math.max(left, 1);
+      const total = Math.max(1, o.constructUntil - start);
+      const h = Math.floor(left / 60), m = Math.ceil(left % 60);
+      cons = { text: `🚧 工事中（残り${h ? `${h}時間` : ''}${h && m ? `${m}分` : !h ? `${Math.max(1, m)}分` : ''}）`, p: Math.max(0, Math.min(1, 1 - left / total)) };
+    }
+    const sig = JSON.stringify(d) + unreachable + JSON.stringify(cons);
+    this.cons = cons;
     if (sig === this.sig) return;
     this.sig = sig;
     const actions = Array.isArray(d.actions) ? d.actions.filter(Boolean) : [];
-    const shape = `${d.title}|${actions.map((a) => a.id).join(',')}`;
-    if (shape !== this.shape || !this.dom) { this.shape = shape; this.build(d, actions); }
+    const isElev = !!(o.cars && o.lo != null);
+    const shape = `${d.title}|${actions.map((a) => a.id).join(',')}|${isElev}`;
+    if (shape !== this.shape || !this.dom) { this.shape = shape; this.build(d, actions, isElev); }
     this.update(d, actions, unreachable);
   }
 
   /** 骨組みを作る（タイトルかアクションの組み合わせが変わったときだけ） */
-  build(d, actions) {
+  build(d, actions, isElev) {
     const el = this.el;
     el.textContent = '';
     const bar = mk('div', 'titlebar');
@@ -82,6 +94,12 @@ export class Panel {
     const body = mk('div', 'p-body');
     const sub = mk('div', 'p-sub');
     const warn = mk('div', 'p-warn');
+    const cons = mk('div', 'p-cons');
+    const consT = mk('div', 'p-cons-t');
+    const consBar = mk('div', 'p-cons-bar');
+    const consFill = mk('i');
+    consBar.append(consFill);
+    cons.append(consT, consBar);
     const level = mk('div', 'p-level');
     const stats = mk('table', 'stats');
     const box = mk('div', 'p-actions');
@@ -95,9 +113,23 @@ export class Panel {
       box.append(b);
       btns.set(a.id, { b, l, c });
     }
-    body.append(sub, warn, level, stats, box);
+    // 評価の内訳（describe().reasons）
+    const why = mk('div', 'p-reasons');
+    const whyH = mk('div', 'p-reasons-h', '評価の内訳');
+    const whyList = mk('ul');
+    why.append(whyH, whyList);
+    body.append(sub, cons, warn, level, why, stats, box);
+    if (isElev) {
+      const ex = mk('div', 'p-elev');
+      const cfg = mk('button', 'btn btn-primary', '⚙ 運転設定・停止階・カゴ');
+      cfg.addEventListener('click', () => this.app.dialogs.elevatorSettings(this.id));
+      const tip = mk('div', 'p-tip', '▲▼ のつまみをドラッグすると、シャフトを伸ばしたり縮めたりできます');
+      ex.append(cfg, tip);
+      // 長いボトムシートでも見えるよう、統計より上に置く
+      body.insertBefore(ex, stats);
+    }
     el.append(bar, body);
-    this.dom = { title, sub, warn, level, stats, box, btns, rows: [] };
+    this.dom = { title, sub, warn, cons, consT, consFill, level, stats, box, btns, rows: [], why, whyList, whySig: '' };
   }
 
   /** 中身をその場で書き換える */
@@ -107,14 +139,29 @@ export class Panel {
     setText(dom.sub, d.subtitle);
     dom.sub.hidden = !d.subtitle;
     // ロビーから行けない施設を目立たせる（describe がすでに書いていれば重ねない）
-    const already = JSON.stringify(d).includes('行けません');
-    dom.warn.hidden = !(unreachable && !already);
-    setText(dom.warn, '⚠ ロビーから行けません（階段・エレベーターでつないでください）');
+    // describe().warning（破壊された施設など）を優先。なければ行けない施設を目立たせる
+    const warnText = d.warning ? `⚠ ${d.warning}` : unreachable ? '⚠ ロビーから行けません（階段・エレベーターでつないでください）' : '';
+    dom.warn.hidden = !warnText;
+    setText(dom.warn, warnText);
+    dom.cons.hidden = !this.cons;
+    if (this.cons) { setText(dom.consT, this.cons.text); dom.consFill.style.width = `${Math.round(this.cons.p * 100)}%`; }
     if (d.level && LEVEL[d.level]) {
       dom.level.hidden = false;
       dom.level.className = `p-level ${d.level}`;
       setText(dom.level, `${LEVEL[d.level][1]} 評価: ${LEVEL[d.level][0]}`);
     } else dom.level.hidden = true;
+    const reasons = Array.isArray(d.reasons) ? d.reasons.filter((r) => r && r.label) : [];
+    const rsig = JSON.stringify(reasons);
+    if (rsig !== dom.whySig) {
+      dom.whySig = rsig;
+      dom.whyList.textContent = '';
+      for (const r of reasons) {
+        const li = mk('li', `r-${r.level || 'fair'}`);
+        li.append(mk('span', 'r-mark', r.level === 'good' ? '◎' : r.level === 'bad' ? '×' : '△'), mk('span', 'r-text', r.label));
+        dom.whyList.append(li);
+      }
+    }
+    dom.why.hidden = !reasons.length;
     const stats = Array.isArray(d.stats) ? d.stats.filter(Boolean) : [];
     while (dom.rows.length < stats.length) {
       const tr = mk('tr');

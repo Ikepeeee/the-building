@@ -65,7 +65,11 @@ export class Input {
     const tool = this.app.tool;
     c.classList.toggle('c-panning', this.mode === 'pan');
     c.classList.toggle('c-pan', this.space && this.mode !== 'pan');
-    c.classList.toggle('c-build', tool !== 'inspect' && !this.space);
+    const idle = !this.space && this.mode !== 'pan';
+    c.classList.toggle('c-inspect', idle && tool === 'inspect');
+    c.classList.toggle('c-bulldoze', idle && tool === 'bulldoze');
+    c.classList.toggle('c-copy', idle && tool === 'copy');
+    c.classList.toggle('c-build', idle && tool !== 'inspect' && tool !== 'bulldoze' && tool !== 'copy');
   }
 
   onDown(e) {
@@ -91,7 +95,8 @@ export class Input {
     if (!touch && e.button !== 0) return;
 
     const tool = this.app.tool;
-    if (tool !== 'inspect' && isDragTool(tool)) {
+    this.resizeCand = null;
+    if (tool !== 'inspect' && this.app.toolIsDrag(tool)) {
       const cell = this.cellAt(sx, sy);
       this.mode = 'drag';
       this.drag = { tool, start: cell, cur: cell, touch, sx, sy };
@@ -99,10 +104,13 @@ export class Input {
       return;
     }
     this.mode = 'tap';
+    // マウスの「調べる」でシャフトの端を掴んだら、動かしたときに伸縮を始める
+    if (!touch && tool === 'inspect') this.resizeCand = this.app.resize.hitEnd(this.app.clampCell(this.cellAt(sx, sy)));
   }
 
   onMove(e) {
     const [sx, sy] = this.local(e);
+    if (e.pointerType === 'mouse') this.app.noSnap = !!e.shiftKey;
     const pt = this.ptrs.get(e.pointerId);
     if (e.pointerType === 'mouse') this.app.hoverAt(this.mode === 'pan' ? null : this.cellAt(sx, sy), this.mode === 'drag');
     if (!pt) return;
@@ -114,7 +122,12 @@ export class Input {
         break;
       case 'tap': {
         const slop = pt.type === 'mouse' ? SLOP_MOUSE : SLOP_TOUCH;
-        if (Math.hypot(sx - pt.x0, sy - pt.y0) > slop) {
+        if (Math.hypot(sx - pt.x0, sy - pt.y0) > slop && this.resizeCand) {
+          this.mode = 'resize';
+          this.app.resize.start(this.resizeCand.o, this.resizeCand.end, e.clientX, e.clientY);
+          this.app.resize.move(e.clientX, e.clientY);
+          this.resizeCand = null;
+        } else if (Math.hypot(sx - pt.x0, sy - pt.y0) > slop) {
           this.mode = 'pan';
           this.app.cam.pan(sx - pt.x0, sy - pt.y0);
           this.updateCursor();
@@ -123,6 +136,9 @@ export class Input {
       }
       case 'pan':
         this.app.cam.pan(dx, dy);
+        break;
+      case 'resize':
+        this.app.resize.move(e.clientX, e.clientY);
         break;
       case 'drag':
         this.drag.sx = sx; this.drag.sy = sy; this.drag.moved = true;
@@ -137,6 +153,8 @@ export class Input {
     for (const id of this.ptrs.keys()) { try { this.canvas.releasePointerCapture(id); } catch { /* */ } }
     this.ptrs.clear();
     if (this.mode === 'drag') this.app.dragCancel();
+    this.app.resize.cancel();
+    this.resizeCand = null;
     this.mode = null;
     this.drag = null;
     this.pinch = null;
@@ -170,6 +188,7 @@ export class Input {
     this.updateCursor();
     if (cancelled) {
       if (mode === 'drag') this.app.dragCancel();
+      if (mode === 'resize') this.app.resize.cancel();
       this.drag = null;
       return;
     }
@@ -177,6 +196,8 @@ export class Input {
       this.app.tapAt(this.cellAt(pt.x, pt.y), pt.type !== 'mouse');
     } else if (mode === 'drag') {
       this.app.dragEnd(this.drag);
+    } else if (mode === 'resize') {
+      this.app.resize.end();
     }
     this.drag = null;
   }
@@ -243,6 +264,7 @@ export class Input {
     if (down) app.userGesture();
     if (!down) {
       this.keys.delete(e.code);
+      if (e.key === 'Shift') { app.noSnap = false; if (app.hover) app.hoverAt(app.hover); }
       if (e.code === 'Space') {
         this.space = false;
         if (!this.spaceUsed && !app.blocked()) app.togglePause();
@@ -251,8 +273,10 @@ export class Input {
       return;
     }
     if (e.code === 'Escape') { app.escape(); e.preventDefault(); return; }
+    if (e.key === 'Shift' && !e.repeat) { app.noSnap = true; if (app.hover) app.hoverAt(app.hover); }
     if (app.blocked()) return; // モーダル・タイトル中はゲーム操作をしない
     if ((e.ctrlKey || e.metaKey) && e.code === 'KeyS') { e.preventDefault(); app.manualSave(); return; }
+    if ((e.ctrlKey || e.metaKey) && e.code === 'KeyC' && !String(window.getSelection?.() || '')) { e.preventDefault(); app.setTool('copy'); return; }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.code === 'Space') {
       e.preventDefault();
@@ -265,7 +289,8 @@ export class Input {
     if (e.code === 'KeyP') { app.togglePause(); return; }
     if (e.code === 'Equal' || e.code === 'NumpadAdd' || e.key === '+') { app.cam.stepZoom(1); return; }
     if (e.code === 'Minus' || e.code === 'NumpadSubtract') { app.cam.stepZoom(-1); return; }
-    if (e.code === 'Home') { app.cam.home(); return; }
+    if (e.code === 'Home') { app.cam.home(app.buildingCenterX()); return; }
+    if (e.code === 'KeyK') { app.setTool(app.tool === 'copy' ? 'inspect' : 'copy'); return; }
     if (e.code === 'KeyM') { app.toggleMute(); return; }
     if (e.code === 'Delete' || e.code === 'Backspace') { app.setTool('bulldoze'); return; }
     if (TOOL_KEYS[e.code]) { app.setTool(TOOL_KEYS[e.code]); }

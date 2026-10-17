@@ -24,6 +24,11 @@ export class Hud {
     this.el.moneyBtn.addEventListener('click', () => app.dialogs.status());
     this.el.mute.addEventListener('click', () => app.toggleMute());
     this.el.menu.addEventListener('click', () => app.dialogs.menu());
+    this.el.night = document.getElementById('night-badge');
+    const fs = document.getElementById('btn-fs');
+    const canFs = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+    fs.hidden = !canFs;
+    fs.addEventListener('click', () => app.toggleFullscreen());
   }
 
   set(key, el, text, prop = 'textContent') {
@@ -54,6 +59,9 @@ export class Hud {
     const cur = app.speedIdx;
     this.speedBtns.forEach((b, i) => b.classList.toggle('is-on', i === cur));
     this.el.badge.hidden = !(cur === 0 && !app.blocked());
+    const ff = !!app.nightFF && cur > 0 && !app.blocked();
+    if (this.el.night.hidden === ff) this.el.night.hidden = !ff;
+    if (ff) this.set('night', this.el.night, `🌙 早送り中 ×${(SPEEDS[cur] || 1) * 4}`);
     this.set('mute', this.el.mute, app.sound.muted ? '🔇' : '🔊');
   }
 }

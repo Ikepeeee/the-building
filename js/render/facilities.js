@@ -4,12 +4,13 @@
 import { TILE_W, FLOOR_H } from '../sim/constants.js';
 import { Painter, rng, shade } from './pixel.js';
 import { standFig, childFig, sitFig } from './people.js';
+import { drawVariant, hasVariantArt } from './variants.js';
 
-const INK = '#141414';
-const SLAB = '#77746c';
-const FIG = '#1a1a1a';
+export const INK = '#141414';
+export const SLAB = '#77746c';
+export const FIG = '#1a1a1a';
 
-function shell(p, wall, floor, opt = {}) {
+export function shell(p, wall, floor, opt = {}) {
   const W = p.w, H = p.h - (p.oy || 0), y0 = p.oy || 0;
   const fy = y0 + H - 3;
   p.r(0, y0, W, H - 3, wall);
@@ -24,13 +25,13 @@ function shell(p, wall, floor, opt = {}) {
 }
 
 // ---- 部品 ----
-function chairR(p, x, seatY, c = '#3a3f48') { // 右向きに座る椅子（背もたれが左）
+export function chairR(p, x, seatY, c = '#3a3f48') { // 右向きに座る椅子（背もたれが左）
   p.r(x - 1, seatY - 5, 1, 6, c); p.r(x - 1, seatY, 4, 1, c); p.r(x + 1, seatY + 1, 1, 2, c); p.r(x, seatY + 3, 3, 1, c);
 }
-function chairL(p, x, seatY, c = '#3a3f48') {
+export function chairL(p, x, seatY, c = '#3a3f48') {
   p.r(x + 3, seatY - 5, 1, 6, c); p.r(x, seatY, 4, 1, c); p.r(x + 1, seatY + 1, 1, 2, c); p.r(x, seatY + 3, 3, 1, c);
 }
-function plant(p, x, yb, tall = 8) {
+export function plant(p, x, yb, tall = 8) {
   p.box(x, yb - 3, 5, 4, '#b0603a');
   const g = ['#2f8a3a', '#3fa84a', '#246a2c'];
   for (let i = 0; i < tall; i++) {
@@ -39,34 +40,34 @@ function plant(p, x, yb, tall = 8) {
   }
   p.p(x + 1, yb - 6, '#1d5a24'); p.p(x + 3, yb - 8, '#1d5a24');
 }
-function picture(p, x, y, w, h, alt = 0) {
+export function picture(p, x, y, w, h, alt = 0) {
   p.box(x, y, w, h, '#8cc4e8');
   const hill = ['#4a9a4a', '#c87a3a', '#6a6ab8'][alt % 3];
   p.r(x + 1, y + h - 3, w - 2, 2, hill);
   p.p(x + w - 3, y + 2, '#f8e060');
 }
-function lamp(p, x, y, c = '#ffe68a') {
+export function lamp(p, x, y, c = '#ffe68a') {
   p.r(x + 1, y, 1, 2, '#444'); p.r(x, y + 2, 3, 2, c); p.p(x + 1, y + 4, '#fff8d0');
 }
-function guardFig(p, x, yFeet, facing = 1) {
+export function guardFig(p, x, yFeet, facing = 1) {
   const hx = facing ? x + 1 : x;
   p.r(x, yFeet - 8, 4, 1, '#1b3486'); p.r(hx, yFeet - 7, 2, 1, FIG);
   p.r(x, yFeet - 6, 3, 4, '#2f5ce0'); p.p(facing ? x + 2 : x, yFeet - 6, '#f0d040');
   p.r(x, yFeet - 2, 1, 2, '#14214f'); p.r(x + 2, yFeet - 2, 1, 2, '#14214f');
 }
-function maidFig(p, x, yFeet, facing = 1) {
+export function maidFig(p, x, yFeet, facing = 1) {
   const hx = facing ? x + 1 : x;
   p.r(hx, yFeet - 8, 2, 1, '#ffffff'); p.r(hx, yFeet - 7, 2, 1, FIG);
   p.r(x, yFeet - 6, 3, 4, '#2c2c48'); p.r(facing ? x + 1 : x, yFeet - 5, 2, 3, '#ffffff');
   p.r(x, yFeet - 2, 1, 2, FIG); p.r(x + 2, yFeet - 2, 1, 2, FIG);
 }
-function coatFig(p, x, yFeet, coat = '#ffffff', facing = 1) {
+export function coatFig(p, x, yFeet, coat = '#ffffff', facing = 1) {
   const hx = facing ? x + 1 : x;
   p.r(hx, yFeet - 8, 2, 2, FIG);
   p.r(x, yFeet - 6, 3, 5, coat); p.r(facing ? x : x + 2, yFeet - 6, 1, 5, shade(coat, -0.2));
   p.r(x, yFeet - 1, 1, 1, FIG); p.r(x + 2, yFeet - 1, 1, 1, FIG);
 }
-function hatFig(p, x, yFeet, hat, facing = 1) {
+export function hatFig(p, x, yFeet, hat, facing = 1) {
   standFig(p, x, yFeet, FIG, facing);
   p.r(x, yFeet - 8, 3, 1, hat);
 }
@@ -149,7 +150,7 @@ DRAW.condo = (p, v) => {
   if (v.n >= 4) { p.r(107, 12, 2, 2, FIG); }
 };
 
-function bed(p, x, w, blanket, guest, dirty, rnd) {
+export function bed(p, x, w, blanket, guest, dirty, rnd) {
   p.box(x, 10, 3, 11, '#7a4a22');
   p.r(x + 3, 18, 1, 3, '#4a2a10'); p.r(x + w - 1, 18, 1, 3, '#4a2a10');
   p.box(x + 2, 14, w - 1, 5, '#ffffff'); p.r(x + 3, 17, w - 3, 1, '#d8d8e0');
@@ -168,7 +169,7 @@ function bed(p, x, w, blanket, guest, dirty, rnd) {
     p.r(x + w - 2, 16, 3, 5, blanket); p.p(x + w, 20, shade(blanket, -0.3));
   }
 }
-function nightstand(p, x) {
+export function nightstand(p, x) {
   p.box(x, 16, 5, 5, '#7a4a22'); p.r(x + 1, 18, 3, 1, '#4a2a10');
   p.r(x + 2, 13, 1, 3, '#444'); p.box(x, 10, 5, 4, '#f4d070');
 }
@@ -344,13 +345,15 @@ DRAW.cinema = (p, v) => {
   p.box(26, 31, 20, fy - 31, '#c8a040'); p.r(28, 33, 16, 5, '#f8f0d0');
   if (v.open) standFig(p, 34, 37, FIG, 0);
   p.r(48, 1, 2, fy - 1, '#120c18');
-  // スクリーン
-  p.r(147, 3, 4, 40, '#a01828'); p.r(242, 3, 4, 40, '#a01828');
-  p.box(151, 6, 91, 31, '#f4f4f4');
-  if (v.open) SCREENS[v.week % SCREENS.length](p, 152, 7, 89, 29);
-  else p.r(152, 7, 89, 29, '#8a8a94');
-  for (let x = 147; x < 151; x += 2) p.r(x, 3, 1, 40, '#801020');
-  p.r(146, 1, 101, 3, '#c02838'); p.r(146, 3, 101, 1, '#e0b040');
+  // スクリーン（右端に寄せる）
+  const dx = Math.max(0, W - 248);
+  p.r(147 + dx, 3, 4, 40, '#a01828'); p.r(242 + dx, 3, 4, 40, '#a01828');
+  p.box(151 + dx, 6, 91, 31, '#f4f4f4');
+  if (v.open) SCREENS[v.week % SCREENS.length](p, 152 + dx, 7, 89, 29);
+  else p.r(152 + dx, 7, 89, 29, '#8a8a94');
+  for (let x = 147 + dx; x < 151 + dx; x += 2) p.r(x, 3, 1, 40, '#801020');
+  p.r(146 + dx, 1, 101, 3, '#c02838'); p.r(146 + dx, 3, 101, 1, '#e0b040');
+  if (dx) { for (let x = 148; x < 146 + dx; x += 10) p.r(x, 12, 2, 2, '#4a3a5a'); }
   // 客席（ひな壇）
   let k = 0;
   const n = v.open ? v.n : 0;
@@ -366,7 +369,7 @@ DRAW.cinema = (p, v) => {
   p.box(51, 4, 5, 4, '#3a3a3a');
   if (v.open && v.n > 0) {
     const g = p.g; g.save(); g.globalAlpha = 0.13; g.fillStyle = '#fff6d0';
-    g.beginPath(); g.moveTo(56, 6); g.lineTo(151, 7); g.lineTo(151, 37); g.closePath(); g.fill(); g.restore(); p._fs = null;
+    g.beginPath(); g.moveTo(56, 6); g.lineTo(151 + dx, 7); g.lineTo(151 + dx, 37); g.closePath(); g.fill(); g.restore(); p._fs = null;
   }
 };
 
@@ -374,31 +377,32 @@ DRAW.partyHall = (p, v) => {
   const W = p.w, fy = p.h - 3;
   shell(p, '#f2e2c4', '#b0804a', {});
   p.r(1, 34, W - 2, fy - 34, '#d8bc8a'); p.r(1, 34, W - 2, 1, '#a88050');
-  for (let x = 4; x < 168; x += 36) {
+  const st = W - 44;
+  for (let x = 4; x < st - 4; x += 36) {
     p.r(x, 1, 4, fy - 1, '#e2cca0'); p.r(x, 1, 1, fy - 1, '#c4aa7a'); p.r(x + 3, 1, 1, fy - 1, '#c4aa7a');
     const wx = x + 13;
     p.box(wx, 9, 12, 18, v.night ? '#1a2850' : '#8ab8e0'); p.r(wx + 1, 8, 10, 1, '#000'); p.r(wx + 3, 7, 6, 1, '#000');
     p.r(wx + 2, 8, 8, 1, v.night ? '#1a2850' : '#8ab8e0'); p.r(wx + 5, 9, 1, 17, '#f2e2c4');
   }
   // 舞台
-  p.r(172, 4, 43, 32, '#901828');
-  for (let x = 173; x < 214; x += 4) p.r(x, 4, 1, 32, '#6a1020');
-  p.r(172, 2, 43, 4, '#c03040'); p.r(172, 6, 43, 1, '#e0b040');
-  p.box(172, 36, 43, fy - 36, '#6a3a1a'); p.r(173, 37, 41, 1, '#9a6030');
-  p.r(194, 28, 1, 8, '#444'); p.p(194, 27, '#888');
+  p.r(st, 4, 43, 32, '#901828');
+  for (let x = st + 1; x < st + 42; x += 4) p.r(x, 4, 1, 32, '#6a1020');
+  p.r(st, 2, 43, 4, '#c03040'); p.r(st, 6, 43, 1, '#e0b040');
+  p.box(st, 36, 43, fy - 36, '#6a3a1a'); p.r(st + 1, 37, 41, 1, '#9a6030');
+  p.r(st + 22, 28, 1, 8, '#444'); p.p(st + 22, 27, '#888');
   // シャンデリア
-  for (const cx of [52, 124]) {
+  for (const cx of W > 230 ? [52, 124, 172] : [52, 124]) {
     p.r(cx, 1, 1, 4, '#806020'); p.r(cx - 5, 5, 11, 2, '#e0b040'); p.r(cx - 3, 7, 7, 1, '#c89020');
     for (let i = -5; i <= 5; i += 2) p.p(cx + i, 4, v.open ? '#fff6b0' : '#c8b070');
     p.p(cx, 8, '#fff6b0');
   }
-  const tables = [18, 60, 102, 144];
+  const tables = W > 230 ? [18, 60, 102, 144, 178] : [18, 60, 102, 144];
   const n = v.open ? v.n : 0;
   let k = 0;
-  if (n > 0) standFig(p, 192, 35, '#c02060', 0, 0);
+  if (n > 0) standFig(p, st + 20, 35, '#c02060', 0, 0);
   const spots = [];
   for (const x of tables) spots.push([x - 5, 1], [x + 18, 0]);
-  spots.push([162, 1], [168, 0], [40, 0], [84, 1], [126, 0]);
+  spots.push([40, 0], [84, 1], [126, 0]);
   for (const [x, f] of spots) { if (++k < n) standFig(p, x, fy - 1, FIG, f, k % 2); }
   for (const x of tables) {
     p.box(x, 35, 16, 3, '#ffffff'); p.r(x + 1, 38, 14, fy - 38, '#f0ece4'); p.r(x + 1, 38, 1, fy - 38, '#d0ccc4');
@@ -450,7 +454,7 @@ DRAW.medical = (p, v) => {
   p.box(6, 2, 11, 11, '#ffffff'); p.r(10, 4, 3, 7, '#20a050'); p.r(8, 6, 7, 3, '#20a050');
   if (v.n > 0) coatFig(p, 12, 19, '#f0a0c0', 1);
   p.box(4, 14, 26, 7, '#d0dcd8'); p.r(3, 13, 28, 1, '#7a8a88');
-  const beds = [38, 80, 122];
+  const beds = p.w < 200 ? [36, 74, 112] : [38, 80, 122];
   for (let i = 0; i < 3; i++) {
     const x = beds[i];
     p.r(x - 2, 1, 38, 1, '#888');
@@ -461,11 +465,12 @@ DRAW.medical = (p, v) => {
     if (v.n > i + 1) p.r(x + 9, 10, 3, 3, FIG);
     p.r(x + 32, 5, 1, 16, '#888'); p.box(x + 31, 4, 3, 5, '#d8f0ff'); p.r(x + 30, 20, 5, 1, '#888');
   }
-  p.box(168, 5, 13, 9, '#202a28'); p.r(169, 9, 3, 1, '#40e080'); p.r(172, 7, 1, 2, '#40e080'); p.r(173, 10, 1, 1, '#40e080'); p.r(174, 9, 5, 1, '#40e080');
-  p.box(184, 3, 20, 18, '#e0e8e8');
-  for (const row of [8, 13]) { p.r(185, row, 18, 1, '#9aa'); for (let i = 0; i < 6; i++) p.r(186 + i * 3, row - 3, 2, 3, ['#e05050', '#ffffff', '#5090e0', '#f0c040'][i % 4]); }
-  p.r(185, 18, 18, 1, '#9aa');
-  if (v.n > 1) coatFig(p, 160, fy - 1, '#ffffff', 0);
+  const mx = p.w - 42, sx = p.w - 24;
+  p.box(mx, 5, 13, 9, '#202a28'); p.r(mx + 1, 9, 3, 1, '#40e080'); p.r(mx + 4, 7, 1, 2, '#40e080'); p.r(mx + 5, 10, 1, 1, '#40e080'); p.r(mx + 6, 9, 5, 1, '#40e080');
+  p.box(sx, 3, 20, 18, '#e0e8e8');
+  for (const row of [8, 13]) { p.r(sx + 1, row, 18, 1, '#9aa'); for (let i = 0; i < 6; i++) p.r(sx + 2 + i * 3, row - 3, 2, 3, ['#e05050', '#ffffff', '#5090e0', '#f0c040'][i % 4]); }
+  p.r(sx + 1, 18, 18, 1, '#9aa');
+  if (v.n > 1) coatFig(p, sx - 6, fy - 1, '#ffffff', 0);
   if (v.n > 4) coatFig(p, 72, fy - 1, '#ffffff', 1);
   if (v.n > 5) standFig(p, 34, fy - 1, FIG, 0, 1);
 };
@@ -483,22 +488,23 @@ DRAW.recycling = (p, v) => {
   p.box(36, 26, 10, 14, '#b89010'); p.r(39, 30, 4, 1, INK);
   p.r(20, 10, 4, 8, '#7a7468'); p.r(14, 8, 16, 3, '#7a7468');
   // コンベア
-  p.box(56, 32, 82, 4, '#3a3a3a');
-  for (let x = 58; x < 136; x += 4) p.p(x, 33, '#9a9a9a');
-  for (const x of [60, 96, 132]) p.r(x, 36, 2, fy - 36, '#4a4a4a');
+  const bin0 = W - 56;
+  p.box(56, 32, bin0 - 60, 4, '#3a3a3a');
+  for (let x = 58; x < bin0 - 6; x += 4) p.p(x, 33, '#9a9a9a');
+  for (const x of [60, 96, bin0 - 10]) p.r(x, 36, 2, fy - 36, '#4a4a4a');
   const items = ['#4a90d0', '#40a040', '#e0c040', '#c0c0c0', '#a05a30'];
   for (let i = 0; i < 9; i++) p.r(62 + i * 8, 29 + (i % 2), 4, 3 - (i % 2), items[i % items.length]);
   // 分別箱
   const bc = ['#3a7ad0', '#3aa050', '#e0b020'];
   for (let i = 0; i < 3; i++) {
-    const x = 142 + i * 18;
+    const x = bin0 + i * 18;
     p.box(x, 28, 16, fy - 28, bc[i]); p.r(x - 1, 27, 18, 2, shade(bc[i], -0.3));
     p.r(x + 6, 33, 4, 1, '#ffffff'); p.r(x + 5, 34, 1, 3, '#ffffff'); p.r(x + 10, 34, 1, 3, '#ffffff'); p.r(x + 6, 37, 4, 1, '#ffffff');
   }
   // 積まれたベール
   p.box(60, 12, 14, 9, '#8a7a5a'); p.box(76, 12, 14, 9, '#5a7a9a'); p.box(68, 3 + 6, 0, 0, '#000');
   p.r(60, 21, 30, 1, '#2a2a22');
-  const pos = [54, 100, 120, 186];
+  const pos = [54, 100, 120, bin0 - 6];
   for (let i = 0; i < Math.min(v.n, 4); i++) hatFig(p, pos[i], fy - 1, '#f0d020', i % 2);
 };
 
@@ -660,13 +666,12 @@ export function floorTile(col) {
 // ---- 移動手段 ----
 function stairsArt(p, v) {
   const W = p.w, H = p.h, fy = H - 3;
-  p.r(0, 0, W, fy, '#c6c0b0'); p.r(0, 0, W, 1, '#9a9484');
-  p.r(0, fy, W, 1, '#8a8478'); p.r(0, fy + 1, W, 1, SLAB); p.r(0, fy + 2, W, 1, '#000');
-  p.r(0, 0, 1, H, '#000');
+  // 背景は透明（後ろの施設やフロアが見える）
+  p.r(2, fy - 1, 4, 1, '#4a463e');
   const steps = 7, rise = fy / steps, run = (W - 8) / steps;
   for (let i = 0; i < steps; i++) {
     const x = Math.round(4 + i * run), y = Math.round(fy - (i + 1) * rise);
-    p.r(x, y, Math.ceil(run), fy - y, '#9a948a');
+    p.r(x, y, Math.ceil(run), fy - y, '#9a948a'); p.r(x, y + 2, Math.ceil(run), fy - y - 2, '#8a847a');
     p.r(x, y, Math.ceil(run), 1, '#4a463e');
     p.r(x, y + 1, 1, Math.max(1, Math.round(rise) - 1), '#4a463e');
   }
@@ -678,16 +683,13 @@ function stairsArt(p, v) {
 }
 function escalatorArt(p, v) {
   const W = p.w, H = p.h, fy = H - 3;
-  p.r(0, 0, W, fy, '#d4d0c4'); p.r(0, 0, W, 1, '#a8a498');
-  p.r(0, fy, W, 1, '#8a8478'); p.r(0, fy + 1, W, 1, SLAB); p.r(0, fy + 2, W, 1, '#000');
-  p.r(0, 0, 1, H, '#000');
   const x0 = 4, x1 = W - 4;
   const g = p.g;
   for (let x = x0; x < x1; x++) {
     const t = (x - x0) / (x1 - x0);
     const y = Math.round(fy - 2 - t * (fy - 1));
     // ガラスの欄干
-    p.r(x, y - 6, 1, 5, '#b8dcec');
+    p.r(x, y - 6, 1, 5, 'rgba(184,220,236,0.6)');
     p.p(x, y - 7, '#202020');
     p.p(x, y, ((x + v.frame) % 4 === 0) ? '#3a3a3a' : '#6a6a70');
     p.r(x, y + 1, 1, 4, '#a8b0b8');
@@ -709,6 +711,95 @@ export function shaftSeg(w, express, stop, top, bottom) {
   p.r(0, 0, 1, 24, '#000'); p.r(W - 1, 0, 1, 24, '#000');
   return p.c;
 }
+// エレベーターの機械室（hi+1 階）とピット（lo-1 階）
+export function machineRoom(w, express) {
+  const W = w * TILE_W;
+  const p = new Painter(W, FLOOR_H);
+  const wall = express ? '#b4a8a0' : '#b0aca2';
+  p.r(0, 6, W, 18, wall);
+  p.r(0, 3, W, 3, '#8a867c'); p.r(0, 2, W, 1, '#000');                 // 屋根
+  p.r(2, 1, 2, 1, '#000'); p.r(W - 4, 1, 2, 1, '#000');                // 換気筒
+  p.r(1, 6, 1, 18, shade(wall, 0.2)); p.r(W - 2, 6, 1, 18, shade(wall, -0.25));
+  p.box(3, 9, W - 6, 12, '#4a4c54');                                     // 室内
+  const cx = W >> 1;
+  p.disc(cx - 3, 15, 3, '#2a2a2e'); p.disc(cx - 3, 15, 2, '#8a8e96'); p.p(cx - 3, 15, '#2a2a2e'); // 巻上機の綱車
+  p.box(cx + 1, 13, 6, 6, express ? '#b84a3a' : '#3a7ab0');            // モーター
+  p.r(cx + 2, 14, 4, 1, shade(express ? '#b84a3a' : '#3a7ab0', 0.3));
+  p.r(cx - 4, 19, 12, 2, '#5a5a62');
+  p.r(4, 10, 3, 2, '#e0c040'); p.p(5, 12, '#40e070');                  // 制御盤
+  p.r((W >> 1) - 3, 21, 1, 3, '#202024'); p.r((W >> 1) + 2, 21, 1, 3, '#202024'); // ロープ
+  p.r(0, 2, 1, 22, '#000'); p.r(W - 1, 2, 1, 22, '#000'); p.r(0, 23, W, 1, '#000');
+  return p.c;
+}
+export function pitSprite(w, express) {
+  const W = w * TILE_W;
+  const p = new Painter(W, FLOOR_H);
+  p.r(0, 0, W, 20, '#5a5650');
+  p.r(2, 0, W - 4, 17, express ? '#2e2834' : '#34343a');
+  p.r(2, 0, 1, 17, '#6c6c78'); p.r(W - 3, 0, 1, 17, '#6c6c78');
+  for (const bx of [5, W - 9]) {                                         // 緩衝器（ばね）
+    p.r(bx, 9, 4, 1, '#c8c8c8');
+    for (let y = 10; y < 16; y += 2) { p.r(bx, y, 4, 1, '#e0c020'); p.r(bx + 1, y + 1, 2, 1, '#202020'); }
+    p.r(bx - 1, 16, 6, 1, '#7a7a80');
+  }
+  for (let y = 2; y < 16; y += 3) p.r((W >> 1) - 1, y, 3, 1, '#8a8478'); // はしご
+  p.r((W >> 1) - 1, 1, 1, 15, '#6a6458'); p.r((W >> 1) + 1, 1, 1, 15, '#6a6458');
+  p.r(0, 17, W, 3, '#6a665e'); p.r(0, 20, W, 1, '#000');
+  p.r(0, 0, 1, 21, '#000'); p.r(W - 1, 0, 1, 21, '#000');
+  return p.c;
+}
+
+// 破壊された施設: 'bomb' = 瓦礫、'fire' = 焼け跡
+function ruinArt(p, kind, v) {
+  const W = p.w, H = p.h, fy = H - 3;
+  const r = rng(7001 + (v.seed | 0) * 131 + W);
+  const fire = kind === 'fire';
+  p.r(0, 0, W, fy, fire ? '#2a2420' : '#6e6a62');
+  // 壁のしみ・ひび
+  for (let i = 0; i < W / 3; i++) {
+    const x = (r() * W) | 0, y = (r() * fy) | 0;
+    p.r(x, y, 1 + ((r() * 3) | 0), 1, fire ? (r() < 0.5 ? '#141210' : '#3a3028') : (r() < 0.5 ? '#5a564e' : '#8a867c'));
+  }
+  if (fire) {
+    // すすの筋と焦げた骨組み
+    for (let x = 4; x < W - 2; x += 6 + ((r() * 6) | 0)) {
+      const h = 6 + ((r() * (fy - 8)) | 0);
+      p.r(x, fy - h, 2, h, '#0e0c0a'); p.p(x + 2, fy - h + 2, '#4a3020');
+    }
+    for (let i = 0; i < W / 10; i++) p.r((r() * (W - 4)) | 0, (r() * 6) | 0, 3, 1, '#000');
+    // 焦げた家具の残骸
+    for (let x = 6; x < W - 10; x += 14 + ((r() * 10) | 0)) {
+      p.r(x, fy - 5, 8, 1, '#1a1410'); p.r(x + 1, fy - 4, 1, 4, '#1a1410'); p.r(x + 6, fy - 4, 1, 4, '#1a1410');
+      if (r() < 0.5) p.r(x + 2, fy - 7, 3, 2, '#3a2a1a');
+    }
+    // 灰と残り火
+    for (let x = 1; x < W - 1; x++) { const h = (r() * 2) | 0; if (h) p.r(x, fy - h, 1, h, r() < 0.15 ? '#c84a10' : '#4a4440'); }
+  } else {
+    // 崩れた天井
+    for (let x = 0; x < W; x += 4 + ((r() * 6) | 0)) {
+      const len = 2 + ((r() * 7) | 0);
+      p.r(x, 0, 3 + ((r() * 4) | 0), len, '#8a867c'); p.r(x, len, 3, 1, '#4a4640');
+    }
+    // むき出しの鉄筋
+    for (let x = 3; x < W - 3; x += 9 + ((r() * 6) | 0)) p.line(x, 1, x + ((r() * 6) | 0) - 3, 4 + ((r() * 7) | 0), '#7a3a20');
+    // 瓦礫の山
+    for (let x = 1; x < W - 1; x++) {
+      const h = Math.round(3 + Math.sin(x * 0.35 + r()) * 2 + r() * 4 + (Math.sin(x * 0.07) + 1) * 3);
+      p.r(x, fy - h, 1, h, (x + h) % 3 ? '#9a958a' : '#7a766c');
+      p.p(x, fy - h, '#b8b4a8');
+    }
+    for (let i = 0; i < W / 4; i++) {
+      const x = (r() * (W - 4)) | 0, y = fy - 2 - ((r() * 8) | 0);
+      p.box(x, y, 3 + ((r() * 3) | 0), 2 + ((r() * 2) | 0), r() < 0.3 ? '#b0a090' : '#8a867c', '#3a3832');
+    }
+    p.r(W >> 1, 2, 2, 2, '#e8e0a0');
+  }
+  p.r(0, fy, W, 1, fire ? '#1a1612' : '#5a564e'); p.r(0, fy + 1, W, 1, SLAB); p.r(0, fy + 2, W, 1, '#000');
+  p.r(0, 0, 1, H, '#000'); p.r(W - 1, 0, 1, fy, '#000');
+  // 立入禁止テープ
+  for (let x = 1; x < W - 1; x++) p.p(x, fy - 12 + ((x >> 3) & 1), ((x >> 1) & 1) ? '#f0d020' : '#202020');
+}
+
 export const CAR_H = 20;
 export function carSprite(w, express, n, open) {
   const W = w * TILE_W - 4;
@@ -755,7 +846,9 @@ export function makeFacilitySprite(type, wTiles, hFloors, v) {
   const p = new Painter(W, H + top);
   p.oy = top;
   try {
-    if (type === 'stairs') stairsArt(p, v);
+    if (type === 'ruinBomb' || type === 'ruinFire') ruinArt(p, type === 'ruinFire' ? 'fire' : 'bomb', v);
+    else if (hasVariantArt(type)) drawVariant(p, type, v);
+    else if (type === 'stairs') stairsArt(p, v);
     else if (type === 'escalator') escalatorArt(p, v);
     else if (type === 'metroFg') metroFg(p, v);
     else if (DRAW[type]) DRAW[type](p, v);
@@ -784,5 +877,107 @@ export function treeSprite(alt) {
   p.disc(7, cy, rad, g[0]);
   for (let i = 0; i < 18; i++) p.p(2 + ((r() * 11) | 0), 3 + ((r() * 11) | 0), g[1 + (i % 2)]);
   p.disc(5, cy - 2, 2, g[1]);
+  return p.c;
+}
+
+// ---- 非常階段（外壁に付ける飾り）。左側用、幅 18・高さ 24。parity で登る向きが交互になる ----
+export const ESC_W = 18;
+export function fireEscapeSprite(parity) {
+  const p = new Painter(ESC_W, FLOOR_H);
+  const steel = '#8a9098', dark = '#3a3e46', rail = '#4a5058', hi = '#b8bec6';
+  // 支柱と壁への腕木
+  p.r(0, 0, 1, 24, rail);
+  p.r(16, 20, 2, 1, dark); p.r(16, 2, 2, 1, dark);
+  // 踊り場（床の高さ）
+  p.r(0, 21, 18, 1, hi); p.r(0, 22, 18, 1, steel); p.r(0, 23, 18, 1, dark);
+  // 階段（踊り場の片側から上の踊り場の反対側へ）
+  const a = parity ? 15 : 2, b = parity ? 2 : 15, dir = b > a ? 1 : -1;
+  const n = Math.abs(b - a);
+  for (let i = 0; i <= n; i++) {
+    const x = a + dir * i;
+    const y = Math.round(20 - (i / n) * 21);
+    p.r(x, y, 1, 1, hi); p.r(x, y + 1, 1, 1, steel); p.r(x, y + 2, 1, 1, dark);
+    p.p(x, y - 6, rail);                    // 手すり
+    if (i % 4 === 0) p.r(x, y - 6, 1, 6, rail);
+  }
+  // 踊り場の手すり（階段の上がり口と反対側）
+  const lx = parity ? 0 : 9;
+  p.r(lx, 15, 9, 1, rail); p.r(lx, 15, 1, 6, rail); p.r(lx + 8, 15, 1, 6, rail);
+  p.r(lx + 4, 16, 1, 5, rail);
+  return p.c;
+}
+// 最上階の上（屋上の高さ）の踊り場
+export function fireEscapeTop() {
+  const p = new Painter(ESC_W, 9);
+  p.r(0, 0, 18, 1, '#4a5058'); p.r(0, 0, 1, 7, '#4a5058'); p.r(8, 0, 1, 6, '#4a5058');
+  p.r(0, 6, 18, 1, '#b8bec6'); p.r(0, 7, 18, 1, '#8a9098'); p.r(0, 8, 18, 1, '#3a3e46');
+  return p.c;
+}
+
+// ---- ごみ収集室（w 8 = 64px）。v.n = ごみの量（0..8、9 = あふれ）、v.open = 回収作業中 ----
+DRAW.garbage = (p, v) => {
+  const W = p.w;
+  const fy = shell(p, '#b8b8a8', '#6a6a62', {});
+  p.r(1, 13, W - 2, 8, '#9a9a8c'); for (let x = 4; x < W; x += 6) p.r(x, 13, 1, 8, '#8a8a7e'); p.r(1, 13, W - 2, 1, '#7a7a6e');
+  // 換気扇と注意書き
+  p.disc(56, 5, 3, '#4a4a4a'); p.disc(56, 5, 2, '#9a9a9a'); p.p(56, 5, '#4a4a4a');
+  p.box(3, 2, 14, 6, '#f0e070'); p.r(5, 4, 10, 1, '#3a3a3a'); p.r(5, 6, 6, 1, '#3a3a3a');
+  const n = v.n | 0, over = n >= 9;
+  // 大型ごみ箱（コンテナ）×2
+  for (const bx of [3, 25]) {
+    p.box(bx, 11, 20, 10, '#2f7a46'); p.r(bx + 1, 12, 18, 1, '#4a9a60');
+    p.r(bx + 2, 15, 16, 1, '#26603a'); p.r(bx + 3, 21 - 1, 2, 1, INK); p.r(bx + 15, 20, 2, 1, INK);
+    // ふた（あふれると開く）
+    if (over || n > 6) { p.line(bx, 10, bx + 6, 4, '#1f5a32'); p.line(bx + 1, 10, bx + 7, 4, '#2f7a46'); }
+    else p.r(bx - 1, 10, 22, 2, '#1f5a32');
+  }
+  // 資源ごみの箱
+  p.box(48, 14, 6, 7, '#3a6ad0'); p.box(55, 14, 6, 7, '#e0b020'); p.r(49, 13, 4, 1, '#2a4a9a'); p.r(56, 13, 4, 1, '#a07a10');
+  // ごみ袋（量に応じて山になる）
+  const bags = [[8, 12], [14, 11], [30, 12], [36, 11], [11, 9], [33, 9], [44, 20], [40, 20], [20, 20], [26, 20], [6, 20], [46, 18], [16, 7], [30, 7], [3, 20], [36, 20]];
+  const shown = Math.min(bags.length, over ? bags.length : Math.round(n * 1.5));
+  for (let i = 0; i < shown; i++) {
+    const [bx, by] = bags[i];
+    const c = i % 3 === 0 ? '#e8e8e0' : i % 3 === 1 ? '#2a2a2e' : '#c8d8e8';
+    p.r(bx + 1, by - 4, 5, 5, '#000'); p.r(bx, by - 3, 7, 3, '#000');
+    p.r(bx + 1, by - 3, 5, 3, c); p.r(bx + 2, by - 4, 3, 1, c); p.p(bx + 2, by - 3, shade(c, 0.35));
+    p.r(bx + 3, by - 6, 1, 2, '#000'); p.p(bx + 2, by - 6, '#000'); p.p(bx + 4, by - 6, '#000');
+  }
+  if (over) {
+    // あふれたごみ・におい
+    for (const [x, c] of [[22, '#c84a20'], [28, '#e8d040'], [43, '#7a5a3a'], [18, '#ffffff']]) p.r(x, 20, 2, 1, c);
+    for (let i = 0; i < 3; i++) { const x = 12 + i * 14; p.p(x, 4, '#6a8a3a'); p.p(x + 1, 3, '#6a8a3a'); p.p(x, 2, '#6a8a3a'); }
+  }
+  // 回収の作業員（オレンジのベスト）
+  if (v.open) {
+    standFig(p, 44, fy - 1, FIG, 0, 0);
+    p.r(44, fy - 9, 3, 1, '#f0d020'); p.r(44, fy - 6, 3, 3, '#f08020'); p.r(45, fy - 5, 1, 1, '#e8e8a0');
+    p.r(40, fy - 6, 3, 3, '#2a2a2e'); p.p(41, fy - 7, '#000');
+  }
+};
+
+// ---- 工事中の骨組みタイル（16x24）とクレーン ----
+export function frameTile() {
+  const p = new Painter(16, FLOOR_H);
+  p.r(0, 0, 16, 24, '#7e786c');
+  for (let i = 0; i < 9; i++) p.p((i * 7) % 16, (i * 11) % 22, '#8e887c');
+  p.r(0, 0, 2, 24, '#4a4640'); p.r(0, 21, 16, 3, '#5a564e'); p.r(0, 21, 16, 1, '#3a3630'); p.r(0, 10, 16, 1, '#5a564e');
+  p.line(2, 20, 15, 11, '#66605a'); p.line(2, 10, 15, 1, '#66605a');
+  p.p(1, 4, '#c87a30'); p.p(1, 15, '#c87a30');
+  return p.c;
+}
+export function craneSprite() {
+  const p = new Painter(64, 44);
+  const y = '#e8c020', k = '#000';
+  // マスト（ラチス）
+  p.r(49, 6, 1, 38, k); p.r(54, 6, 1, 38, k); p.r(50, 6, 4, 38, y);
+  for (let yy = 8; yy < 44; yy += 5) { p.line(50, yy, 53, yy + 4, '#8a6a10'); p.r(50, yy, 4, 1, '#c8a010'); }
+  // 運転室
+  p.box(46, 6, 6, 5, '#e8c020'); p.r(47, 7, 3, 2, '#9ad8f0');
+  // ジブ（腕）とカウンタージブ
+  p.r(2, 3, 62, 1, k); p.r(2, 6, 62, 1, k); p.r(2, 4, 62, 2, y);
+  for (let x = 4; x < 62; x += 4) p.p(x, 4 + ((x >> 2) & 1), '#8a6a10');
+  p.box(57, 6, 6, 5, '#7a7a7a');
+  p.r(51, 0, 2, 3, k); p.line(51, 0, 4, 3, '#3a3a3a'); p.line(52, 0, 62, 3, '#3a3a3a');
   return p.c;
 }

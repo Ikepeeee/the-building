@@ -10,6 +10,13 @@ import { Dialogs } from './dialogs.js';
 import { Sound } from './audio.js';
 import { saveGame, loadCandidates, peekSave, storage } from './save.js';
 import { Guide } from './guide.js';
+import { CopyTool } from './copytool.js';
+import { ElevatorResize } from './resize.js';
+import { Minimap } from './minimap.js';
+import { Ambience } from './ambience.js';
+import { TRANSPORT_TYPES } from '../sim/constants.js';
+
+const TRANSPORT_SET = new Set(TRANSPORT_TYPES);
 
 const MAX_FRAME_SEC = 0.1; // 1フレームで進める実時間の上限（スパイク対策）
 const isTouchDevice = () => matchMedia('(hover: none) and (pointer: coarse)').matches;
@@ -52,6 +59,13 @@ export class App {
     this.panel = new Panel(this);
     this.input = new Input(this);
     this.guide = new Guide(this);
+    this.copy = new CopyTool(this);
+    this.resize = new ElevatorResize(this);
+    this.minimap = new Minimap(this);
+    this.ambience = new Ambience(this.sound);
+    this.hoverGhosts = null;
+    this.ambTimer = 0;
+    this.nightFF = false;
     this.simFailed = false; // sim.step が例外を出したら自動保存を止める
 
     this.setupConfirmBar();
@@ -71,8 +85,8 @@ export class App {
   // ---------------- sim の接続 ----------------
   attachSim(sim) {
     const mine = (fn) => (d) => { if (sim === this.sim) fn(d || {}); };
-    sim.on('message', mine((m) => this.toasts && this.toasts.show(m)));
-    sim.on('prompt', mine((p) => { if (!this.restoring) this.dialogs.enqueue({ type: 'prompt', data: p }); }));
+    sim.on('message', mine((m) => { if (m.kind === 'event' && !this.restoring) this.calmSpeed(); if (this.toasts) this.toasts.show(m); }));
+    sim.on('prompt', mine((p) => { if (!this.restoring) { this.calmSpeed(); this.dialogs.enqueue({ type: 'prompt', data: p }); } }));
     sim.on('star', mine((s) => { if (!this.restoring && this.started) this.dialogs.enqueue({ type: 'star', star: s.star }); }));
     sim.on('tower', mine(() => { if (!this.restoring && this.started) this.dialogs.enqueue({ type: 'tower' }); }));
     sim.on('sound', mine((s) => { this.soundFlag = true; if (!this.restoring) this.sound.play(s.name); }));
@@ -106,7 +120,30 @@ export class App {
 
   effectiveSpeed() {
     if (this.blocked() || document.hidden) return 0;
-    return SPEEDS[this.speedIdx] || 0;
+    const base = SPEEDS[this.speedIdx] || 0;
+    return base * (this.nightFF ? 4 : 1);
+  }
+
+  /** 事件が起きているか（夜の早送りを止める） */
+  eventActive() {
+    const s = this.sim;
+    if (!s) return false;
+    return !!(s.bomb || s.heli || s.fire || (s.fires && s.fires.length) || (s.vip && s.vip.active) || this.dialogs.count);
+  }
+
+  /** 深夜（0〜6時）で事件中でなければ、さらに ×4 */
+  updateNightFF() {
+    const s = this.sim;
+    this.nightFF = !!(this.started && s && s.hour < 6 && this.speedIdx > 0 && !this.eventActive());
+  }
+
+  /** 事件のときは等速に戻す */
+  calmSpeed() {
+    if (this.speedIdx > 1) {
+      this.setSpeed(1);
+      this.toasts.show({ text: '事件のため速度を等速に戻しました', kind: 'info' });
+    }
+    this.nightFF = false;
   }
 
   setSpeed(i) {
@@ -146,6 +183,7 @@ export class App {
 
     this.input.update(dt);
     this.cam.update(now);
+    this.updateNightFF();
 
     const spd = this.effectiveSpeed();
     if (spd > 0) {
@@ -171,11 +209,18 @@ export class App {
       this.recheckGhosts();
       this.guide.update();
     }
+    if (now - this.ambTimer > 120) {
+      this.ambTimer = now;
+      try { this.ambience.update(this); } catch (e) { this.reportError(e, 'ambience'); }
+    }
+    this.resize.frame(dt);
+    if (this.started) this.minimap.draw(now);
 
     try {
       this.renderer.render({
         cam: this.cam.view,
         ghost: this.started ? this.dragGhost || (this.pending && this.pending.ghost) || this.hoverGhost : null,
+        ghosts: this.started ? (this.pending && this.pending.ghosts) || (this.tool === 'copy' && this.input.lastType === 'mouse' ? this.hoverGhosts : null) : null,
         selectedId: this.selectedId,
         hover: this.started && this.input.lastType === 'mouse' ? this.hover : null,
         nowMs: now,
@@ -248,7 +293,7 @@ export class App {
 
   // ---------------- ツール ----------------
   setTool(key) {
-    if (key !== 'inspect' && key !== 'bulldoze') {
+    if (key !== 'inspect' && key !== 'bulldoze' && key !== 'copy') {
       const t = TYPES[key];
       if (!t) return;
       if (this.sim && this.sim.star < t.star) {
@@ -260,9 +305,12 @@ export class App {
     this.tool = key;
     this.pending = null;
     this.hoverGhost = null;
+    this.hoverGhosts = null;
     this.dragGhost = null;
+    this.copy.reset();
+    this.resize.cancel();
     if (key !== 'inspect') {
-      this.toolbar.reveal(key);
+      if (TYPES[key]) this.toolbar.reveal(key);
       if (isTouchDevice() || this.root.clientWidth < 760) this.panel.close();
     }
     this.toolbar.update(true);
@@ -277,12 +325,16 @@ export class App {
     const key = this.tool;
     let s;
     if (key === 'inspect') s = touch ? 'タップで詳細／1本指でスクロール／2本指でズーム' : '施設をクリックで詳細／ドラッグ・ホイールでスクロール／Ctrl+ホイールでズーム';
-    else if (key === 'bulldoze') s = touch ? '撤去: 横になぞって範囲を選び ✓ で確定（返金なし）' : '撤去: 横にドラッグした範囲を撤去（施設があれば確認します。返金なし）';
+    else if (key === 'copy') {
+      s = this.copy.phase === 'paste'
+        ? (touch ? 'コピー: タップで貼り付け位置を決め ✓ で建設（✕で範囲を選び直す）' : 'コピー: 貼り付けたい場所でクリック（続けて何度でも）。Esc で範囲を選び直す')
+        : (touch ? 'コピー: 1本指でなぞってコピーする範囲を選ぶ' : 'コピー: ドラッグでコピーする範囲を選ぶ（フロア・施設・移動手段をまとめて複製）');
+    } else if (key === 'bulldoze') s = touch ? '撤去: 横になぞって範囲を選び ✓ で確定（返金なし）' : '撤去: 横にドラッグした範囲を撤去（施設があれば確認します。返金なし）';
     else {
       const t = TYPES[key];
       const how = t.drag === 'h' ? (touch ? '横になぞって設置' : '横にドラッグして設置')
         : t.drag === 'v' ? (touch ? '縦になぞって範囲を決める' : '縦にドラッグして範囲を決める')
-          : touch ? '指の位置が中心。タップで仮置き→再タップか✓で確定' : 'クリックで設置（カーソルの位置が施設の中心）';
+          : touch ? '指の位置が中心（隣にぴったり寄せます）。タップで仮置き→再タップか✓で確定' : 'クリックで設置（カーソルが中心。隣の施設にぴったり寄せます／Shift で寄せない）';
       s = touch ? `${t.name}: ${how}。${t.desc || ''}` : `${t.name}: ${t.desc || ''}｜${how}`;
     }
     this.toolbar.setHint(s);
@@ -299,7 +351,50 @@ export class App {
     const w = t.w || 1;
     let f = t.only === 'basement' ? c.f - (h - 1) : c.f;
     f = Math.max(MIN_F, Math.min(MAX_F - h + 1, f));
-    return { f, x: Math.max(0, Math.min(W - w, c.x - Math.floor(w / 2))) };
+    let x = Math.max(0, Math.min(W - w, c.x - Math.floor(w / 2)));
+    if (!this.noSnap) x = this.snapX(tool, f, x, w, h);
+    return { f, x };
+  }
+
+  /**
+   * すき間なく並べやすいように x を寄せる（2マス以内のときだけ）。Shift を押している間は寄せない。
+   * 優先: 隣の施設にぴったり付く位置 → 施設の幅の倍数（W は全施設の幅で割り切れる）
+   */
+  snapX(tool, f, x, w, h) {
+    const sim = this.sim;
+    if (!sim || !sim.grid || TRANSPORT_SET.has(tool)) return x;
+    const rows = [];
+    for (let k = 0; k < h; k++) if (sim.grid[f + k]) rows.push(sim.grid[f + k]);
+    if (!rows.length) return x;
+    const free = (cx) => {
+      if (cx < 0 || cx + w > W) return false;
+      for (const row of rows) for (let i = cx; i < cx + w; i++) if (row[i] > 0) return false;
+      return true;
+    };
+    const R = 2;
+    const cands = [];
+    for (const row of rows) {
+      // 左隣の施設の右端、右隣の施設の左端
+      for (let i = Math.max(0, x - R - 1); i <= Math.min(W - 1, x + R + w); i++) {
+        const v = row[i];
+        if (v > 0 && (i + 1 >= W || row[i + 1] !== v)) cands.push({ x: i + 1, pri: 0 });
+        if (v > 0 && (i === 0 || row[i - 1] !== v)) cands.push({ x: i - w, pri: 0 });
+      }
+    }
+    cands.push({ x: Math.round(x / w) * w, pri: 1 });
+    let best = null;
+    for (const c of cands) {
+      const d = Math.abs(c.x - x);
+      if (d === 0 && c.pri === 0 && free(c.x)) return x;
+      if (d > R || !free(c.x)) continue;
+      if (!best || c.pri < best.pri || (c.pri === best.pri && d < best.d)) best = { ...c, d };
+    }
+    return best ? best.x : x;
+  }
+
+  /** 今のツールがドラッグで操作するものか */
+  toolIsDrag(tool = this.tool) {
+    return tool === 'copy' ? this.copy.isDrag : isDragTool(tool);
   }
 
   paramsFor(tool, a, b) {
@@ -310,20 +405,29 @@ export class App {
     return this.clickParams(tool, b);
   }
 
-  evalGhost(tool, p) {
+  evalGhost(tool, p, type) {
     let r = null;
     try { r = this.sim.check(tool, p); } catch (e) { this.reportError(e, 'sim.check'); }
     if (!r || !r.ghost) return null;
     let label;
     if (r.ok) label = tool === 'bulldoze' ? (r.cost ? `撤去 ${fmtMoney(r.cost)}` : '撤去') : fmtMoney(r.cost || 0);
     else label = r.reason || '置けません';
-    return { ...r.ghost, type: tool === 'bulldoze' ? undefined : tool, ok: !!r.ok, label, res: r };
+    return { ...r.ghost, type: type || (tool === 'bulldoze' ? undefined : tool), ok: !!r.ok, label, res: r };
   }
 
   /** マウスのホバー（PC のゴースト表示） */
   hoverAt(cell, dragging) {
     this.hover = cell ? this.clampCell(cell) : null;
     if (dragging) return;
+    if (this.tool === 'inspect' && cell && this.started) {
+      // シャフトの端の上では伸縮カーソル
+      this.canvas.classList.toggle('c-resize', !!this.resize.hitEnd(this.clampCell(cell)));
+    } else this.canvas.classList.remove('c-resize');
+    if (this.tool === 'copy') {
+      this.hoverGhost = null;
+      this.hoverGhosts = cell && this.started && this.copy.phase === 'paste' ? this.copy.preview(this.clampCell(cell)) : null;
+      return;
+    }
     if (!cell || this.tool === 'inspect' || !this.started) { this.hoverGhost = null; return; }
     const p = isDragTool(this.tool) ? this.paramsFor(this.tool, cell, cell) : this.clickParams(this.tool, cell);
     this.hoverGhost = this.evalGhost(this.tool, p);
@@ -332,15 +436,22 @@ export class App {
 
   recheckGhosts() {
     if (!this.started) return;
-    if (this.pending) {
+    if (this.pending && this.pending.tool === 'copy') {
+      const gs = this.copy.preview(this.pending.cell, true);
+      this.pending.ghosts = gs;
+      this.pending.ghost = this.copyPendingGhost();
+      this.updateConfirmBar();
+    } else if (this.pending) {
       this.pending.ghost = this.evalGhost(this.pending.tool, this.pending.p);
       this.updateConfirmBar();
     }
+    if (this.tool === 'copy' && this.hover && this.copy.phase === 'paste' && this.input.lastType === 'mouse') this.hoverGhosts = this.copy.preview(this.hover, true);
     if (this.hoverGhost && this.hoverParams && this.tool !== 'inspect') this.hoverGhost = this.evalGhost(this.tool, this.hoverParams);
   }
 
   dragUpdate(d) {
     this.hoverGhost = null;
+    if (d.tool === 'copy') { this.dragGhost = this.copy.selectGhost(this.clampCell(d.start), this.clampCell(d.cur)); return; }
     this.dragGhost = this.evalGhost(d.tool, this.paramsFor(d.tool, d.start, d.cur));
   }
 
@@ -350,6 +461,20 @@ export class App {
 
   dragEnd(d) {
     this.dragGhost = null;
+    if (d.tool === 'copy') {
+      if (this.copy.finishSelect(this.clampCell(d.start), this.clampCell(d.cur))) {
+        this.updateHint();
+        if (d.touch) {
+          // スマホ: まずは元の範囲のすぐ右に仮置きして、見えるようにする
+          const src = this.copy.src;
+          const cell = { f: src.f1, x: Math.min(W - 1, src.x2 + 1 + Math.floor(this.copy.bp.w / 2)) };
+          this.setCopyPending(cell);
+          this.cam.focus(src.f1 + Math.floor(this.copy.bp.h / 2), cell.x, this.cam.zoom);
+        } else if (this.hover) this.hoverAt(this.hover);
+        this.toasts.show({ text: d.touch ? 'コピーしました。貼り付けたい場所をタップしてください' : 'コピーしました。貼り付けたい場所でクリックしてください', kind: 'info' });
+      }
+      return;
+    }
     const p = this.paramsFor(d.tool, d.start, d.cur);
     if (d.touch) {
       const same = d.start.f === d.cur.f && d.start.x === d.cur.x;
@@ -365,7 +490,8 @@ export class App {
     const ids = new Set();
     const row = this.sim.grid && this.sim.grid[p.f];
     const a = Math.min(p.x, p.x2 ?? p.x), b = Math.max(p.x, p.x2 ?? p.x);
-    if (row) for (let x = Math.max(0, a); x <= Math.min(W - 1, b); x++) if (row[x] > 0) ids.add(row[x]);
+    const trow = this.sim.tgrid && this.sim.tgrid[p.f];
+    if (row) for (let x = Math.max(0, a); x <= Math.min(W - 1, b); x++) { if (row[x] > 0) ids.add(row[x]); if (trow && trow[x] > 0) ids.add(trow[x]); }
     if (ids.size) {
       const names = [...ids].map((id) => TYPES[this.sim.objs.get(id)?.type]?.name).filter(Boolean);
       const uniq = [...new Set(names)].slice(0, 4).join('・');
@@ -386,9 +512,17 @@ export class App {
     if (this.tool === 'inspect') {
       const c = this.clampCell(cell);
       let o = null;
-      try { o = cell.f >= MIN_F && cell.f <= MAX_F && cell.x >= 0 && cell.x < W ? this.sim.objAt(c.f, c.x) : null; } catch (e) { this.reportError(e, 'sim.objAt'); }
+      try { o = cell.f >= MIN_F && cell.f <= MAX_F && cell.x >= 0 && cell.x < W ? this.pickAt(c.f, c.x) : null; } catch (e) { this.reportError(e, 'sim.objAt'); }
       if (o) this.select(o.id);
       else { this.panel.close(); }
+      return;
+    }
+    if (this.tool === 'copy') {
+      if (this.copy.phase !== 'paste') return;
+      const c = this.clampCell(cell);
+      if (!touch) { this.copy.preview(c, true); if (this.copy.build()) this.hoverGhosts = this.copy.preview(c, true); return; }
+      if (this.pending && this.pending.tool === 'copy' && this.inGhost(this.pending.ghost, c)) { this.confirmPending(); return; }
+      this.setCopyPending(c);
       return;
     }
     if (isDragTool(this.tool)) return;
@@ -396,6 +530,30 @@ export class App {
     if (!touch) { this.doBuild(this.tool, p); return; }
     if (this.pending && this.pending.tool === this.tool && this.inGhost(this.pending.ghost, cell)) { this.confirmPending(); return; }
     this.setPending(this.tool, p);
+  }
+
+  /** 移動手段を優先して拾う（v2: 移動手段は施設と重なる） */
+  pickAt(f, x) {
+    const s = this.sim;
+    let o = null;
+    if (s.transportAt) o = s.transportAt(f, x);
+    return o || s.objAt(f, x);
+  }
+
+  setCopyPending(cell) {
+    const gs = this.copy.preview(cell, true);
+    this.pending = { tool: 'copy', cell, ghosts: gs, ghost: null };
+    this.pending.ghost = this.copyPendingGhost();
+    this.sound.play(this.copy.res && this.copy.res.ok ? 'click' : 'error');
+    this.updateConfirmBar();
+  }
+
+  /** コピーの仮置き: 外枠（判定・確定バー用。描画は ghosts） */
+  copyPendingGhost() {
+    const b = this.copy.bbox();
+    if (!b) return null;
+    const r = this.copy.res || {};
+    return { ...b, ok: !!r.ok, label: this.copy.label(), outline: true };
   }
 
   setPending(tool, p) {
@@ -409,12 +567,39 @@ export class App {
   confirmPending() {
     const pd = this.pending;
     if (!pd) return;
+    if (pd.tool === 'copy') {
+      this.copy.preview(pd.cell, true);
+      if (this.copy.build()) this.setCopyPending(pd.cell);
+      return;
+    }
     this.doBuild(pd.tool, pd.p);
   }
 
   cancelPending() {
+    // コピーの貼り付け中に「やめる」→ 範囲を選び直す
+    if (this.pending && this.pending.tool === 'copy') { this.copy.reset(); this.updateHint(); }
     this.pending = null;
     this.updateConfirmBar();
+  }
+
+  /** 全画面表示の切り替え */
+  toggleFullscreen() {
+    const d = document, el = d.documentElement;
+    try {
+      if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen).call(d);
+      else (el.requestFullscreen || el.webkitRequestFullscreen).call(el, { navigationUI: 'hide' });
+    } catch {
+      this.toasts.show({ text: 'このブラウザでは全画面表示にできません（ホーム画面に追加すると全画面で遊べます）', kind: 'info' });
+    }
+  }
+
+  /** 建物の中心（ロビー階の構造の中央。なければ世界の中央） */
+  buildingCenterX() {
+    const row = this.sim && this.sim.grid && this.sim.grid[0];
+    if (!row) return null;
+    let a = -1, b = -1;
+    for (let x = 0; x < row.length; x++) if (row[x]) { if (a < 0) a = x; b = x; }
+    return a < 0 ? null : (a + b + 1) / 2;
   }
 
   doBuild(tool, p) {
@@ -461,7 +646,7 @@ export class App {
     if (!show) { cb.el.hidden = true; return; }
     cb.el.hidden = false;
     const t = TYPES[pd.tool];
-    cb.name.textContent = pd.tool === 'bulldoze' ? '撤去' : t ? t.name : pd.tool;
+    cb.name.textContent = pd.tool === 'bulldoze' ? '撤去' : pd.tool === 'copy' ? 'コピー' : t ? t.name : pd.tool;
     cb.cost.textContent = pd.ghost.label || '';
     cb.el.classList.toggle('bad', !pd.ghost.ok);
     cb.ok.disabled = !pd.ghost.ok;
@@ -512,6 +697,8 @@ export class App {
     if (this.dialogs.escape()) return;
     if (!this.started) return;
     if (this.input.mode === 'drag') { this.dragCancel(); this.input.mode = null; this.input.drag = null; return; }
+    if (this.resize.active) { this.resize.cancel(); return; }
+    if (this.tool === 'copy' && this.copy.phase === 'paste') { this.copy.reset(); this.pending = null; this.hoverGhosts = null; this.updateConfirmBar(); this.updateHint(); return; }
     if (this.pending) { this.cancelPending(); return; }
     if (this.tool !== 'inspect') { this.setTool('inspect'); return; }
     this.panel.close();
@@ -571,7 +758,7 @@ export class App {
     this.setSim(sim);
     this.simFailed = false;
     this.enterGame();
-    this.cam.home();
+    this.cam.home(this.buildingCenterX());
     this.toasts.show({ text: isBackup ? 'バックアップから読み込みました' : imported ? 'セーブデータを読み込みました' : `${sim.day + 1}日目から再開します`, kind: isBackup ? 'bad' : 'good' });
     if (imported) this.autosave();
     return true;

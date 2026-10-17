@@ -11,7 +11,8 @@ const STEPS = [
   { label: '2F より上にフロアを伸ばす', done: (s) => { for (let f = 1; f <= 99; f++) { const r = s.grid[f]; if (r && r.some((v) => v !== 0)) return true; } return false; } },
   { label: 'エレベーターを縦にドラッグして階をつなぐ', done: (s) => has(s, 'elevator', 'express', 'stairs', 'escalator') },
   { label: 'オフィスかマンションを建てる', done: (s) => has(s, 'office', 'condo') },
-  { label: '入居を待つ（倍速ボタンで早送り）', done: (s) => (s.pop | 0) > 0 },
+  { label: '入居を待つ（倍速ボタンで早送り。建てた直後は工事中）', done: (s) => (s.pop | 0) > 0 },
+  { label: 'ごみ収集室を建てる（サービス。上下5フロアのごみを集める）', done: (s) => has(s, 'garbage') },
   { label: '混んできたらエレベーターを選んでカゴを増やす', done: (s) => { for (const o of s.objs.values()) if (o.cars && o.cars.length >= 2) return true; return false; } },
 ];
 
@@ -23,6 +24,7 @@ export class Guide {
     this.hidden = !!st.hidden;
     const narrow = window.innerWidth < 760 || window.innerHeight < 520;
     this.collapsed = st.collapsed ?? narrow;
+    this.autoCollapsed = !!st.autoCollapsed;
     this.sig = '';
     const el = document.createElement('section');
     el.id = 'guide';
@@ -47,7 +49,7 @@ export class Guide {
     this.apply();
   }
 
-  persist() { storage.set(KEY, JSON.stringify({ hidden: this.hidden, collapsed: this.collapsed })); }
+  persist() { storage.set(KEY, JSON.stringify({ hidden: this.hidden, collapsed: this.collapsed, autoCollapsed: this.autoCollapsed })); }
 
   setHidden(h) {
     this.hidden = !!h;
@@ -80,6 +82,8 @@ export class Guide {
     if (prog && prog.next != null && Array.isArray(prog.reqs)) {
       const name = typeof prog.next === 'number' ? `★${prog.next}` : String(prog.next);
       const reqs = prog.reqs.map((r) => ({ label: r.label, done: !!r.done, sub: true }));
+      // 基本がそろったら一度だけ自動でたたむ（建設の邪魔にならないように）
+      if (basicsDone && !this.autoCollapsed) { this.autoCollapsed = true; this.collapsed = true; this.persist(); queueMicrotask(() => this.apply()); }
       if (basicsDone || sim.star >= 2) return [{ label: `${name} の条件`, done: reqs.every((r) => r.done), head: true }, ...reqs];
       out.push({ label: `${name} の条件をそろえる（HUDの★で確認）`, done: false });
     }

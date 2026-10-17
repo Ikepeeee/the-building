@@ -1,6 +1,7 @@
 // 事件・スタッフ・プロンプト（Tower.prototype に混ぜ込む）
 // 爆破予告、火災、ゴキブリ、苦情、VIP、結婚式、警備員とメイドの派遣。
 import { DAY, W, STAR_POP, TYPES, floorName, fmtMoney } from './constants.js';
+
 import { FI, HOTEL, TENANT, SIM, burnable } from './rules.js';
 import { clamp } from './util.js';
 
@@ -120,7 +121,7 @@ export const EventsMixin = {
   },
 
   cleanArrive(p, room) {
-    if (room.dead || !p.task || p.task.room !== room) { this.releaseTask(p); this.goHome(p); return; }
+    if (room.dead || room.destroyed || !p.task || p.task.room !== room) { this.releaseTask(p); this.goHome(p); return; }
     this.settle(p, room);
     this.later(20 + this.rand(10), () => this.cleanDone(p, room));
   },
@@ -284,11 +285,11 @@ export const EventsMixin = {
         hit.add(o);
       }
     }
-    for (const o of hit) this.removeObj(o);
+    for (const o of hit) this.destroyObj(o, 'bomb');
     this.effect('explosion', b.f, b.x, 30);
     this.effect('smoke', b.f + 1, b.x, 90);
     this.sound('boom');
-    this.msg(`爆弾が爆発しました！ ${floorName(b.f)}付近の施設${hit.size}件が失われました`, 'bad', b.f, b.x);
+    this.msg(`爆弾が爆発しました！ ${floorName(b.f)}付近の施設${hit.size}件が破壊されました。撤去して建て直してください`, 'bad', b.f, b.x);
   },
 
   // ================= 火災 =================
@@ -320,8 +321,46 @@ export const EventsMixin = {
     if (value !== 'heli' || !this.fire) return;
     if (this.money < SIM.HELI) { this.msg('資金が足りず、ヘリを呼べません', 'bad'); this.sound('error'); return; }
     this.spend(SIM.HELI);
-    this.fire.heli = this.time + 15;
+    this.fire.heli = 'called';
+    this.dispatchHeli();
     this.msg('消防ヘリを要請しました', 'info');
+  },
+
+  // ---- 消防ヘリ: 画面外から飛来 → 散水 → 去る。消火は散水が終わったとき ----
+  dispatchHeli() {
+    const F = this.fire;
+    if (!F || this.heli) return;
+    const tx = F.x, tf = F.f;
+    const from = tx > W / 2 ? 1 : -1;
+    this.heli = { x: from > 0 ? W + 25 : -25, f: this.topBuiltFloor() + 5, phase: 'in', targetX: tx, targetF: tf, until: 0, from };
+    this.sound('heli');
+  },
+
+  updateHeli(dt) {
+    const h = this.heli;
+    const hover = h.targetF + 2;
+    if (h.phase === 'in') {
+      const dx = h.targetX - h.x;
+      const step = SIM.HELI_SPEED * dt;
+      h.x = Math.abs(dx) <= step ? h.targetX : h.x + Math.sign(dx) * step;
+      const cruise = Math.max(hover, this.topBuiltFloor() + 4);
+      const goal = Math.abs(dx) < 30 ? hover : cruise;
+      const df = goal - h.f, vs = SIM.HELI_CLIMB * dt;
+      h.f = Math.abs(df) <= vs ? goal : h.f + Math.sign(df) * vs;
+      if (h.x === h.targetX && Math.abs(h.f - hover) < 1e-6) {
+        h.phase = 'spray'; h.until = this.time + SIM.HELI_SPRAY;
+        this.effect('smoke', h.targetF, h.targetX, SIM.HELI_SPRAY + 10);
+      }
+    } else if (h.phase === 'spray') {
+      if (this.time >= h.until) {
+        if (this.fire) this.fire.heliDone = true;
+        h.phase = 'out';
+      }
+    } else {
+      h.x -= h.from * SIM.HELI_SPEED * dt;
+      h.f += SIM.HELI_CLIMB * 0.5 * dt;
+      if (h.x < -40 || h.x > W + 40) this.heli = null;
+    }
   },
 
   ignite(o) {
@@ -362,7 +401,7 @@ export const EventsMixin = {
         o.burning = false;
         F.burned++;
         this.effect('smoke', o.f, o.x + o.w / 2, 60);
-        this.removeObj(o);
+        this.destroyObj(o, 'fire');
         this.updateFires();
       }
     }
@@ -371,13 +410,13 @@ export const EventsMixin = {
       let spread = false;
       for (const o of [...F.burning]) {
         for (const n of this.fireNeighbors(o)) {
-          if (!n.burning && !n.dead && this.r() < 0.18) { this.ignite(n); spread = true; }
+          if (!n.burning && !n.dead && !n.destroyed && !(n.fireSafeUntil > this.time) && this.r() < 0.18) { this.ignite(n); spread = true; }
         }
       }
       if (spread) { this.sound('fire'); this.staffDispatch(); }
     }
     let text = null;
-    if (F.heli !== null && this.time >= F.heli) text = '消防ヘリが火を消し止めました';
+    if (F.heliDone) text = '消防ヘリが火を消し止めました';
     else if (this.time - F.start >= 360) text = '消防隊が到着し、火を消し止めました';
     if (text) {
       for (const o of F.burning) o.burning = false;
@@ -396,6 +435,7 @@ export const EventsMixin = {
 
   extinguish(o) {
     o.burning = false;
+    o.fireSafeUntil = this.time + 120; // 消し止めた直後は燃え移らない
     if (this.fire) this.fire.burning.delete(o);
     this.updateFires();
     this.effect('smoke', o.f, o.x + o.w / 2, 30);
@@ -453,13 +493,14 @@ export const EventsMixin = {
     const fl = floorName(o.f);
     const who = o.type === 'condo' ? `${fl}の住人` : o.type === 'office' ? `${fl}のオフィス` : `${fl}の宿泊客`;
     let line = null;
+    // いちばん大きな原因を言う: ゴキブリ → 移動のストレス → 騒音 → ごみ
+    const bad = this.evalLevel(o) === 'bad';
     if (o.infested) line = 'ゴキブリが出た！ なんとかして！';
+    else if (bad && o.cWait >= o.cStair && o.cWait > 1) line = o.type === 'office' ? 'エレベーターが遅すぎて仕事にならない！' : 'エレベーターが遅すぎる！';
+    else if (bad && o.cStair > 1) line = '階段ばかりで疲れる！';
     else if (o.noisy) line = o.type === 'condo' ? '近くの店がうるさくて眠れない！' : '騒がしくて休めない！';
-    else if (this.evalLevel(o) === 'bad') {
-      if (o.cWait >= o.cStair && o.cWait > 0) line = o.type === 'office' ? 'エレベーターが遅すぎて仕事にならない！' : 'エレベーターが遅すぎる！';
-      else if (o.cStair > 0) line = '階段ばかりで疲れる！';
-      else line = 'ここは居心地が悪い！';
-    }
+    else if (o.garbageBad) line = 'ごみが溜まっていて臭う！';
+    else if (bad) line = 'ここは居心地が悪い！';
     return line ? `${who}: ${line}` : null;
   },
 

@@ -3,7 +3,7 @@
 
 export const TILE_W = 8;        // 1マスの幅（ワールドpx）
 export const FLOOR_H = 24;      // 1フロアの高さ（ワールドpx）
-export const W = 150;           // 横のマス数
+export const W = 480;           // 横のマス数（v2: 150 → 480。約数が多く、全施設の幅が W の約数になるようにしている）
 export const MIN_F = -10;       // 最下層 B10F
 export const MAX_F = 99;        // 最上層 100F
 export const DAY = 1440;        // 1日 = 1440 ゲーム分
@@ -39,7 +39,7 @@ export const TYPES = {
   escalator:   { name: 'エスカレーター', cat: 'transport', w: 8, cost: 20000, star: 2, desc: '1つ上の階とつなぐ。商業施設向き' },
   elevator:    { name: 'エレベーター', cat: 'transport', w: 4, drag: 'v', cost: 200000, carCost: 80000, maxSpan: 30, maxCars: 8, cap: 21, star: 1, desc: '全階停止。最大30フロア' },
   express:     { name: '急行エレベーター', cat: 'transport', w: 6, drag: 'v', cost: 400000, carCost: 150000, maxSpan: 110, maxCars: 8, cap: 40, star: 3, desc: 'ロビー階と地下のみ停止' },
-  office:      { name: 'オフィス', cat: 'office', w: 9, cost: 40000, cap: 6, rent: 5000, star: 1, only: 'aboveGround', desc: '6人が平日に通勤。平日毎日賃料' },
+  office:      { name: 'オフィス', cat: 'office', w: 10, cost: 40000, cap: 6, rent: 5000, star: 1, only: 'aboveGround', desc: '6人が平日に通勤。平日毎日賃料' },
   condo:       { name: 'マンション', cat: 'living', w: 16, cost: 80000, cap: 3, sale: 100000, star: 1, only: 'aboveGround', desc: '3人家族が住む。入居時に販売収入' },
   hotelSingle: { name: 'シングルルーム', cat: 'hotel', w: 4, cost: 20000, cap: 1, price: 1000, star: 2, only: 'aboveGround', desc: '1人宿泊。清掃が必要' },
   hotelTwin:   { name: 'ツインルーム', cat: 'hotel', w: 6, cost: 50000, cap: 2, price: 2000, star: 2, only: 'aboveGround', desc: '2人宿泊。清掃が必要' },
@@ -47,12 +47,13 @@ export const TYPES = {
   fastfood:    { name: 'ファストフード', cat: 'commerce', w: 16, cost: 100000, price: 50, open: [10, 21], star: 1, desc: '10〜21時営業' },
   restaurant:  { name: 'レストラン', cat: 'commerce', w: 24, cost: 200000, price: 200, open: [17, 24], star: 2, desc: '17〜24時営業' },
   shop:        { name: 'ショップ', cat: 'commerce', w: 12, cost: 100000, price: 100, open: [10, 21], star: 2, desc: '10〜21時営業' },
-  cinema:      { name: '映画館', cat: 'commerce', w: 31, h: 2, cost: 500000, price: 150, open: [10, 24], star: 3, desc: '2フロア分。週替わり上映' },
-  partyHall:   { name: 'パーティーホール', cat: 'commerce', w: 27, h: 2, cost: 100000, price: 2000, open: [12, 22], star: 3, desc: '2フロア分。団体客が来る' },
+  cinema:      { name: '映画館', cat: 'commerce', w: 32, h: 2, cost: 500000, price: 150, open: [10, 24], star: 3, desc: '2フロア分。週替わり上映' },
+  partyHall:   { name: 'パーティーホール', cat: 'commerce', w: 30, h: 2, cost: 100000, price: 2000, open: [12, 22], star: 3, desc: '2フロア分。団体客が来る' },
   security:    { name: '警備室', cat: 'service', w: 16, cost: 100000, cap: 6, star: 2, desc: '爆弾捜索・消火を行う。★3の条件' },
   housekeeping:{ name: 'ハウスキーピング', cat: 'service', w: 15, cost: 50000, cap: 6, star: 2, desc: 'ホテルの客室を清掃する' },
-  medical:     { name: '医療センター', cat: 'service', w: 26, cost: 500000, star: 3, desc: '★4の条件' },
-  recycling:   { name: 'リサイクルセンター', cat: 'service', w: 25, h: 2, cost: 500000, star: 3, only: 'basement', desc: '地下2フロア分。★4の条件' },
+  garbage:     { name: 'ごみ収集室', cat: 'service', w: 8, cost: 30000, star: 1, range: 5, desc: '上下5フロアのごみを集める。無いとごみが溜まり評価が下がる' },
+  medical:     { name: '医療センター', cat: 'service', w: 24, cost: 500000, star: 3, desc: '★4の条件' },
+  recycling:   { name: 'リサイクルセンター', cat: 'service', w: 24, h: 2, cost: 500000, star: 3, only: 'basement', desc: '地下2フロア分。★4の条件' },
   metro:       { name: '地下鉄駅', cat: 'special', w: 30, h: 3, cost: 1000000, star: 4, only: 'basement', desc: '地下3フロア分。第2の出入口。★5の条件' },
   cathedral:   { name: '大聖堂', cat: 'special', w: 30, cost: 3000000, star: 5, only: 'top', desc: '100Fのみ。結婚式が挙がればタワー達成' },
 };
@@ -67,3 +68,18 @@ export const TOOL_CATS = [
   { id: 'service', name: 'サービス' },
   { id: 'special', name: '特別' },
 ];
+
+// ---- テナントのバリエーション（v2） ----
+// 各施設に o.variant（下記配列の添字）を sim が割り当てる。render は種類ごとに内装を描き分け、
+// sim は種類ごとの店名・社名（o.brand）を付ける。キー名は render / sim の共通語彙。
+export const VARIANTS = {
+  office:      ['standard', 'it', 'law', 'design', 'bank', 'publisher', 'game', 'trading'],
+  condo:       ['modern', 'japanese', 'family', 'luxury', 'artist', 'minimal'],
+  hotelSingle: ['classic', 'modern', 'japanese'],
+  hotelTwin:   ['classic', 'modern', 'japanese'],
+  hotelSuite:  ['classic', 'modern', 'japanese'],
+  fastfood:    ['burger', 'ramen', 'sushi', 'pizza', 'cafe', 'curry', 'donut'],
+  restaurant:  ['french', 'italian', 'chinese', 'japanese', 'steak'],
+  shop:        ['fashion', 'books', 'electronics', 'flowers', 'toys', 'sports', 'grocery'],
+};
+export const TRANSPORT_TYPES = ['elevator', 'express', 'stairs', 'escalator'];

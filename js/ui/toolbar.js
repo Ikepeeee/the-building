@@ -39,7 +39,7 @@ export class Toolbar {
     this.seenStar = 1;
     this.newKeys = new Set();
 
-    for (const [key, label, title] of [['inspect', '調べる', '施設を調べる (Esc / I)'], ['bulldoze', '撤去', '撤去する (B)']]) {
+    for (const [key, label, title] of [['inspect', '調べる', '施設を調べる (Esc / I)'], ['bulldoze', '撤去', '撤去する (B)'], ['copy', 'コピー', '範囲をまとめてコピー (K)']]) {
       const b = this.makeButton(key, label, '', title);
       b.classList.add('fixed');
       this.fixedEl.append(b);
@@ -116,7 +116,8 @@ export class Toolbar {
   showTip(b, key) {
     const tip = this.tip;
     if (key === 'inspect') tip.innerHTML = '<b>調べる</b><br><span class="tt-meta">施設をクリックすると詳細を表示。ドラッグでスクロール。</span>';
-    else if (key === 'bulldoze') tip.innerHTML = '<b>撤去</b><br><span class="tt-meta">横にドラッグした範囲を撤去する。返金はありません。</span>';
+    else if (key === 'bulldoze') tip.innerHTML = '<b>撤去</b><br><span class="tt-meta">横にドラッグした範囲を撤去する（移動手段が優先）。返金はありません。</span>';
+    else if (key === 'copy') tip.innerHTML = '<b>コピー</b><br><span class="tt-meta">ドラッグで範囲を選び、貼り付けたい場所でクリック。フロア・施設・移動手段をまとめて建てます。</span>';
     else {
       const t = TYPES[key];
       const sim = this.app.sim;

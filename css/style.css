@@ -53,8 +53,10 @@ textarea, input[type=text] { -webkit-user-select: text; user-select: text; }
 #view.c-build { cursor: crosshair; }
 #view.c-pan { cursor: grab; }
 #view.c-panning { cursor: grabbing; }
-#view.c-bulldoze { cursor: not-allowed; }
-#view.c-bulldoze { cursor: crosshair; }
+#view.c-inspect { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32' shape-rendering='crispEdges'%3E%3Ccircle cx='12' cy='12' r='8' fill='%23cdeeff' fill-opacity='.55' stroke='%23000' stroke-width='4'/%3E%3Ccircle cx='12' cy='12' r='8' fill='none' stroke='%23fff' stroke-width='2'/%3E%3Cpath d='M18 18 L28 28' stroke='%23000' stroke-width='7' stroke-linecap='round'/%3E%3Cpath d='M18 18 L28 28' stroke='%23a0672a' stroke-width='4' stroke-linecap='round'/%3E%3Crect x='8' y='8' width='3' height='3' fill='%23fff'/%3E%3C/svg%3E") 12 12, zoom-in; }
+#view.c-bulldoze { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32' shape-rendering='crispEdges'%3E%3Crect x='1' y='1' width='3' height='3' fill='%23000'/%3E%3Crect x='2' y='2' width='1' height='1' fill='%23fff'/%3E%3Crect x='4' y='14' width='4' height='12' fill='%23000'/%3E%3Crect x='5' y='15' width='2' height='10' fill='%23777'/%3E%3Crect x='8' y='13' width='20' height='9' fill='%23000'/%3E%3Crect x='9' y='14' width='18' height='7' fill='%23f0a817'/%3E%3Crect x='17' y='7' width='9' height='7' fill='%23000'/%3E%3Crect x='18' y='8' width='7' height='6' fill='%23f0a817'/%3E%3Crect x='19' y='9' width='5' height='3' fill='%23aee3ff'/%3E%3Crect x='8' y='22' width='21' height='7' fill='%23000'/%3E%3Crect x='10' y='24' width='2' height='2' fill='%23888'/%3E%3Crect x='15' y='24' width='2' height='2' fill='%23888'/%3E%3Crect x='20' y='24' width='2' height='2' fill='%23888'/%3E%3Crect x='25' y='24' width='2' height='2' fill='%23888'/%3E%3C/svg%3E") 2 2, crosshair; }
+#view.c-copy { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32' shape-rendering='crispEdges'%3E%3Cpath d='M2 2 L2 14 L5 11 L8 17 L10 16 L7 10 L11 10 Z' fill='%23fff' stroke='%23000' stroke-width='1.5'/%3E%3Crect x='12' y='12' width='12' height='12' fill='%23fff' stroke='%23000' stroke-width='2'/%3E%3Crect x='17' y='17' width='12' height='12' fill='%239cd0ff' stroke='%23000' stroke-width='2'/%3E%3Crect x='22' y='20' width='2' height='6' fill='%23000'/%3E%3Crect x='20' y='22' width='6' height='2' fill='%23000'/%3E%3C/svg%3E") 2 2, copy; }
+#view.c-resize { cursor: ns-resize !important; }
 
 /* ---------- 共通の枠とボタン ---------- */
 .frame {
@@ -287,7 +289,7 @@ button.hud-cell:hover { filter: brightness(1.15); }
 #panel {
   position: absolute; z-index: 22; right: calc(10px + var(--sar));
   top: calc(var(--hud-h, 52px) + 10px);
-  width: 300px; max-height: calc(100% - var(--hud-h, 52px) - var(--tb-h, 130px) - 24px);
+  width: 300px; max-height: calc(100% - var(--hud-h, 52px) - var(--tb-h, 130px) - 104px); /* 下に全体図 */
   display: flex; flex-direction: column; padding: 0;
   animation: panel-in .15s steps(3) both;
 }
@@ -544,3 +546,75 @@ textarea.io {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
+
+/* ================= v2 ================= */
+#night-badge {
+  position: absolute; z-index: 19; left: 50%; transform: translateX(-50%);
+  top: calc(var(--hud-h, 52px) + 8px); pointer-events: none;
+  background: #26206b; color: #ffe9a8; font-weight: 800; padding: 3px 12px; border: 2px solid var(--edge);
+  box-shadow: inset 0 0 0 1px #5b54c9; letter-spacing: .08em; white-space: nowrap;
+}
+#app.is-title #night-badge, #app.is-title #minimap, #app.is-title .rs-handle { display: none !important; }
+
+/* エレベーターの伸縮つまみ */
+.rs-handle {
+  position: absolute; left: 0; top: 0; z-index: 31; width: 44px; height: 30px; padding: 0;
+  font-size: 14px; line-height: 1; color: #fff; background: #2f46a8;
+  border: 2px solid var(--edge); box-shadow: inset 2px 2px 0 #6f89e8, inset -2px -2px 0 #0d1a55, 0 2px 0 rgba(0,0,0,.4);
+  cursor: ns-resize; touch-action: none;
+}
+.rs-handle.is-pinned { opacity: .85; border-style: dashed; }
+.rs-handle.is-active { background: #ffcc33; color: #000; box-shadow: inset 2px 2px 0 #fff2b0, inset -2px -2px 0 #9a6b00; }
+@media (hover: none) { .rs-handle { width: 52px; height: 38px; font-size: 16px; } }
+
+/* 情報パネル: 評価の内訳・エレベーター */
+#panel .p-reasons { margin: 0 0 8px; border: 2px solid var(--lo); background: #f3efe4; }
+#panel .p-reasons-h { font-size: 11px; font-weight: 700; color: var(--ink-2); background: var(--panel-2); padding: 2px 6px; border-bottom: 1px solid var(--lo); }
+#panel .p-reasons ul { list-style: none; margin: 0; padding: 4px 6px; display: grid; gap: 2px; }
+#panel .p-reasons li { display: flex; gap: 6px; font-size: 12px; align-items: baseline; }
+#panel .p-reasons .r-mark { flex: none; width: 16px; text-align: center; font-weight: 900; }
+#panel .p-reasons li.r-good .r-mark { color: var(--good); }
+#panel .p-reasons li.r-fair .r-mark { color: var(--fair); }
+#panel .p-reasons li.r-bad .r-mark { color: var(--bad); }
+#panel .p-reasons li.r-bad .r-text { color: #7a1d12; font-weight: 700; }
+#panel .p-elev { margin-top: 8px; display: grid; gap: 4px; }
+#panel .p-elev .btn { width: 100%; }
+#panel .p-tip { font-size: 11px; color: var(--ink-2); }
+
+/* 設定ダイアログ */
+.modal .small, .small { font-size: 12px; color: var(--ink-2); margin: -2px 0 6px; }
+.seg { display: flex; flex-wrap: wrap; gap: 0; margin-bottom: 4px; }
+.seg .seg-b { min-height: 40px; margin-right: -2px; flex: 1 1 auto; font-weight: 700; }
+.seg .seg-b.is-on { background: var(--navy-2); color: #fff; box-shadow: inset 2px 2px 0 #0d1a55, inset -2px -2px 0 #6f89e8; }
+.cars-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cars-row .cars-n { flex: 1; text-align: center; font-size: 16px; letter-spacing: 1px; min-width: 60px; }
+.stops { display: grid; grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); gap: 4px; max-height: 240px; overflow-y: auto; padding: 2px; overscroll-behavior: contain; }
+.stops .stop-b { min-height: 38px; padding: 4px; font-family: var(--mono); color: #8a8372; text-decoration: line-through; background: #c9c2b0; }
+.stops .stop-b.is-on { color: #fff; text-decoration: none; background: var(--good); box-shadow: inset 2px 2px 0 #7fe08f, inset -2px -2px 0 #0f5a20; }
+.stops-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
+
+/* 全体図 */
+#minimap {
+  position: absolute; z-index: 21; right: calc(10px + var(--sar)); bottom: calc(var(--tb-h, 130px) + 10px);
+  width: 220px; height: 70px; padding: 2px; touch-action: none;
+}
+#minimap canvas { display: block; width: 100%; height: 100%; cursor: pointer; image-rendering: auto; touch-action: none; }
+@media (max-width: 760px) {
+  #minimap { width: 132px; height: 48px; right: calc(6px + var(--sar)); bottom: calc(var(--tb-h, 130px) + 6px); }
+  #guide { width: min(222px, calc(100% - 152px)); }
+  #app.sheet-open #minimap, #app.confirming #minimap { display: none; }
+  #night-badge { font-size: 12px; padding: 2px 8px; }
+  #btn-fs { display: none; } /* 狭い画面ではメニューから */
+}
+#app.side-tb #minimap { right: calc(6px + var(--sar)); bottom: calc(6px + var(--sab)); width: 170px; height: 54px; }
+#app.side-tb.sheet-open #minimap { display: none; }
+#app.side-tb .tb-fixed .tool .t-name { font-size: 10px; }
+#app.side-tb .tb-fixed { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; }
+#app.side-tb .tb-fixed .tool { flex-direction: column; width: auto; min-width: 0; padding: 2px 1px; gap: 0; }
+#app.side-tb .tb-fixed .tool img { width: 30px; height: 19px; }
+.stops .stop-b.lobby { box-shadow: inset 0 0 0 2px #ffcc33, inset 3px 3px 0 rgba(255,255,255,.35); }
+.stops .stop-b.lobby.is-on { box-shadow: inset 0 0 0 2px #ffcc33, inset 3px 3px 0 #7fe08f; }
+#panel .p-cons { margin-bottom: 6px; border: 2px solid var(--edge); background: repeating-linear-gradient(-45deg, #ffcc33 0 8px, #222 8px 16px); padding: 2px; }
+#panel .p-cons-t { background: #fff6c8; font-size: 12px; font-weight: 800; padding: 2px 6px; }
+#panel .p-cons-bar { height: 6px; background: #555; margin-top: 2px; }
+#panel .p-cons-bar i { display: block; height: 100%; background: #3fcf5f; width: 0; transition: width .3s steps(4); }

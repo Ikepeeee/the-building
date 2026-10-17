@@ -1,5 +1,5 @@
 // モーダル類: 事件の prompt、確認、メニュー、遊び方、状況（★進捗・財務）、セーブ入出力、★昇格演出、エンディング
-import { TYPES, STAR_POP, fmtMoney } from '../sim/constants.js';
+import { TYPES, STAR_POP, LOBBY_FLOORS, fmtMoney, floorName } from '../sim/constants.js';
 import { iconURL } from './icons.js';
 import { exportText, parseImport, downloadText, peekSave, storage } from './save.js';
 
@@ -243,11 +243,125 @@ export class Dialogs {
       item('📊 タワーの状況・財務', '', () => this.status()),
       item('❓ 遊び方・操作方法', '', () => this.help()),
       item(app.guide.hidden ? '📋 「次にやること」を表示する' : '📋 「次にやること」を隠す', '', () => app.guide.setHidden(!app.guide.hidden)),
-      item(app.sound.muted ? '🔈 効果音をオンにする' : '🔇 効果音をオフにする', 'M', () => app.toggleMute()),
+      item('🔊 サウンド設定（効果音・環境音）', 'M で全体ミュート', () => this.soundSettings()),
+      item('⛶ 全画面表示の切り替え', '', () => app.toggleFullscreen()),
       item('🏠 タイトルへ戻る', '', () => app.toTitle()));
     const p = this.open({ title: 'メニュー', body: list });
     close = () => { const top = this.stack[this.stack.length - 1]; if (top) top.close(null); };
     return p;
+  }
+
+  /** セグメント（択一ボタン）を作る */
+  seg(options, cur, onPick) {
+    const box = h('div', { class: 'seg', role: 'radiogroup' });
+    for (const [value, label] of options) {
+      const b = h('button', { class: 'btn seg-b' + (value === cur ? ' is-on' : ''), role: 'radio', 'aria-checked': value === cur ? 'true' : 'false', text: label });
+      b.addEventListener('click', () => { if (value !== cur) onPick(value); });
+      box.append(b);
+    }
+    return box;
+  }
+
+  soundSettings() {
+    const app = this.app;
+    const body = h('div');
+    const render = () => {
+      body.textContent = '';
+      body.append(
+        h('h3', { text: '全体' }),
+        this.seg([[false, '🔊 鳴らす'], [true, '🔇 ミュート']], app.sound.muted, (v) => { app.sound.unlock(); app.sound.setMuted(v); app.hud.update(); render(); }),
+        h('h3', { text: '効果音' }),
+        h('p', { class: 'small', text: '建設・お金・事件などの音' }),
+        this.seg([[true, 'オン'], [false, 'オフ']], app.sound.sfxOn, (v) => { app.sound.setSfx(v); render(); }),
+        h('h3', { text: '環境音' }),
+        h('p', { class: 'small', text: '画面に映っているものに合わせた音（エレベーターの走行音とチャイム、オフィスのタイピングと電話、飲食店の雑談と調理音、ロビーのざわめき、消防ヘリ）。音量は控えめです。' }),
+        this.seg([[true, 'オン'], [false, 'オフ']], app.ambience.enabled, (v) => { app.ambience.setEnabled(v); render(); }));
+    };
+    render();
+    return this.open({ title: 'サウンド設定', body, buttons: [{ label: '閉じる', primary: true }] });
+  }
+
+  /** エレベーターの設定（カゴの数・速度・ドア・待機・ラッシュ・停止階） */
+  elevatorSettings(id) {
+    const app = this.app;
+    const sim = app.sim;
+    const body = h('div', { class: 'elev-cfg' });
+    let closeFn = null;
+    const apply = (patch) => {
+      const e = sim.objs.get(id);
+      if (!e) return;
+      let r;
+      try { r = sim.setElevatorConfig(e, patch); } catch (err) { console.error(err); r = { ok: false, reason: 'エラーが発生しました' }; }
+      if (!r || !r.ok) { app.toasts.show({ text: (r && r.reason) || '変更できませんでした', kind: 'bad' }); app.sound.play('error'); }
+      else app.sound.play('click');
+      render();
+    };
+    const act = (actionId) => {
+      const e = sim.objs.get(id);
+      if (!e) return;
+      app.withSoundCheck(() => {
+        let r;
+        try { r = sim.act(e, actionId); } catch (err) { console.error(err); r = { ok: false, reason: 'エラーが発生しました' }; }
+        if (!r || !r.ok) { app.toasts.show({ text: (r && r.reason) || 'できませんでした', kind: 'bad' }); return 'error'; }
+        return actionId === 'addCar' ? 'build' : 'click';
+      });
+      render();
+    };
+    const render = () => {
+      const e = sim.objs.get(id);
+      body.textContent = '';
+      if (!e) { body.append(h('p', { text: 'このエレベーターはもうありません。' })); return; }
+      const T = TYPES[e.type] || {};
+      const n = e.cars ? e.cars.length : 0;
+      body.append(h('h3', { text: `カゴ（${n} / ${T.maxCars || 8}台）` }),
+        h('div', { class: 'cars-row' },
+          h('button', { class: 'btn', text: '－ 減らす', disabled: n <= 1, onclick: () => act('removeCar') }),
+          h('span', { class: 'cars-n', text: '🛗'.repeat(Math.min(n, 8)) || '—' }),
+          h('button', { class: 'btn btn-primary', disabled: n >= (T.maxCars || 8), onclick: () => act('addCar') }, `＋ 増やす ${T.carCost ? fmtMoney(T.carCost) : ''}`)));
+      const cfg = e.config;
+      if (!cfg || typeof sim.setElevatorConfig !== 'function') {
+        body.append(h('p', { class: 'small', text: '（この版のシミュレーションでは運転設定は使えません）' }));
+        return;
+      }
+      body.append(
+        h('h3', { text: 'モーター' }),
+        this.seg([[1, '標準'], [2, '高速（維持費2倍）']], cfg.speed ?? 1, (v) => apply({ speed: v })),
+        h('h3', { text: 'ドアの開閉' }),
+        this.seg([['short', '短い'], ['normal', '普通'], ['long', '長い']], cfg.door ?? 'normal', (v) => apply({ door: v })),
+        h('h3', { text: '待機中のカゴ' }),
+        this.seg([['none', 'その場'], ['lobby', 'ロビーへ'], ['spread', '分散']], cfg.standby ?? 'none', (v) => apply({ standby: v })),
+        h('h3', { text: 'ラッシュ運転' }),
+        h('p', { class: 'small', text: '朝は空のカゴをロビーへ、夕方は上の階へ回します' }),
+        this.seg([[false, 'オフ'], [true, 'オン']], !!cfg.rush, (v) => apply({ rush: v })));
+      // 停止階
+      const skip = new Set(cfg.skip || []);
+      const express = e.type === 'express';
+      const floors = [];
+      for (let f = e.hi; f >= e.lo; f--) floors.push(f);
+      body.append(h('h3', { text: '停止階（押すと止まる／通過を切り替え）' }));
+      body.append(h('p', { class: 'small', text: express
+        ? '急行は最初はロビー階（★印）と地下だけに止まります。ほかの階も止まるようにできます。止まる階は2つ以上必要です。'
+        : '★印はロビー階です。止まる階は2つ以上必要です。' }));
+      const grid = h('div', { class: 'stops' });
+      for (const f of floors) {
+        const stop = !skip.has(f);
+        const lobby = LOBBY_FLOORS.includes(f);
+        grid.append(h('button', {
+          class: 'btn stop-b' + (stop ? ' is-on' : '') + (lobby ? ' lobby' : ''), 'aria-pressed': stop ? 'true' : 'false',
+          title: `${floorName(f)}${lobby ? '（ロビー階）' : ''}: ${stop ? '止まる' : '通過'}`,
+          text: (lobby ? '★' : '') + floorName(f),
+          onclick: () => { const ns = new Set(skip); if (stop) ns.add(f); else ns.delete(f); apply({ skip: [...ns].sort((a, b) => a - b) }); },
+        }));
+      }
+      body.append(grid, h('div', { class: 'stops-foot' },
+        h('span', { class: 'small', text: `通過 ${skip.size}階` }),
+        h('button', { class: 'btn btn-small', text: 'すべて止まる', disabled: !skip.size, onclick: () => apply({ skip: [] }) })));
+    };
+    render();
+    const e0 = sim.objs.get(id);
+    const p = this.open({ title: `${TYPES[e0?.type]?.name || 'エレベーター'}の設定`, body, wide: true, buttons: [{ label: '閉じる', primary: true }] });
+    closeFn = p;
+    return closeFn;
   }
 
   status() {
@@ -299,6 +413,16 @@ export class Dialogs {
         <li><b>オフィス</b>や<b>マンション</b>を置くと入居者が来て収入が入る</li>
         <li>エレベーターが混んだら施設を選んで<b>カゴを増やす</b>。待ち時間が長いと人のストレス（ピンク→赤）が上がり、評価が下がって退去してしまう</li>
         <li>ホテルは<b>ハウスキーピング</b>、事件には<b>警備室</b>が必要</li>
+        <li>建てた施設はしばらく<b>工事中</b>（足場とクレーン）。完成するまで使えません</li>
+        <li>「サービス」の<b>ごみ収集室</b>は上下5フロアのごみを集める。無い・満杯だと評価が下がる</li>
+      </ul>
+      <h3>便利な機能</h3>
+      <ul>
+        <li><b>全体図</b>（右下）: タップでその場所へ移動</li>
+        <li><b>エレベーター</b>を選ぶと ▲▼ のつまみで伸縮。「⚙ 運転設定」で止まる階・速度・ドア・待機・ラッシュ運転</li>
+        <li><b>コピー</b>: 範囲を選んで、別の場所にまとめて建てる</li>
+        <li>深夜 0〜6 時は自動で ×4 の<b>早送り</b>（事件中は止まる）</li>
+        <li>施設のパネルの<b>評価の内訳</b>で、評価が悪い理由がわかる</li>
       </ul>
       <h3>操作（${touch ? 'スマホ・タブレット' : 'パソコン'}）</h3>
       ${touch ? `
@@ -319,6 +443,7 @@ export class Dialogs {
         <tr><td><kbd>Esc</kbd> / <kbd>I</kbd></td><td>「調べる」に戻る・閉じる</td></tr>
         <tr><td><kbd>F</kbd> <kbd>L</kbd> <kbd>E</kbd> <kbd>X</kbd> <kbd>T</kbd></td><td>フロア・ロビー・エレベーター・急行・階段</td></tr>
         <tr><td><kbd>O</kbd> <kbd>C</kbd> <kbd>H</kbd> <kbd>R</kbd> <kbd>B</kbd></td><td>オフィス・マンション・シングル・レストラン・撤去</td></tr>
+        <tr><td><kbd>K</kbd> / <kbd>Ctrl+C</kbd></td><td>コピー</td></tr>
         <tr><td><kbd>Home</kbd> / <kbd>M</kbd> / <kbd>Ctrl+S</kbd></td><td>1Fへ戻る／効果音／セーブ</td></tr>
       </table>`}
       <h3>セーブ</h3>

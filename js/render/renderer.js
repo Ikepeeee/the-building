@@ -1,7 +1,8 @@
 // The Building Renderer（Canvas 2D・ピクセルアート）
 // const r = new Renderer(canvas, sim); r.resize(w, h); r.render(view); r.setSim(sim);
 import { TILE_W, FLOOR_H, W, MIN_F, MAX_F, DAY, LOBBY_FLOORS, TYPES, floorName } from '../sim/constants.js';
-import { makeFacilitySprite, lobbyTile, floorTile, shaftSeg, carSprite, CAR_H, SPRITE_TOP, treeSprite } from './facilities.js';
+import { makeFacilitySprite, lobbyTile, floorTile, shaftSeg, carSprite, CAR_H, SPRITE_TOP, treeSprite, machineRoom, pitSprite, fireEscapeSprite, fireEscapeTop, ESC_W, frameTile, craneSprite } from './facilities.js';
+import { heliSprite, planeSprite, bannerPlaneSprite, bannerSprite } from './vehicles.js';
 import { peopleAtlas, KIND_INDEX, PW, PH, stressIndex } from './people.js';
 import {
   skyColors, nightness, cloudTint, cloudSprite, sunSprite, moonSprite, strataSprite, STRATA_W, STRATA_H,
@@ -29,8 +30,8 @@ const num = (v, d = 0) => (typeof v === 'number' && isFinite(v) ? v : d);
 
 // 雲と星の配置（固定）
 const CLOUDS = [];
-for (let i = 0; i < 46; i++) {
-  CLOUDS.push({ x: hash2(i, 1) * 3200 - 1000, y: -40 - hash2(i, 2) * 2700, shape: (hash2(i, 3) * 3) | 0, sp: 0.6 + hash2(i, 4) * 0.8 });
+for (let i = 0; i < 130; i++) {
+  CLOUDS.push({ x: hash2(i, 1) * (WORLD_W + 2400) - 1200, y: -40 - hash2(i, 2) * 2700, shape: (hash2(i, 3) * 3) | 0, sp: 0.6 + hash2(i, 4) * 0.8 });
 }
 const STARS = [];
 for (let i = 0; i < 220; i++) STARS.push([hash2(i, 11), hash2(i, 12), hash2(i, 13)]);
@@ -227,11 +228,54 @@ export class Renderer {
     const drift = this.nowMs * 0.004;
     for (const c of CLOUDS) {
       const spr = cloudSprite(c.shape, tint);
-      const span = 3400, k = 2;
-      let x = ((c.x + drift * c.sp + 1000) % span + span) % span - 1000;
+      const span = WORLD_W + 2400, k = 2;
+      let x = ((c.x + drift * c.sp + 1200) % span + span) % span - 1200;
       const y = c.y;
       if (y + spr.height * k < wy0 || y > Math.min(wy1, 0) || x + spr.width * k < wx0 || x > wx1) continue;
       this.img(spr, x, y, spr.width * k, spr.height * k);
+    }
+    this.drawPlanes(hour, night, skyH);
+  }
+
+  // 飛行機（時刻を種にして決定的に、ときどき空を横切る。画面に固定した遠景）
+  drawPlanes(hour, night, skyH) {
+    const ctx = this.ctx, cw = this.canvas.width, ch = this.canvas.height, dpr = this.dpr, ms = this.nowMs;
+    const T = this.simTime;
+    const nightMode = night > 0.5;
+    for (let k = 0; k < 2; k++) {
+      const P = k ? 290 : 200, offs = k * 97, dur = 45;
+      const idx = Math.floor((T + offs) / P);
+      const ph = ((T + offs) - idx * P) / dur;
+      if (ph < 0 || ph >= 1) continue;
+      if (hash2(idx, k + 3) > 0.62) continue;
+      const dir = hash2(idx, k + 7) < 0.5 ? 1 : -1;
+      const banner = !nightMode && hash2(idx, k + 11) < 0.3;
+      const ps = Math.max(2, Math.round(dpr * 2));
+      const y = Math.round(ch * (0.05 + hash2(idx, k + 13) * 0.3));
+      if (y + 20 * ps >= skyH) continue;
+      let spr = banner ? bannerPlaneSprite() : planeSprite(nightMode);
+      const bn = banner ? bannerSprite('THE BUILDING') : null;
+      const total = (spr.width + (bn ? bn.width + 6 : 0)) * ps;
+      const x0 = dir > 0 ? -total + ph * (cw + total * 2) - total * 0 : cw - ph * (cw + total * 2) + total;
+      const key = (banner ? 'bp' : nightMode ? 'pn' : 'pd') + (dir > 0 ? 'R' : 'L');
+      if (dir < 0) spr = this.tile(key, () => mirrored(spr));
+      const sw = spr.width * ps, sh = spr.height * ps;
+      const px = Math.round(dir > 0 ? x0 + (bn ? (bn.width + 6) * ps : 0) : x0 - sw - (bn ? (bn.width + 6) * ps : 0));
+      if (bn) {
+        const bx = dir > 0 ? px - (bn.width + 6) * ps : px + sw + 6 * ps;
+        const by = y + Math.round(Math.sin(ms / 200) * ps);
+        ctx.fillStyle = '#555';
+        ctx.fillRect(dir > 0 ? bx + bn.width * ps : px + sw, y + 4 * ps, 6 * ps, Math.max(1, ps >> 1));
+        ctx.drawImage(bn, bx, by, bn.width * ps, bn.height * ps);
+      }
+      ctx.drawImage(spr, px, y, sw, sh);
+      if (nightMode) {
+        const blink = ((ms / 450) | 0) % 2;
+        ctx.fillStyle = blink ? '#ff3030' : '#601010';
+        ctx.fillRect(px + (dir > 0 ? 24 * ps : sw - 26 * ps), y + 10 * ps, 2 * ps, 2 * ps);
+        if (((ms / 900) | 0) % 3 === 0) { ctx.fillStyle = '#ffffff'; ctx.fillRect(dir > 0 ? px : px + sw - 2 * ps, y, 2 * ps, 2 * ps); }
+        ctx.fillStyle = '#30ff60'; ctx.fillRect(px + (dir > 0 ? sw - 3 * ps : ps), y + 7 * ps, ps, ps);
+      }
     }
   }
 
@@ -260,7 +304,7 @@ export class Renderer {
       if (t.x + 15 < wx0 || t.x > wx1) continue;
       if (row) {
         let blocked = false;
-        for (let cx = Math.floor((t.x - 2) / TW); cx <= Math.floor((t.x + 17) / TW); cx++) {
+        for (let cx = Math.floor((t.x - 26) / TW); cx <= Math.floor((t.x + 41) / TW); cx++) {
           if (cx >= 0 && cx < W && row[cx]) { blocked = true; break; }
         }
         if (blocked) continue;
@@ -304,11 +348,12 @@ export class Renderer {
       let darkFrom = -1;
       for (let x = xA; x <= xB + 1; x++) {
         const v = x <= xB ? row[x] : 0;
-        const isFloor = v === -1 || (v > 0 && objs && !objs.has(v));
+        let isFloor = v === -1;
+        if (v > 0 && objs) { const ov = objs.get(v); isFloor = !ov || ov.type === 'stairs' || ov.type === 'escalator'; }
         if (isFloor) {
-          this.img(this.tile('fl' + (x & 3), () => floorTile(x & 3)), x * TW, wy, TW, FH);
           if (darkFrom < 0) darkFrom = x;
         } else if (darkFrom >= 0) {
+          this.floorRun(darkFrom, x, wy);
           if (night > 0.02) { ctx.globalAlpha = 0.5 * night; this.rect(darkFrom * TW, wy, (x - darkFrom) * TW, FH - 2, '#0a0e24'); ctx.globalAlpha = 1; }
           darkFrom = -1;
         }
@@ -318,7 +363,8 @@ export class Renderer {
     // 2) 施設
     const elevs = [];
     const later = this._later || (this._later = []);
-    later.length = 0;
+    const trans = this._trans || (this._trans = []);
+    later.length = 0; trans.length = 0;
     this.visObjs = [];
     let count = 0;
     const [wx0, wy0, wx1, wy1] = this.vb;
@@ -328,7 +374,7 @@ export class Renderer {
         const type = o.type;
         if (isElev(type)) {
           const lo = num(o.lo, num(o.f)), hi = num(o.hi, lo);
-          if (hi < fLo || lo > fHi) continue;
+          if (hi + 1 < fLo || lo - 1 > fHi) continue;
           const ox = num(o.x) * TW, ow = num(o.w, TYPES[type] ? TYPES[type].w : 4) * TW;
           if (ox + ow < wx0 || ox > wx1) continue;
           elevs.push(o);
@@ -344,25 +390,45 @@ export class Renderer {
         this.visObjs.push(o);
         if (type === 'lobby') { this.guard(() => this.drawLobby(o, f, num(o.x), tw)); continue; }
         if (type === 'floor') { for (let i = 0; i < tw; i++) this.img(this.tile('fl' + ((num(o.x) + i) & 3), () => floorTile((num(o.x) + i) & 3)), x + i * TW, y, TW, FH); continue; }
-        later.push(o, tw, th, x, y, top);
+        if (type === 'stairs' || type === 'escalator') trans.push(o, tw, th, x, y, top);
+        else later.push(o, tw, th, x, y, top);
       }
     }
-    // ロビーの上に重ねて置かれた移動手段などを後から描く
-    for (let i = 0; i < later.length; i += 6) {
-      const o = later[i];
-      this.guard(() => this.drawFacility(o, o.type, later[i + 1], later[i + 2], later[i + 3], later[i + 4], later[i + 5], nightOn, frameEsc, week));
+    // 施設 → 移動手段（階段・エスカレーター）の順に重ねる（v2: 移動手段は施設の上に置ける）
+    for (const list of [later, trans]) {
+      for (let i = 0; i < list.length; i += 6) {
+        const o = list[i];
+        this.guard(() => this.drawFacility(o, o.type, list[i + 1], list[i + 2], list[i + 3], list[i + 4], list[i + 5], nightOn, frameEsc, week));
+      }
     }
     this.stats.objs = count;
 
-    // 3) エレベーターのシャフト
-    for (const e of elevs) this.guard(() => this.drawShaft(e, fLo, fHi));
-
-    // 4) 外壁・屋上
+    // 3) 外壁・屋上・非常階段
     this.drawFacade(grid, fLo, fHi, xA, xB);
+    this.guard(() => this.drawFireEscapes(grid, fLo, fHi));
+
+    // 4) エレベーターのシャフト・機械室・ピット（施設の上に重ねる）
+    for (const e of elevs) this.guard(() => this.drawShaft(e, fLo, fHi));
 
     // 5) カゴ
     for (const e of elevs) this.guard(() => this.drawCars(e, dtMs));
+    this.guard(() => this.drawStopPlates(elevs, fLo, fHi));
     this.elevs = elevs;
+  }
+
+  // 空きフロアの連続を、まとめた帯のスプライトから一度に描く
+  floorRun(xs, xe, wy) {
+    const strip = this.tile('flstrip', () => {
+      const c = makeCanvasLike(64 * TW, FH);
+      const g = c.getContext('2d');
+      for (let i = 0; i < 64; i++) g.drawImage(this.tile('fl' + (i & 3), () => floorTile(i & 3)), i * TW, 0);
+      return c;
+    });
+    for (let x = xs; x < xe;) {
+      const n = Math.min(xe - x, 60);
+      this.imgPart(strip, (x & 3) * TW, 0, n * TW, FH, x * TW, wy, n * TW, FH);
+      x += n;
+    }
   }
 
   drawLobby(o, f, x0, tw) {
@@ -377,6 +443,7 @@ export class Renderer {
       const col = x & 3;
       this.img(this.tile('lb' + kind + col, () => lobbyTile(col, kind)), x * TW, wy, TW, FH);
     }
+    if (this.isBuilding(o)) this.drawConstruction(o, x0 * TW, wy, tw * TW, FH, f, 1, true);
   }
 
   facilityState(o, type, nightOn, frameEsc, week) {
@@ -391,30 +458,63 @@ export class Renderer {
       } else n = Math.min(cap, n);
     }
     let open = 1;
-    if (COMMERCE.has(type)) {
+    if (type === 'garbage') open = 0;
+    else if (COMMERCE.has(type)) {
       try { open = typeof sim.isOpen === 'function' ? (sim.isOpen(o) ? 1 : 0) : 1; } catch (e) { open = 1; }
     }
     const dirty = o.dirty ? 1 : 0;
     const alt = (num(o.id) % 3 + 3) % 3;
+    if (type === 'garbage') {
+      const fl = Math.max(0, num(o.fill));
+      n = fl >= 1 ? 9 : Math.min(8, Math.round(fl * 8));
+      const h = this.hour;
+      open = h >= 4.5 && h < 6.2 ? 1 : 0;
+    }
     const frame = type === 'escalator' ? frameEsc : 0;
     const wk = type === 'cinema' ? week : 0;
-    return { occ, n, open, dirty, alt, frame, week: wk, night: nightOn };
+    const id = num(o.id);
+    const hh = Math.floor(hash2(id, 4242) * 4096);
+    const seed = hh % 12;
+    const vr = Math.max(0, num(o.variant) | 0) & 15;
+    const des = o.destroyed === 'bomb' ? 1 : o.destroyed === 'fire' ? 2 : o.destroyed ? 1 : 0;
+    return { occ, n, open, dirty, alt, frame, week: wk, night: nightOn, var: vr, seed, flip: (hh >> 6) & 1, destroyed: des };
   }
 
   drawFacility(o, type, tw, th, x, y, top, nightOn, frameEsc, week) {
     const v = this.facilityState(o, type, nightOn, frameEsc, week);
-    const sig = v.n | (v.occ << 5) | (v.dirty << 6) | (v.open << 7) | (v.alt << 8) | (v.night << 10) | (v.week << 11) | (v.frame << 13);
+    if (v.destroyed) { v.n = 0; v.occ = 0; v.dirty = 0; v.open = 1; v.night = 0; v.frame = 0; v.week = 0; v.var = 0; }
+    const sig = (v.n | (v.occ << 5) | (v.dirty << 6) | (v.open << 7) | (v.alt << 8) | (v.night << 10) | (v.week << 11) | (v.frame << 13)
+      | (v.var << 15) | (v.seed << 19) | (v.destroyed << 23) | (v.flip << 25)) >>> 0;
     let m = this.memo.get(o);
     if (!m || m.sig !== sig || m.type !== type || m.tw !== tw || m.th !== th) {
+      const art = v.destroyed === 2 ? 'ruinFire' : v.destroyed ? 'ruinBomb' : type;
       const key = type + '|' + tw + '|' + th + '|' + sig;
-      const img = this.sprite(key, () => makeFacilitySprite(type, tw, th, v));
+      const img = this.sprite(key, () => makeFacilitySprite(art, tw, th, v));
       let fg = null;
       if (type === 'metro') fg = this.sprite('fg' + key, () => makeFacilitySprite('metroFg', tw, th, v));
       m = { sig, type, tw, th, img, fg, v };
       this.memo.set(o, m);
     }
     const ww = tw * TW, hh = th * FH;
+    if (this.isBuilding(o)) {
+      // 工事中: 下から仕上がっていく（上の方は骨組み）
+      this.img(m.img, x, y, ww, hh);
+      this.drawConstruction(o, x, y, ww, hh, num(o.f), th, type !== 'stairs' && type !== 'escalator');
+      return;
+    }
     this.img(m.img, x, y - top, ww, hh + top);
+    if (v.destroyed) {
+      // 焼け跡のくすぶり・瓦礫の土ぼこり
+      const ms = this.nowMs;
+      this.ctx.globalAlpha = 0.35;
+      for (let i = 0; i < Math.max(2, tw >> 2); i++) {
+        const ph = ((ms / 2600) + hash2(num(o.id), i)) % 1;
+        const r = 2 + ph * 5;
+        this.rect(x + 4 + hash2(i, num(o.id)) * (ww - 8) - r, y + hh - 8 - ph * 26, r * 2, r * 1.3, v.destroyed === 2 ? '#2a2826' : '#9a968c');
+      }
+      this.ctx.globalAlpha = 1;
+      return;
+    }
     if (type === 'metro') {
       this.drawTrain(x, y, ww);
       this.img(m.fg, x, y, ww, hh);
@@ -457,6 +557,93 @@ export class Renderer {
     }
   }
 
+  isBuilding(o) { return typeof o.constructUntil === 'number' && o.constructUntil > this.simTime; }
+
+  // 工事中の演出: 骨組み・足場・防音ネット・作業員・溶接の火花・クレーン・進み具合
+  drawConstruction(o, x, y, ww, hh, f0, th, crane) {
+    const ctx = this.ctx, ms = this.nowMs, now = this.simTime;
+    const t1 = num(o.constructUntil), t0 = Math.min(num(o.constructStart, t1 - 60), t1 - 0.01);
+    const pr = Math.max(0, Math.min(1, (now - t0) / (t1 - t0)));
+    const uh = Math.round((1 - pr) * (hh - 3));
+    const id = num(o.id);
+    // 骨組み（まだ仕上がっていない上の部分）
+    if (uh > 0) {
+      const fr = this.tile('frame', frameTile);
+      for (let j = 0; j < th; j++) {
+        const by = y + j * FH;
+        const h = Math.min(FH, y + uh - by);
+        if (h <= 0) break;
+        for (let xx = 0; xx < ww; xx += 16) {
+          const w = Math.min(16, ww - xx);
+          this.imgPart(fr, 0, 0, w, h, x + xx, by, w, h);
+        }
+      }
+      this.rect(x, y + uh - 1, ww, 1, '#e8dcb0');
+    }
+    // 防音ネット（作業している前線のすぐ上は開けておく）
+    const netH = uh - 9;
+    if (netH > 2) {
+      ctx.globalAlpha = 0.42;
+      this.rect(x + 1, y, ww - 2, netH, ((id >> 1) & 1) ? '#2f7a8a' : '#3a8a4a');
+      ctx.globalAlpha = 0.25;
+      for (let xx = 3; xx < ww - 2; xx += 4) this.rect(x + xx, y, 1, netH, '#123018');
+      ctx.globalAlpha = 1;
+    }
+    // 足場（パイプと板）
+    const sTop = y - 2, sBot = Math.min(y + hh - 3, y + uh + 8);
+    if (sBot > sTop) {
+      for (let xx = 2; xx < ww; xx += 16) this.rect(x + xx, sTop, 1, sBot - sTop, '#d8b040');
+      this.rect(x + ww - 2, sTop, 1, sBot - sTop, '#d8b040');
+      for (let yy = sTop + 6; yy < sBot; yy += 8) { this.rect(x, yy, ww, 1, '#8a6a20'); this.rect(x, yy + 1, ww, 0.5, '#5a4410'); }
+    }
+    // 作業員（黄色いヘルメット、オレンジのベスト）
+    const feet = uh > 2 ? y + uh - 1 : y + hh - 4;
+    const cnt = Math.max(1, Math.min(4, Math.round(ww / 40)));
+    for (let i = 0; i < cnt; i++) {
+      const wx = x + 4 + ((i + 0.5) / cnt) * (ww - 10) + Math.sin(ms / 1700 + i * 2 + id) * 4;
+      const ham = ((ms / 180 + i) | 0) % 2;
+      this.rect(wx, feet - 8, 3, 1, '#f0d020');
+      this.rect(wx + 1, feet - 7, 2, 2, '#1a1a1a');
+      this.rect(wx, feet - 5, 3, 3, '#f08020');
+      this.rect(wx + 1, feet - 4, 1, 1, '#e8e8a0');
+      this.rect(wx, feet - 2, 1, 2, '#2a2a3a'); this.rect(wx + 2, feet - 2, 1, 2, '#2a2a3a');
+      this.rect(wx + 3, feet - 6 + ham, 1, 1, '#1a1a1a'); this.rect(wx + 4, feet - 7 + ham * 2, 1, 2, '#6a6a6a');
+    }
+    // 溶接の火花
+    if (pr < 0.98) {
+      const sx = x + 6 + hash2(id, Math.floor(ms / 1500)) * (ww - 12), sy = feet - 6;
+      if (((ms / 90) | 0) % 3) {
+        this.rect(sx, sy, 1, 1, '#ffffff');
+        for (let i = 0; i < 6; i++) {
+          const a = hash2(i, (ms / 90) | 0) * Math.PI * 2, d = 1 + hash2((ms / 90) | 0, i) * 4;
+          this.rect(sx + Math.cos(a) * d, sy + Math.sin(a) * d * 0.7 + d * 0.3, 1, 1, i % 2 ? '#ffe060' : '#ffa020');
+        }
+        ctx.globalAlpha = 0.25; this.rect(sx - 3, sy - 3, 7, 7, '#c8e8ff'); ctx.globalAlpha = 1;
+      }
+    }
+    // クレーン（上が空いている大きめの施設）
+    const grid = this.sim.grid;
+    const cx = Math.floor((x + ww / 2) / TW), above = grid && grid[f0 + th];
+    if (crane && ww >= 48 && (f0 + th > MAX_F || !above || !above[cx])) {
+      const cr = this.tile('crane', craneSprite);
+      const mastX = x + ww - 14;
+      const sx0 = mastX - 51, sy0 = y - cr.height;
+      this.img(cr, sx0, sy0, cr.width, cr.height);
+      const tx = sx0 + 6 + (0.5 + 0.5 * Math.sin(ms / 2600 + id)) * 38;
+      const hookY = sy0 + 10 + (0.5 + 0.5 * Math.sin(ms / 1900 + id)) * (cr.height + Math.max(0, uh) - 20);
+      this.rect(tx - 1, sy0 + 6, 3, 2, '#3a3a3a');
+      this.rect1(tx, sy0 + 8, 0.5, hookY - sy0 - 8, '#2a2a2a');
+      this.rect(tx - 1, hookY, 3, 2, '#3a3a3a');
+      this.rect(tx - 6, hookY + 2, 13, 2, '#c84a2a'); this.rect(tx - 6, hookY + 2, 13, 0.5, '#e87a5a');
+    }
+    // 進み具合のバー
+    if (this.S / this.dpr >= 0.9) {
+      const bw = Math.min(ww - 6, 40);
+      this.rect(x + 3, y + 2, bw, 3, '#000');
+      this.rect(x + 4, y + 3, (bw - 2) * pr, 1, '#f0d020');
+    }
+  }
+
   drawTrain(x, y, ww) {
     // 20 ゲーム分周期で到着 → 停車 → 発車
     const t = (((this.simTime % 20) + 20) % 20);
@@ -484,11 +671,11 @@ export class Renderer {
     const lo = num(e.lo, num(e.f)), hi = num(e.hi, lo);
     const x = num(e.x) * TW;
     const q = e.q || null;
+    const stops = this.stopSet(e);
     for (let f = Math.max(lo, fLo); f <= Math.min(hi, fHi); f++) {
-      const stop = express ? (LOBBY_SET.has(f) || f < 0 ? 1 : 0) : 1;
-      const top = f === hi ? 1 : 0, bot = f === lo ? 1 : 0;
-      const key = 'sh' + w + express + stop + top + bot;
-      this.img(this.tile(key, () => shaftSeg(w, express, stop, top, bot)), x, -(f + 1) * FH, w * TW, FH);
+      const stop = stops.has(f) ? 1 : 0;
+      const key = 'sh' + w + express + stop;
+      this.img(this.tile(key, () => shaftSeg(w, express, stop, 0, 0)), x, -(f + 1) * FH, w * TW, FH);
       if (q) {
         const qf = q[f];
         if (qf) {
@@ -497,18 +684,96 @@ export class Renderer {
         }
       }
     }
+    this.drawMachinePit(x, w, express, lo, hi, fLo, fHi);
+    if (this.isBuilding(e)) this.drawConstruction(e, x, -(hi + 2) * FH, w * TW, (hi - lo + 3) * FH, lo - 1, hi - lo + 3, false);
+  }
+  // 止まる階（sim の e.stops。無ければ lo..hi − config.skip、急行はロビー階と地下）
+  stopSet(e) {
+    const memo = this._stops || (this._stops = new WeakMap());
+    const lo = num(e.lo, num(e.f)), hi = num(e.hi, lo);
+    const src = Array.isArray(e.stops) ? e.stops : (e.config && Array.isArray(e.config.skip) ? e.config.skip : null);
+    let m = memo.get(e);
+    if (m && m.src === src && m.len === (src ? src.length : -1) && m.lo === lo && m.hi === hi && m.type === e.type) return m.set;
+    const set = new Set();
+    if (Array.isArray(e.stops)) for (const f of e.stops) set.add(f);
+    else {
+      const skip = e.config && Array.isArray(e.config.skip) ? new Set(e.config.skip) : null;
+      for (let f = lo; f <= hi; f++) {
+        if (skip ? !skip.has(f) : (e.type !== 'express' || LOBBY_SET.has(f) || f < 0)) set.add(f);
+      }
+    }
+    memo.set(e, { src, len: src ? src.length : -1, lo, hi, type: e.type, set });
+    return set;
+  }
+
+  // 乗り場の階数プレート（止まる階だけ）。ズーム 1 以上で文字、引くと小さな印だけ
+  drawStopPlates(elevs, fLo, fHi) {
+    const ctx = this.ctx, dpr = this.dpr, zc = this.S / dpr;
+    if (zc < 0.45) return;
+    const fs = Math.round(Math.max(8, Math.min(12, FH * zc * 0.34)) * dpr);
+    if (zc >= 0.95) { ctx.font = `bold ${fs}px ui-monospace, Menlo, Consolas, monospace`; ctx.textBaseline = 'middle'; }
+    for (const e of elevs) {
+      if (this.isBuilding(e)) continue;
+      const express = e.type === 'express';
+      const w = num(e.w, express ? 6 : 4), x = num(e.x) * TW;
+      const lo = num(e.lo, num(e.f)), hi = num(e.hi, lo);
+      const stops = this.stopSet(e);
+      const cx = this.X(x + w * TW / 2);
+      for (let f = Math.max(lo, fLo); f <= Math.min(hi, fHi); f++) {
+        if (!stops.has(f)) continue;
+        const top = this.Y(-(f + 1) * FH);
+        if (zc < 0.95) {
+          const s = Math.max(2, Math.round(2 * this.S));
+          ctx.fillStyle = '#000'; ctx.fillRect(cx - s - 1, top + Math.round(this.S) - 1, s * 2 + 2, s + 2);
+          ctx.fillStyle = express ? '#ff9a40' : '#ffd040'; ctx.fillRect(cx - s, top + Math.round(this.S), s * 2, s);
+          continue;
+        }
+        const label = floorName(f).replace(/F$/, '');
+        const tw = ctx.measureText(label).width;
+        const pw = Math.round(tw + fs * 0.6), ph = Math.round(fs * 1.15);
+        const px = Math.round(cx - pw / 2), py = top + Math.round(1.5 * this.S);
+        ctx.fillStyle = '#c8c8d0'; ctx.fillRect(px - dpr, py - dpr, pw + 2 * dpr, ph + 2 * dpr);
+        ctx.fillStyle = '#14161c'; ctx.fillRect(px, py, pw, ph);
+        ctx.fillStyle = LOBBY_SET.has(f) ? '#7ae0ff' : express ? '#ffa850' : '#ffd040';
+        ctx.fillText(label, px + (pw - tw) / 2, py + ph / 2 + dpr * 0.5);
+      }
+    }
+  }
+
+  drawMachinePit(x, w, express, lo, hi, fLo, fHi) {
+    if (hi + 1 >= fLo && hi + 1 <= fHi + 1) this.img(this.tile('mr' + w + express, () => machineRoom(w, express)), x, -(hi + 2) * FH, w * TW, FH);
+    if (lo - 1 >= fLo - 1 && lo - 1 <= fHi) this.img(this.tile('pit' + w + express, () => pitSprite(w, express)), x, -lo * FH, w * TW, FH);
   }
 
   drawCars(e, dtMs) {
+    if (this.isBuilding(e)) return;
     const cars = Array.isArray(e.cars) ? e.cars : [];
     const express = e.type === 'express' ? 1 : 0;
     const w = num(e.w, express ? 6 : 4);
     const x = num(e.x) * TW + 2;
     const [, wy0, , wy1] = this.vb;
-    for (const car of cars) {
+    const lo = num(e.lo, num(e.f)), hi = num(e.hi, lo);
+    const shaftTop = -(hi + 1) * FH;
+    const cw = w * TW - 4;
+    for (let ci = 0; ci < cars.length; ci++) {
+      const car = cars[ci];
       if (!car) continue;
       const pos = num(car.pos, num(e.lo));
       const top = -(pos + 1) * FH + 1;
+      const vel = num(car.v, 0);
+      // ロープ（カゴの上から機械室へ）と釣り合いおもり
+      if (top > wy0 - 4 && shaftTop < wy1) {
+        const cx = x + (cw >> 1);
+        this.rect1(cx - 2, Math.max(shaftTop, wy0 - 2), 0.5, top - Math.max(shaftTop, wy0 - 2), '#15151a');
+        this.rect1(cx + 1, Math.max(shaftTop, wy0 - 2), 0.5, top - Math.max(shaftTop, wy0 - 2), '#15151a');
+      }
+      const cwPos = lo + hi - pos;
+      const cwTop = -(cwPos + 1) * FH + 4;
+      if (ci === 0 && cwTop + 10 > wy0 && cwTop < wy1) {
+        const cwx = x + cw - 3 + (ci & 1);
+        this.rect(cwx, shaftTop, 1, cwTop - shaftTop, '#2a2a30');
+        this.rect(cwx - 1, cwTop, 3, 10, '#6a6458'); this.rect(cwx - 1, cwTop, 3, 1, '#2a2a2a'); this.rect(cwx - 1, cwTop + 9, 3, 1, '#2a2a2a');
+      }
       let a = this.carAnim.get(car);
       if (!a) { a = { open: 0 }; this.carAnim.set(car, a); }
       const target = car.state === 'doors' ? 4 : 0;
@@ -521,6 +786,77 @@ export class Renderer {
       const nv = Math.min(n, 30);
       const spr = this.sprite('car' + w + express + '|' + nv + '|' + a.open, () => carSprite(w, express, nv, a.open));
       this.img(spr, x, top, w * TW - 4, CAR_H);
+      // 速度に応じた動きの線（加減速が見える）
+      const sp = Math.abs(vel);
+      if (sp > 1.5) {
+        const k = Math.min(1, (sp - 1.5) / 8);
+        this.ctx.globalAlpha = 0.25 + 0.35 * k;
+        const len = 3 + k * 10;
+        const ty = vel > 0 ? top + CAR_H : top - len;
+        for (const dx of [2, (cw >> 1), cw - 3]) this.rect1(x + dx, ty, 0.5, len, '#e8e0c0');
+        this.ctx.globalAlpha = 1;
+      }
+    }
+  }
+
+  // 各フロアの外壁の位置（構造のまとまりの左端・右端）。sim.revision が変わったら作り直す。
+  // 一番外側の端は必ず、内側の端は外に 6 マス以上の空きがあるときだけ非常階段を付ける。
+  floorEdges(grid) {
+    const sim = this.sim;
+    const rev = typeof sim.revision === 'number' ? sim.revision : -1;
+    const c = this._edges;
+    this._edgeFrame = (this._edgeFrame || 0) + 1;
+    if (c && c.grid === grid && c.rev === rev && (rev >= 0 || this._edgeFrame % 60)) return c;
+    const GAP = 6;
+    const left = [], right = [];   // left[f] = 左側に階段を付けるマス x の配列
+    for (let f = 0; f <= MAX_F; f++) {
+      const row = grid[f];
+      const L = [], R = [];
+      left.push(L); right.push(R);
+      if (!row) continue;
+      let x = 0;
+      while (x < W) {
+        while (x < W && !row[x]) x++;
+        if (x >= W) break;
+        const a = x;
+        while (x < W && row[x]) x++;
+        const b = x - 1;
+        let gl = 0; for (let k = a - 1; k >= 0 && !row[k] && gl < GAP; k--) gl++;
+        let gr = 0; for (let k = b + 1; k < W && !row[k] && gr < GAP; k++) gr++;
+        if (gl >= GAP || gl === a) L.push(a);
+        if (gr >= GAP || b + gr === W - 1) R.push(b);
+      }
+    }
+    this._edges = { grid, rev, left, right };
+    return this._edges;
+  }
+
+  // 非常階段（飾り）: 地上の各フロアの外壁に、ジグザグの階段と踊り場
+  drawFireEscapes(grid, fLo, fHi) {
+    const { left, right } = this.floorEdges(grid);
+    const [wx0, , wx1] = this.vb;
+    const spr0 = this.tile('fe0', () => fireEscapeSprite(0)), spr1 = this.tile('fe1', () => fireEscapeSprite(1));
+    const spr0R = this.tile('fe0R', () => mirrored(spr0)), spr1R = this.tile('fe1R', () => mirrored(spr1));
+    const top = this.tile('feTop', fireEscapeTop), topR = this.tile('feTopR', () => mirrored(top));
+    const lit = this.night > 0.3;
+    for (let f = Math.max(0, fLo); f <= Math.min(MAX_F, fHi); f++) {
+      const wy = -(f + 1) * FH;
+      const par = f & 1;
+      const upL = f < MAX_F ? left[f + 1] : null, upR = f < MAX_F ? right[f + 1] : null;
+      for (const ex of left[f]) {
+        const lx = ex * TW - 3 - ESC_W;
+        if (lx + ESC_W < wx0 || lx > wx1) continue;
+        this.img(par ? spr1 : spr0, lx, wy, ESC_W, FH);
+        if (!upL || upL.indexOf(ex) < 0) this.img(top, lx, wy - 6, ESC_W, 9);
+        if (lit) this.rect(lx + 16, wy + 13, 1, 1, '#ffe08a');
+      }
+      for (const ex of right[f]) {
+        const rx = (ex + 1) * TW + 3;
+        if (rx + ESC_W < wx0 || rx > wx1) continue;
+        this.img(par ? spr1R : spr0R, rx, wy, ESC_W, FH);
+        if (!upR || upR.indexOf(ex) < 0) this.img(topR, rx, wy - 6, ESC_W, 9);
+        if (lit) this.rect(rx + 1, wy + 13, 1, 1, '#ffe08a');
+      }
     }
   }
 
@@ -639,11 +975,13 @@ export class Renderer {
     // 施設ごと
     const bubbles = [];
     this.badges.length = 0;
+    const zc = this.S / this.dpr;
     const evalFn = typeof sim.evalLevel === 'function' ? sim.evalLevel.bind(sim) : null;
     for (const o of this.visObjs || []) {
       const type = o.type;
       const tw = num(o.w, (TYPES[type] && TYPES[type].w) || 1), th = num(o.h, (TYPES[type] && TYPES[type].h) || 1);
       const x = num(o.x) * TW, y = -(num(o.f) + th) * FH;
+      if (o.destroyed || this.isBuilding(o)) continue;
       if (o.infested) { this.drawRoaches(o, x, y, tw * TW, ms); this.badges.push(1, x + tw * TW, y); }
       else if (o.dirty) this.badges.push(2, x + tw * TW, y);
       if (o.unreachable === true) {
@@ -658,6 +996,7 @@ export class Renderer {
         const c = lv && EVAL_COL[lv];
         if (c) { this.rect(x + 2, y + 2, 4, 3, '#000'); this.rect(x + 3, y + 2, 2, 2, c); }
       }
+      if (o.brand && zc >= 1.9) this.drawBrand(o, x, y, tw * TW);
     }
     // 爆弾捜索
     const bomb = sim.bomb;
@@ -668,7 +1007,7 @@ export class Renderer {
         const row = sim.grid && sim.grid[f];
         if (!row) continue;
         let a = -1, b = -1;
-        for (let x = 0; x < W; x++) if (row[x]) { if (a < 0) a = x; b = x; }
+        for (let x = this.xA; x <= this.xB; x++) if (row[x]) { if (a < 0) a = x; b = x; }
         if (a < 0) continue;
         const wy = -(f + 1) * FH;
         if (has(f)) {
@@ -717,9 +1056,105 @@ export class Renderer {
     // サンタ
     const santa = sim.santa;
     if (santa && typeof santa === 'object') this.guard(() => this.drawSanta(santa, ms));
+    // 消防ヘリ
+    const heli = sim.heli;
+    if (heli && typeof heli === 'object') this.guard(() => this.drawHeli(heli, ms));
     // 吹き出し
     const bs = bubbleSprite();
     for (const [bx, by] of bubbles) this.img(bs, bx, by - 4 + Math.round(Math.sin(ms / 250) * 1), bs.width, bs.height);
+  }
+
+  // 看板の上に店名・社名（brand）を重ねる（ズーム時のみ、日本語可）
+  drawBrand(o, x, y, ow) {
+    const m = this.memo.get(o);
+    const sg = m && m.img && m.img.sign;
+    if (!sg) return;
+    const ctx = this.ctx, dpr = this.dpr;
+    const x0 = this.X(x + sg.x), y0 = this.Y(y + sg.y), x1 = this.X(x + sg.x + sg.w), y1 = this.Y(y + sg.y + sg.h);
+    let w = x1 - x0, h = y1 - y0;
+    if (h < 6 * dpr) return;
+    const text = String(o.brand);
+    let fs = Math.min(h * 0.72, 16 * dpr);
+    ctx.font = `bold ${fs}px system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif`;
+    let tw = ctx.measureText(text).width;
+    // 看板より長ければ看板を少し広げ、それでも足りなければ文字を縮める
+    const maxW = Math.max(w, Math.min(tw + 6 * dpr, w * 2.2));
+    if (tw + 4 * dpr > maxW) { fs = Math.max(7 * dpr, fs * (maxW - 4 * dpr) / tw); ctx.font = `bold ${fs}px system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif`; tw = ctx.measureText(text).width; }
+    const bw = Math.max(w, Math.min(maxW, tw + 6 * dpr));
+    const fx0 = this.X(x) + 2 * dpr, fx1 = this.X(x + ow) - 2 * dpr;
+    let bx = Math.round(x0 + w / 2 - bw / 2);
+    bx = Math.max(fx0, Math.min(fx1 - bw, bx));
+    ctx.fillStyle = '#000';
+    ctx.fillRect(bx - 1, y0 - 1, Math.round(bw) + 2, h + 2);
+    ctx.fillStyle = sg.bg || '#f6f0dc';
+    ctx.fillRect(bx, y0, Math.round(bw), h);
+    ctx.save();
+    ctx.beginPath(); ctx.rect(bx, y0, bw, h); ctx.clip();
+    ctx.fillStyle = sg.fg || '#202020';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, bx + (bw - tw) / 2, y0 + h / 2 + dpr * 0.5);
+    ctx.restore();
+  }
+
+  drawHeli(h, ms) {
+    const ctx = this.ctx;
+    const hx = num(h.x, NaN) * TW, hf = num(h.f, NaN);
+    if (!(hx === hx) || !(hf === hf)) return;
+    const hy = -(hf + 0.5) * FH;
+    const st = this._heli || (this._heli = { x: hx, dir: 1 });
+    if (h.phase === 'spray' && h.targetX != null) st.dir = num(h.targetX) * TW >= hx - 1 ? 1 : -1;
+    else if (hx > st.x + 0.01) st.dir = 1; else if (hx < st.x - 0.01) st.dir = -1;
+    st.x = hx;
+    const base = heliSprite();
+    const spr = st.dir > 0 ? base : this.tile('heliL', () => mirrored(base));
+    const [wx0, wy0, wx1, wy1] = this.vb;
+    const bob = Math.sin(ms / 220) * 1.2;
+    const K = 1.5;
+    const sx = hx - 20 * K, sy = hy - 9 * K + bob;
+    // 散水
+    if (h.phase === 'spray') {
+      const tx = num(h.targetX, hx / TW) * TW, tf = num(h.targetF, hf - 3);
+      const by = sy + 26 * K / 1.5 + 6, bx = hx - 2;
+      this.rect1(hx, sy + 16 * K, 0.5, by - sy - 16 * K, '#3a3a3a');
+      this.rect(bx, by, 5, 4, '#e07a20'); this.rect(bx, by, 5, 1, '#000');
+      const ty = -(tf + 1) * FH + 4, bottom = -tf * FH - 3;
+      if (bottom > wy0 && by < wy1) {
+        ctx.globalAlpha = 0.22 + 0.06 * Math.sin(ms / 120);
+        this.rect(tx - 28, ty, 56, bottom - ty, '#9ad4ff');
+        ctx.globalAlpha = 1;
+        for (let i = 0; i < 60; i++) {
+          const ph = ((ms / 650) + i / 60) % 1;
+          const spread = (hash2(i, 77) - 0.5) * (8 + ph * 48);
+          const x = bx + 2 + (tx - bx - 2) * ph + spread;
+          const y = by + 4 + (bottom - by - 4) * ph;
+          ctx.globalAlpha = 0.85 - ph * 0.3;
+          this.rect1(x, y, 1, 2 + ph * 2, i % 3 ? '#7ac4f8' : '#e8f6ff');
+        }
+        ctx.globalAlpha = 1;
+        // しぶき
+        for (let i = 0; i < 10; i++) {
+          const ph = ((ms / 400) + i / 10) % 1;
+          ctx.globalAlpha = 1 - ph;
+          this.rect1(tx + (hash2(i, 5) - 0.5) * 50, bottom - 2 - ph * 5, 1, 1, '#ffffff');
+        }
+        ctx.globalAlpha = 1;
+      }
+    }
+    if (sx + 40 * K < wx0 || sx > wx1 || sy + 18 * K < wy0 || sy - 4 > wy1) return;
+    this.img(spr, sx, sy, spr.width * K, spr.height * K);
+    // メインローター（回転は長さの変化で表現）
+    const mast = sx + (st.dir > 0 ? 23 : 17) * K;
+    const fr = ((ms / 35) | 0) % 4;
+    const half = [21, 14, 5, 14][fr] * K;
+    ctx.globalAlpha = 0.22; this.rect(mast - 21 * K, sy, 42 * K, 1.5, '#c8ccd0'); ctx.globalAlpha = 1;
+    this.rect(mast - half, sy, half * 2, 1.5, '#202024');
+    this.rect(mast - 1.5, sy, 3, 2, '#3a3a3a');
+    // テールローター
+    const tr = st.dir > 0 ? sx + 3 * K : sx + 37 * K;
+    const tf2 = ((ms / 30) | 0) % 2;
+    this.rect(tr - (tf2 ? 4 : 0), sy + 6 - (tf2 ? 0 : 4), tf2 ? 9 : 1.5, tf2 ? 1.5 : 9, '#3a3a40');
+    // 回転灯
+    if (((ms / 300) | 0) % 2) this.rect(sx + (st.dir > 0 ? 24 : 15) * K, sy + 3 * K, 1.5, 1.5, '#ff4040');
   }
 
   drawSanta(santa, ms) {
@@ -795,10 +1230,13 @@ export class Renderer {
   // 状態バッジ（施設の右上・画面上の最小サイズを保つ）と待ち人数
   drawBadges() {
     const ctx = this.ctx, dpr = this.dpr, ms = this.nowMs;
-    const sc = Math.max(this.S, 1.6 * dpr);
+    const zc = this.S / dpr;
+    // 引いた視点では小さく（全体が見えるときに画面を埋めないように）
+    const sc = zc >= 0.75 ? Math.max(this.S, 1.6 * dpr) : Math.max(this.S, 0.9 * dpr);
     const b = this.badges;
     for (let i = 0; i < b.length; i += 3) {
       const kind = b[i];
+      if (zc < 0.6 && kind === 2) continue;
       const spr = kind === 1 ? roachIcon() : kind === 2 ? dirtyIcon() : warnIcon();
       const w = Math.round(spr.width * sc), h = Math.round(spr.height * sc);
       let sx = this.X(b[i + 1]), sy = this.Y(b[i + 2]);
@@ -813,11 +1251,12 @@ export class Renderer {
     // エレベーター待ちの人数
     const q = this.qBadges;
     if (!q.length) return;
-    const fs = Math.round(Math.max(10, Math.min(13, 10 * this.S / dpr)) * dpr);
+    const fs = Math.round(Math.max(zc < 0.6 ? 8 : 10, Math.min(13, 10 * zc)) * dpr);
     ctx.font = `bold ${fs}px system-ui, -apple-system, sans-serif`;
     ctx.textBaseline = 'middle';
     for (let i = 0; i < q.length; i += 4) {
       const n = q[i];
+      if (zc < 0.6 && n <= 25) continue;
       const label = String(n);
       const tw = ctx.measureText(label).width;
       const pw = Math.round(tw + fs * 0.8), ph = Math.round(fs * 1.25);
@@ -935,12 +1374,13 @@ export class Renderer {
       }
     }
     // ホバー
-    if (view.hover && !view.ghost) {
+    if (view.hover && !view.ghost && !(Array.isArray(view.ghosts) && view.ghosts.length)) {
       const h = view.hover;
       this.strokeWorld([num(h.x) * TW, -(num(h.f) + 1) * FH, TW, FH], 'rgba(255,255,255,0.75)', Math.max(1, dpr), false);
     }
     // ゴースト
     if (view.ghost) this.drawGhost(view.ghost);
+    if (Array.isArray(view.ghosts)) for (const g of view.ghosts) if (g) this.guard(() => this.drawGhost(g));
     // 爆弾のアラーム（画面の縁）
     if (sim && sim.bomb && !sim.bomb.found) {
       const a = 0.18 + 0.18 * Math.sin(ms / 200);
@@ -987,6 +1427,16 @@ export class Renderer {
       b = [num(g.x) * TW, -(num(g.f) + h) * FH, num(g.w, 1) * TW, h * FH];
     }
     const ok = g.ok !== false;
+    // エレベーターは機械室とピットも含めて出す
+    if (g.lo != null || g.hi != null) {
+      const lo = Math.min(num(g.lo), num(g.hi, num(g.lo))), hi = Math.max(num(g.lo), num(g.hi, num(g.lo)));
+      const w = num(g.w, 4), express = (g.type === 'express' || w >= 6) ? 1 : 0, x = num(g.x) * TW;
+      ctx.globalAlpha = 0.6;
+      this.img(this.tile('mr' + w + express, () => machineRoom(w, express)), x, -(hi + 2) * FH, w * TW, FH);
+      this.img(this.tile('pit' + w + express, () => pitSprite(w, express)), x, -lo * FH, w * TW, FH);
+      ctx.globalAlpha = 1;
+      this.strokeWorld([x, -(hi + 2) * FH, w * TW, (hi - lo + 3) * FH], ok ? 'rgba(80,255,120,0.55)' : 'rgba(255,70,70,0.55)', Math.max(1, dpr), false);
+    }
     // 施設の見た目を薄く出す（UI が ghost.type を渡した場合）
     const type = g.type;
     if (ok && type && TYPES[type] && !isElev(type) && type !== 'floor' && type !== 'lobby' && type !== 'bulldoze') {
@@ -1043,6 +1493,11 @@ export class Renderer {
       ctx.fillText(label, x0 + padX, cy + Math.round(dpr * 0.5));
     }
   }
+}
+
+function makeCanvasLike(w, h) {
+  if (typeof document !== 'undefined') { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+  return new OffscreenCanvas(w, h);
 }
 
 function roundRect(ctx, x, y, w, h, r) {
