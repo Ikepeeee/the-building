@@ -664,38 +664,33 @@ export function floorTile(col) {
 }
 
 // ---- 移動手段 ----
+// 本家と同じく、背景のない細い斜めの帯だけを描く（後ろのテナントがほぼ隠れない）。
+// 左下（この階の床）から右上（上の階の床）へ、黒縁・明るい踏み面・段の刻みの帯。
+function diagonalBand(p, x0, x1, fy, body, top, edge, stepAt) {
+  for (let x = x0; x < x1; x++) {
+    const t = (x - x0) / (x1 - x0 - 1);
+    const y = Math.round(fy - 1 - t * (fy - 1));
+    p.p(x, y - 1, edge);
+    p.p(x, y, stepAt(x) ? edge : top);
+    p.r(x, y + 1, 1, 2, body);
+    p.p(x, y + 3, edge);
+  }
+  // 上下の踊り場（床に沿った短い板）
+  p.r(x0 - 3, fy - 1, 3, 1, top); p.r(x0 - 3, fy, 3, 1, edge);
+  p.r(x1, 0, 3, 1, top); p.r(x1, 1, 3, 1, edge);
+}
 function stairsArt(p, v) {
-  const W = p.w, H = p.h, fy = H - 3;
-  // 背景は透明（後ろの施設やフロアが見える）
-  p.r(2, fy - 1, 4, 1, '#4a463e');
-  const steps = 7, rise = fy / steps, run = (W - 8) / steps;
-  for (let i = 0; i < steps; i++) {
-    const x = Math.round(4 + i * run), y = Math.round(fy - (i + 1) * rise);
-    p.r(x, y, Math.ceil(run), fy - y, '#9a948a'); p.r(x, y + 2, Math.ceil(run), fy - y - 2, '#8a847a');
-    p.r(x, y, Math.ceil(run), 1, '#4a463e');
-    p.r(x, y + 1, 1, Math.max(1, Math.round(rise) - 1), '#4a463e');
-  }
-  p.line(6, fy - 7, W - 4, -1, '#2a2a2a');
-  for (let i = 1; i < steps; i += 2) {
-    const x = Math.round(4 + i * run + run / 2), y = Math.round(fy - (i + 1) * rise);
-    p.r(x, y - 6, 1, 6, '#5a5650');
-  }
+  const W = p.w, fy = p.h - 3;
+  diagonalBand(p, 4, W - 4, fy, '#a8a49a', '#e4e0d6', '#2a2824', (x) => x % 3 === 0);
 }
 function escalatorArt(p, v) {
-  const W = p.w, H = p.h, fy = H - 3;
-  const x0 = 4, x1 = W - 4;
-  const g = p.g;
-  for (let x = x0; x < x1; x++) {
-    const t = (x - x0) / (x1 - x0);
-    const y = Math.round(fy - 2 - t * (fy - 1));
-    // ガラスの欄干
-    p.r(x, y - 6, 1, 5, 'rgba(184,220,236,0.6)');
-    p.p(x, y - 7, '#202020');
-    p.p(x, y, ((x + v.frame) % 4 === 0) ? '#3a3a3a' : '#6a6a70');
-    p.r(x, y + 1, 1, 4, '#a8b0b8');
-    p.p(x, y + 5, '#5a6068');
+  const W = p.w, fy = p.h - 3, x0 = 4, x1 = W - 4;
+  diagonalBand(p, x0, x1, fy, '#9aa2ac', '#d8dee6', '#24282e', (x) => (x + v.frame) % 4 === 0);
+  // 細い手すり（線だけ）
+  for (let x = x0; x < x1; x += 1) {
+    const t = (x - x0) / (x1 - x0 - 1);
+    p.p(x, Math.round(fy - 1 - t * (fy - 1)) - 5, '#2c3e50');
   }
-  p.r(0, fy - 1, x0 + 2, 1, '#6a6a70'); p.r(x1 - 2, 0, 6, 1, '#6a6a70');
 }
 export function shaftSeg(w, express, stop, top, bottom) {
   const W = w * TILE_W;

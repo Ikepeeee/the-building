@@ -525,7 +525,7 @@ export class Renderer {
     if (COMMERCE.has(type)) dark = v.open ? 0 : 0.42 + 0.3 * night;
     else if (ROOMS.has(type)) dark = !v.occ ? 0.12 + 0.66 * night : v.n === 0 ? 0.74 * night : 0;
     else if (SERVICE.has(type)) dark = v.n === 0 ? 0.55 * night : 0;
-    else if (type === 'stairs' || type === 'escalator') dark = 0.3 * night;
+    // 階段・エスカレーターは細い帯だけなので暗くしない（四角く暗くすると後ろの施設まで隠れる）
     if (dark > 0.01) {
       this.ctx.globalAlpha = Math.min(0.85, dark);
       this.rect(x + 1, y, ww - 1, hh - 2, '#080c22');
