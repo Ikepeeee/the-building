@@ -1,0 +1,20 @@
+{
+  "name": "The Building",
+  "short_name": "Building",
+  "description": "ブラウザで遊べるビル経営シミュレーション",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#1c2a6b",
+  "theme_color": "#1c2a6b",
+  "lang": "ja",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Crect width='16' height='16' fill='%232b4fa8'/%3E%3Crect x='0' y='13' width='16' height='3' fill='%235a3d22'/%3E%3Crect x='5' y='2' width='6' height='11' fill='%23222'/%3E%3Crect x='6' y='3' width='4' height='10' fill='%23d9d4c4'/%3E%3Crect x='6' y='4' width='1' height='1' fill='%23ffd34d'/%3E%3Crect x='8' y='4' width='1' height='1' fill='%23ffd34d'/%3E%3Crect x='7' y='6' width='1' height='1' fill='%23ffd34d'/%3E%3Crect x='9' y='6' width='1' height='1' fill='%23ffd34d'/%3E%3Crect x='6' y='8' width='1' height='1' fill='%23ffd34d'/%3E%3Crect x='8' y='8' width='1' height='1' fill='%23ffd34d'/%3E%3Crect x='7' y='11' width='2' height='2' fill='%23553'/%3E%3Crect x='7' y='0' width='2' height='2' fill='%23ffd34d'/%3E%3C/svg%3E",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

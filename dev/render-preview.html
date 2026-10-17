@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Render Preview</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; touch-action: none; }
+  #hud { position: fixed; right: 6px; top: 6px; color: #fff; font: 11px/1.4 ui-monospace, monospace; background: rgba(0,0,0,.55); padding: 4px 6px; border-radius: 4px; pointer-events: none; white-space: pre; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"></div>
+<script type="module">
+// 使い方: ?hour=12&zoom=2&f=5&x=40&people=200&speed=1&ghost=1&sel=1&real=1&hud=0
+import { Renderer } from '../js/render/renderer.js';
+import { TILE_W, FLOOR_H } from '../js/sim/constants.js';
+import { MockTower } from './mock-sim.js';
+
+const q = new URLSearchParams(location.search);
+const num = (k, d) => (q.has(k) ? parseFloat(q.get(k)) : d);
+const hour = q.has('hour') ? num('hour', 12) : null;
+let sim;
+if (q.get('real') === '1') {
+  const { Tower } = await import('../js/sim/tower.js');
+  sim = new Tower({ seed: 7 });
+  if (q.get('scene') === 'demo') {
+    sim.money = 1e9; sim.star = 5;
+    const fails = [];
+    const B = (tool, p) => { const r = sim.build(tool, p); if (!r || !r.ok) fails.push(tool + JSON.stringify(p) + ':' + (r && r.reason)); return r; };
+    B('lobby', { f: 0, x: 30, x2: 109 });
+    for (let f = 1; f <= 16; f++) B('floor', { f, x: 30, x2: 109 });
+    for (let f = -1; f >= -4; f--) B('floor', { f, x: 30, x2: 109 });
+    B('elevator', { f: 0, x: 66, f2: 16 }); B('elevator', { f: -4, x: 70, f2: 12 });
+    B('express', { f: -3, x: 74, f2: 14 });
+    B('stairs', { f: 0, x: 32 }); B('escalator', { f: 0, x: 100 }); B('stairs', { f: 1, x: 32 });
+    for (const [t, f, x] of [['fastfood', 1, 40], ['shop', 1, 80], ['restaurant', 1, 92 - 12]]) B(t, { f, x });
+    B('cinema', { f: 2, x: 34 }); B('partyHall', { f: 2, x: 80 });
+    B('security', { f: 4, x: 30 }); B('housekeeping', { f: 4, x: 46 }); B('medical', { f: 4, x: 80 });
+    for (let f = 5; f <= 8; f++) { for (let i = 0; i < 4; i++) B('office', { f, x: 30 + i * 9 }); for (let i = 0; i < 3; i++) B('office', { f, x: 80 + i * 9 }); }
+    for (let f = 9; f <= 11; f++) { B('condo', { f, x: 30 }); B('condo', { f, x: 46 }); B('condo', { f, x: 80 }); }
+    for (let f = 12; f <= 13; f++) { for (let i = 0; i < 6; i++) B('hotelSingle', { f, x: 30 + i * 4 }); for (let i = 0; i < 4; i++) B('hotelTwin', { f, x: 80 + i * 6 }); }
+    B('hotelSuite', { f: 14, x: 30 }); B('hotelSuite', { f: 14, x: 80 });
+    B('metro', { f: -4, x: 32 }); B('recycling', { f: -4, x: 80 });
+    window.__fails = fails;
+  }
+  if (q.has('steps')) for (let i = 0; i < +q.get('steps'); i++) sim.step(1);
+} else {
+  sim = new MockTower({ hour, people: num('people', 160), bombFound: q.get('bombFound') === '1', santa: q.get('santa') !== '0', santaF: q.has('santaF') ? +q.get('santaF') : undefined, bomb: q.get('bomb') !== '0' });
+}
+window.sim = sim;
+const canvas = document.getElementById('c');
+const r = new Renderer(canvas, sim);
+window.renderer = r;
+const cam = { x: 0, y: 0, zoom: num('zoom', 2) };
+function center(f, x) {
+  cam.x = x * TILE_W - innerWidth / cam.zoom / 2;
+  cam.y = -(f + 0.5) * FLOOR_H - innerHeight / cam.zoom / 2;
+}
+center(num('f', 3), num('x', 70));
+function size() { r.resize(innerWidth, innerHeight); }
+addEventListener('resize', size); size();
+
+const view = { cam, ghost: null, selectedId: null, hover: null, nowMs: 0 };
+if (q.get('ghost') === '1') {
+  view.ghost = { x: 30, w: 9, f: 21, h: 1, ok: true, label: 'オフィス $40,000', type: 'office' };
+}
+if (q.get('ghost') === '2') view.ghost = { x: 100, w: 16, f: 6, h: 1, ok: false, label: 'ここには建てられません' };
+if (q.get('ghost') === '3') view.ghost = { x: 50, w: 4, lo: 2, hi: 12, ok: true, label: 'エレベーター 2F〜13F' };
+if (q.get('sel') === '1') { const o = sim.objAt ? sim.objAt(1, 20) : null; if (o) view.selectedId = o.id; }
+if (q.has('hx')) view.hover = { f: num('hf', 0), x: num('hx', 0) };
+
+// 操作（ドラッグでパン・ホイールでズーム）
+let drag = null;
+canvas.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY, cx: cam.x, cy: cam.y }; canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener('pointermove', (e) => {
+  if (drag) { cam.x = drag.cx - (e.clientX - drag.x) / cam.zoom; cam.y = drag.cy - (e.clientY - drag.y) / cam.zoom; }
+  const wx = e.clientX / cam.zoom + cam.x, wy = e.clientY / cam.zoom + cam.y;
+  view.hover = { x: Math.floor(wx / TILE_W), f: Math.floor(-wy / FLOOR_H) };
+});
+canvas.addEventListener('pointerup', () => { drag = null; });
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const wx = e.clientX / cam.zoom + cam.x, wy = e.clientY / cam.zoom + cam.y;
+  cam.zoom = Math.max(0.25, Math.min(6, cam.zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+  cam.x = wx - e.clientX / cam.zoom; cam.y = wy - e.clientY / cam.zoom;
+}, { passive: false });
+addEventListener('keydown', (e) => {
+  if (e.key === 'n' && sim.hourFixed != null) sim.hourFixed = (sim.hourFixed + 1) % 24;
+});
+
+const hud = document.getElementById('hud');
+if (q.get('hud') === '0') hud.style.display = 'none';
+const speed = num('speed', 1);
+if (q.has('bench')) {
+  const N = +q.get('bench');
+  for (let i = 0; i < 5; i++) { sim.step(0.1); view.nowMs = i * 16; r.render(view); }
+  const t0 = performance.now();
+  for (let i = 0; i < N; i++) { sim.step(0.1); view.nowMs = 100 + i * 16; r.render(view); }
+  const avg = (performance.now() - t0) / N;
+  document.title = 'BENCH ' + avg.toFixed(2);
+  hud.style.fontSize = '20px';
+  window.__bench = `bench avg ${avg.toFixed(2)}ms/frame (incl. sim.step) people=${r.stats.people} objs=${r.stats.objs}`;
+}
+let last = performance.now(), fps = 0, acc = 0, frames = 0;
+function loop(now) {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  if (speed > 0) sim.step(dt * 6 * speed);
+  view.nowMs = now;
+  r.render(view);
+  frames++; acc += dt;
+  if (acc > 0.5) { fps = frames / acc; frames = 0; acc = 0; }
+  hud.textContent = (window.__bench ? window.__bench + '\n' : '') + (window.__fails && window.__fails.length ? 'FAIL ' + window.__fails.slice(0, 6).join('\n') + '\n' : '') + `fps ${fps.toFixed(0)}  draw ${r.stats.ms.toFixed(1)}ms\nobjs ${r.stats.objs}  people ${r.stats.people}\n${sim.hour}:${String(sim.minute).padStart(2, '0')} zoom ${cam.zoom.toFixed(2)}` + (r.lastError ? '\nERR ' + (r.lastError.stack || r.lastError) : '');
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
