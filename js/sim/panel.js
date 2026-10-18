@@ -21,7 +21,7 @@ export const PanelMixin = {
       const w = r.wait / r.n, st = r.stairs / r.n, wk = r.walk / r.n, cr = r.crowd / r.n;
       out.push({ label: `エレベーター待ち 平均${w.toFixed(1)}分`, level: lv3(w, 3, 8) });
       if (st > 0.5) out.push({ label: `階段の上り下り（ストレス ${st.toFixed(0)}）`, level: lv3(st, 6, 15) });
-      out.push({ label: `移動距離 歩き平均${wk.toFixed(0)}分`, level: lv3(wk, 12, 25) });
+      out.push({ label: `移動距離 歩き平均${wk.toFixed(0)}分`, level: lv3(wk, 15, 30) });
       if (cr > 0.2) out.push({ label: `エレベーターの混雑（ストレス ${cr.toFixed(1)}）`, level: lv3(cr, 2, 6) });
     }
     if (o.noisy) out.push({ label: '騒音（近くの飲食店・映画館など）', level: 'bad' });

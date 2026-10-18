@@ -413,8 +413,30 @@ export class Tower {
 
   spotIn(o) { return o.x + 0.5 + this.rand(Math.max(0, o.w - 1)); }
 
-  spawnAt(p, ent) {
-    p.f = ent.f; p.x = ent.x0 + 0.5 + this.rand(Math.max(0, ent.x1 - ent.x0 - 1));
+  // 入口のどこから入るか。aimX（行き先の x）があれば、その近くの扉から入る。
+  // 横に長いロビーでランダムな位置から入ると、反対端まで歩かされて「歩き」の評価が常に悪くなるため。
+  doorX(ent, aimX) {
+    const lo = ent.x0 + 0.5, hi = ent.x1 - 0.5;
+    if (aimX === undefined || aimX === null || !Number.isFinite(aimX)) return lo + this.rand(Math.max(0, hi - lo));
+    return Math.max(lo, Math.min(hi, aimX + this.rand(6) - 3));
+  }
+
+  // 入口の階から (f, x) へ向かう人が、どの扉から入るのがよいか。
+  // 最初に乗る移動手段（行き先に近いもの）の前の扉。乗り継ぎ不要なら行き先の前の扉。
+  doorAim(ent, f, x) {
+    const legs = this.route(ent.f, f);
+    if (!legs || !legs.length) return x;
+    const leg = legs[0];
+    if (leg.kind === 'elev' || leg.kind === 'express') {
+      const e = this.pickElevator(leg, x);
+      return e ? e.x + e.w / 2 : x;
+    }
+    const st = this.pickStairs(leg.kind, Math.min(leg.from, leg.to), x);
+    return st ? st.x + st.w / 2 : x;
+  }
+
+  spawnAt(p, ent, aimX) {
+    p.f = ent.f; p.x = this.doorX(ent, aimX);
     p.state = 'walk'; p.loc = null;
     this.active.add(p);
   }
@@ -506,7 +528,8 @@ export class Tower {
     for (const e of this.byType[type]) {
       if (!this.serves(e, a, b)) continue;
       const q = e.q[a];
-      const s = Math.abs(e.x + e.w / 2 - x) * 0.05 + (q ? q[k].length : 0) / e.cars.length;
+      // 歩く時間（分）と、行列による待ちの見込み（分）を同じ単位で比べる
+      const s = Math.abs(e.x + e.w / 2 - x) / SIM.WALK + (q ? q[k].length : 0) / e.cars.length * 0.6;
       if (s < bs) { bs = s; best = e; }
     }
     return best;
@@ -671,7 +694,8 @@ export class Tower {
   exitTrip(p, cb) {
     const ent = this.pickExitFrom(p.f);
     if (!ent) return false;
-    return this.startTrip(p, ent.f, ent.x0 + 0.5 + this.rand(Math.max(0, ent.x1 - ent.x0 - 1)), cb);
+    if (p.walking) this.syncX(p);
+    return this.startTrip(p, ent.f, this.doorX(ent, p.x), cb);
   }
 
   enterBuilding(p) {
@@ -680,7 +704,7 @@ export class Tower {
     if ((TENANT.has(h.type) || HOTEL.has(h.type)) && !h.occupied) return;
     const ent = this.pickEntranceTo(h.f);
     if (!ent || this.dist(ent.f, h.f) === Infinity) { this.recordEvalValue(h, 100); return; }
-    this.spawnAt(p, ent);
+    this.spawnAt(p, ent, this.doorAim(ent, h.f, h.x + h.w / 2));
     if (!this.startTrip(p, h.f, this.spotIn(h), (pp) => this.arriveHome(pp))) {
       this.recordEvalValue(h, 100);
       this.leave(p);
@@ -757,7 +781,7 @@ export class Tower {
     const ent = this.pickVisitorEntrance(o.f);
     if (!ent) return;
     const p = this.newPerson('visitor', null);
-    this.spawnAt(p, ent);
+    this.spawnAt(p, ent, this.doorAim(ent, o.f, o.x + o.w / 2));
     if (!this.startTrip(p, o.f, this.spotIn(o), (pp) => this.atShop(pp, o))) this.leave(p);
   }
 

@@ -22,14 +22,14 @@ export const isStopFloor = (type, f) => type !== 'express' || f < 0 || LOBBY_SET
 
 export const SIM = {
   TICK: 0.25,
-  WALK: 2.5,            // マス/分
+  WALK: 4,              // マス/分（横幅480に合わせて 2.5 → 4）
   STAIR_TIME: 1.2,      // 階段1階分（分）
   ESC_TIME: 0.7,        // エスカレーター1階分（分）
   DOOR: 0.35,           // ドア開閉（分）
   BOARD: 0.02,          // 1人の乗降（分）
   WAIT_GRACE: 3,        // この時間を超える待ちでストレス増
   WAIT_STRESS: 1.5,     // /分
-  WALK_GRACE: 15,       // 1回の移動でこれ以上歩くとストレス
+  WALK_GRACE: 20,       // 1回の移動でこれ以上歩くとストレス
   WALK_STRESS: 0.5,     // /分
   CROWD_STRESS: 0.3,    // 定員の8割を超えたカゴに乗っている間 /分
   STAIR_STRESS: 5,      // /階

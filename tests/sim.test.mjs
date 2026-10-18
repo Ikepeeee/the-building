@@ -354,13 +354,14 @@ test('ホテル: 予約→チェックイン→チェックアウト（宿泊料
   assert.ok(booked.length > 10, '予約が入る');
   assert.ok(booked.some((o) => o.inCount > 0), 'チェックイン済み');
   assert.ok(s.pop > 0, '宿泊客は人口に数える');
-  stepTo(s, 1, 10, 30);
-  stepTo(s, 1, 11);
+  // チェックアウト後は要清掃になる（清掃が速いと11時には終わっているので途中で確かめる）
+  let sawDirty = false;
+  while (s.time < DAY + 11 * 60) { s.step(1); if (rooms.some((o) => o.dirty || o.cleaner)) sawDirty = true; }
   assert.ok(rooms.every((o) => !o.occupied), '全室チェックアウト');
   assert.ok(s.money > m0, '宿泊料');
   assert.ok(s.dayLog.hotel > 0);
   assert.ok(!ev.message.some((m) => m.kind === 'money'), 'お金の通知は0時のまとめだけ');
-  assert.ok(rooms.some((o) => o.dirty || o.cleaner), '要清掃');
+  assert.ok(sawDirty, '要清掃');
   // メイドが実際に移動して清掃する
   let sawMaid = false;
   for (let i = 0; i < 60 * 8; i++) { s.step(1); if ([...s.active].some((p) => p.kind === 'maid')) sawMaid = true; }

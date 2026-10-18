@@ -555,7 +555,7 @@ export const EventsMixin = {
     const p = this.newPerson('vip', suite);
     suite.occupied = true; suite.vipHold = true; suite.checkedIn = 0; suite.members = [p];
     Object.assign(v, { stage: 'stay', suite, p, dirty: !!suite.dirty, infested: !!suite.infested });
-    this.spawnAt(p, ent);
+    this.spawnAt(p, ent, this.doorAim(ent, suite.f, suite.x + suite.w / 2));
     const ok = this.startTrip(p, suite.f, this.spotIn(suite), (pp) => {
       v.arrStress = pp.stress;
       if (suite.dead) return;
@@ -638,7 +638,7 @@ export const EventsMixin = {
       w.people.push(p);
       this.later(i * 0.5, () => {
         if (cath.dead) return;
-        this.spawnAt(p, ent);
+        this.spawnAt(p, ent, this.doorAim(ent, cath.f, cath.x + cath.w / 2));
         if (!this.startTrip(p, cath.f, this.spotIn(cath), (pp) => this.weddingArrive(pp, w))) this.leave(p);
       });
     });
