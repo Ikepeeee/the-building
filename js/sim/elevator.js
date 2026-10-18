@@ -265,7 +265,7 @@ export const ElevatorMixin = {
     const q = e.q[g];
     if (!q) return 0;
     let w = 0;
-    for (const d of ['up', 'down']) if (q[d].length) w = Math.max(w, q[d][0].waitT);
+    for (const d of ['up', 'down']) if (q[d].length) w = Math.max(w, this.time - q[d][0].waitStart);
     return w;
   },
 
@@ -390,9 +390,12 @@ export const ElevatorMixin = {
       let n = 0;
       while (n < line.length && c.pass.length < e.cap) {
         const p = line[n++];
-        e.wSum[e.wb] += p.waitT; e.wN[e.wb]++;
-        p.waitTot = (p.waitTot || 0) + p.waitT;
-        p.state = 'ride'; p.car = c; p.rideT = 0;
+        // 待ち時間とそのストレスは乗るときにまとめて確定する
+        const w = this.time - p.waitStart, extra = Math.max(0, w - SIM.WAIT_GRACE) * SIM.WAIT_STRESS;
+        p.waitT = w; p.stress = p.stressBase + extra; p.sWait += extra;
+        e.wSum[e.wb] += w; e.wN[e.wb]++;
+        p.waitTot = (p.waitTot || 0) + w;
+        p.state = 'ride'; p.car = c; p.rideT = 0; p.rideStart = this.time;
         c.pass.push(p);
         c.drop[FI(legTo(p))]++;
         moved++;
@@ -409,7 +412,7 @@ export const ElevatorMixin = {
     let sum = 0, n = 0;
     for (let i = 0; i < 12; i++) { sum += e.wSum[i]; n += e.wN[i]; }
     if (e.waitN) {
-      for (const k in e.q) for (const d of ['up', 'down']) for (const p of e.q[k][d]) { sum += p.waitT; n++; }
+      for (const k in e.q) for (const d of ['up', 'down']) for (const p of e.q[k][d]) { sum += this.time - p.waitStart; n++; }
     }
     e.avgWait = n ? sum / n : 0;
     if (e.avgWait > e.peakWait) e.peakWait = e.avgWait;

@@ -25,7 +25,9 @@ export const PanelMixin = {
       if (cr > 0.2) out.push({ label: `エレベーターの混雑（ストレス ${cr.toFixed(1)}）`, level: lv3(cr, 2, 6) });
     }
     if (o.noisy) out.push({ label: '騒音（近くの飲食店・映画館など）', level: 'bad' });
-    if (o.garbageBad) out.push({ label: o.gRooms && o.gRooms.length ? 'ごみが溜まっている（収集室が満杯）' : 'ごみが溜まっている（近くにごみ収集室がない）', level: 'bad' });
+    if (o.garbageBad) out.push({ label: this.garbageProblem() === 'none' ? 'ごみが溜まっている（ごみ集積所がない）' : 'ごみが溜まっている（集積所が満杯）', level: 'bad' });
+    if (o.parkingShort > 0) out.push({ label: `駐車場がない（${o.parkingShort}台不足）`, level: 'bad' });
+    else if (o.needsParking > 0) out.push({ label: `駐車場 ${o.needsParking}台 確保`, level: 'good' });
     if (HOTEL.has(o.type)) {
       if (o.infested) out.push({ label: 'ゴキブリが出る', level: 'bad' });
       else if (o.dirty) out.push({ label: '未清掃', level: o.cleaner ? 'fair' : 'bad' });
@@ -126,11 +128,17 @@ export const PanelMixin = {
       stats.push(['要清掃の客室', `${dirty}室`]);
       stats.push(['維持費', `${fmtMoney(SIM.MAINT.housekeeping)}/日`]);
     } else if (o.type === 'garbage') {
-      const n = this.facs.filter((t) => t.gRooms && t.gRooms.includes(o)).length;
-      stats.push(['たまったごみ', `${Math.round(o.bags)} / ${SIM.GARBAGE.cap}袋（${Math.round(o.fill * 100)}%）`]);
-      stats.push(['担当範囲', `${floorName(Math.max(-10, o.f - TYPES.garbage.range))}〜${floorName(Math.min(99, o.f + TYPES.garbage.range))}（${n}件）`]);
-      stats.push(['回収', `毎朝5時・1袋 ${fmtMoney(this.byType.recycling.length ? SIM.GARBAGE.feeRecycle : SIM.GARBAGE.fee)}`]);
-      if (o.fill >= 1) d0warn = '満杯です。ごみ収集室を増やしてください';
+      stats.push(['この集積所', `${Math.round(o.bags)} / ${TYPES.garbage.capacity}袋（${Math.round(o.fill * 100)}%）`]);
+      stats.push(['ビル全体', `${Math.round(this.garbageBags)} / ${this.garbageCap}袋（${this.byType.garbage.length}室）`]);
+      stats.push(['回収', `毎朝4:30〜5:30・1袋 ${fmtMoney(this.byType.recycling.length ? SIM.GARBAGE.feeRecycle : SIM.GARBAGE.fee)}`]);
+      if (o.truck) stats.push(['収集車', { in: '到着中', load: '積み込み中', out: '出発' }[o.truck.phase]]);
+      stats.push(['維持費', `${fmtMoney(SIM.MAINT.garbage)}/日`]);
+      if (this.garbageProblem() === 'full') d0warn = '満杯です。ごみ集積所を増やしてください';
+    } else if (o.type === 'parking') {
+      stats.push(['駐車場', `使用 ${o.used} / ${TYPES.parking.spaces}台`]);
+      stats.push(['ビル全体', `使用 ${this.parkingUsed} / ${this.parkingSpaces}台`]);
+      if (this.parkingShort > 0) { stats.push(['不足', `${this.parkingShort}台`]); d0warn = `駐車場が${this.parkingShort}台足りません`; }
+      stats.push(['維持費', `${fmtMoney(SIM.MAINT.parking)}/日`]);
     } else if (o.type === 'lobby') {
       stats.push(['幅', `${o.w}マス`]);
       if (o.f === 0) stats.push(['役割', '出入口']);
@@ -161,7 +169,7 @@ export const PanelMixin = {
     const d = { title, subtitle, stats, level, actions };
     if (d0warn) d.warning = d0warn;
     if (reasons) d.reasons = reasons;
-    if (o.unreachable) { stats.unshift(['⚠ 警告', 'ロビーから行けません']); d.warning = 'ロビーから行けません'; }
+    if (o.unreachable) { stats.unshift(['⚠ 警告', 'ロビーから行けません']); d.warning = d.warning || 'ロビーから行けません'; }
     return d;
   },
 

@@ -21,7 +21,8 @@ export class MockTower {
     this.santa = null;
     this.nextId = 1;
     this.walkers = [];
-    this.build(opt);
+    this.walkMin = 11; this.walkMax = 130;
+    if (opt.big) this.buildBig(opt); else this.build(opt);
     this.updateClock();
   }
   updateClock() {
@@ -74,6 +75,52 @@ export class MockTower {
   }
   person(kind, stress = 0, extra = {}) {
     return { id: this.nextId++, kind, state: 'walk', stress, f: 0, x: 0, ...extra };
+  }
+
+  // 性能測定用: 横いっぱい（W マス）× F フロアの満載タワー
+  buildBig(opt) {
+    const F = opt.floors || 60;
+    this.elevators = [];
+    this.walkMin = 1; this.walkMax = W - 2;
+    const cols = [];
+    for (let x = 40; x + 14 < W; x += 80) cols.push(x);
+    for (const x of cols) {
+      for (let lo = 0; lo < F; lo += 30) this.elevators.push(this.elev('elevator', x, lo, Math.min(F - 1, lo + 29), 2));
+      this.elevators.push(this.elev('elevator', x + 4, 0, Math.min(F - 1, 29), 2));
+      this.elevators.push(this.elev('express', x + 8, 0, F - 1, 2));
+    }
+    const isCol = (x) => cols.some((c) => x >= c && x < c + 14);
+    const types = ['office', 'office', 'office', 'condo', 'hotelTwin', 'hotelSingle', 'fastfood', 'shop', 'restaurant', 'hotelSuite'];
+    for (let f = -2; f < F; f++) {
+      for (let x = 0; x < W; x++) if (!this.grid[f][x]) this.grid[f][x] = -1;
+      if (f < 0) continue;
+      if (f === 0 || LOBBY_FLOORS.includes(f)) { let x = 0; while (x < W) { while (x < W && isCol(x)) x++; let x1 = x; while (x1 < W && !isCol(x1)) x1++; if (x1 > x) this.add('lobby', f, x, { w: x1 - x }); x = x1; } continue; }
+      let x = 0;
+      while (x < W) {
+        const t = types[(rnd() * types.length) | 0];
+        const w = TYPES[t].w;
+        if (x + w > W) break;
+        let ok = true; for (let k = x; k < x + w; k++) if (isCol(k)) { ok = false; break; }
+        if (!ok) { x++; continue; }
+        const o = this.add(t, f, x, { inCount: (rnd() * 6) | 0, occupied: rnd() > 0.1, dirty: t.startsWith('hotel') && rnd() < 0.1 });
+        const V = VARIANTS[t]; if (V) { o.variant = (rnd() * V.length) | 0; o.brand = '株式会社サンプル' + (o.id % 50); }
+        x += w;
+      }
+    }
+    const kinds = ['worker', 'worker', 'resident', 'guest', 'visitor', 'visitor', 'guard', 'maid'];
+    const N = opt.people || 3300;
+    for (let i = 0; i < N; i++) {
+      const p = this.person(pick(kinds), (rnd() * 90) | 0, { f: (rnd() * F) | 0, x: 1 + rnd() * (W - 3) });
+      p._v = (rnd() < 0.5 ? -1 : 1) * (1.5 + rnd() * 2);
+      this.walkers.push(p); this.active.add(p);
+    }
+    for (const e of this.elevators) {
+      for (let f = e.lo; f <= e.hi; f++) if (rnd() < 0.2) {
+        const up = [], down = [];
+        for (let i = 0; i < (rnd() * 6) | 0; i++) { const p = this.person(pick(kinds), (rnd() * 100) | 0, { state: 'wait', f }); up.push(p); this.active.add(p); }
+        e.q[f] = { up, down };
+      }
+    }
   }
 
   build(opt) {
@@ -195,8 +242,17 @@ export class MockTower {
     // §12: 工事中とごみ収集室
     const D = 100000;
     const cons = (o, pr) => { if (o) { o.constructStart = this.time - pr * D; o.constructUntil = this.time + (1 - pr) * D; o.inCount = 0; } return o; };
-    this.row(12, S0, S1, [['garbage', { fill: 0 }], ['garbage', { fill: 0.35 }], ['garbage', { fill: 0.7 }], ['garbage', { fill: 1 }], ['garbage', { fill: 1.4 }],
-      ['office', { _c: 0.08 }], ['office', { _c: 0.35 }], ['office', { _c: 0.65 }], ['office', { _c: 0.93 }], ['condo', { _c: 0.5 }], ['shop', { _c: 0.25 }], ['restaurant', { _c: 0.8 }], ['hotelSuite', { _c: 0.45 }]]);
+    // §13: 地下のごみ集積所（2フロア）と駐車場
+    const tk = opt.truck;   // 'in' | 'load' | 'out' で全室に収集車
+    const gs = [[0, null], [0.35, { phase: 'in', t: 0.55 }], [0.7, { phase: 'load', t: 0.3 }], [1, { phase: 'out', t: 0.45 }], [1.4, null], [0.2, { phase: 'load', t: 0.8 }]];
+    for (let i = 0; i < gs.length; i++) {
+      const [fill, truck] = gs[i];
+      this.add('garbage', -2, S0 + i * 16, { fill, bags: Math.round(fill * 80), truck: tk ? { phase: tk, t: 0.5 } : truck });
+    }
+    this.floor(-1, S0, S1 - 1); this.floor(-2, S0, S1 - 1);
+    for (let i = 0; i < 8; i++) this.add('parking', -3, S0 + i * 24, { used: [0, 3, 6, 9, 12, 12, 1, 7][i] });
+    this.floor(-3, S0, S1 - 1);
+    this.row(12, S0, S1, [['office', { _c: 0.08 }], ['office', { _c: 0.35 }], ['office', { _c: 0.65 }], ['office', { _c: 0.93 }], ['condo', { _c: 0.5 }], ['shop', { _c: 0.25 }], ['restaurant', { _c: 0.8 }], ['hotelSuite', { _c: 0.45 }]]);
     this.add('cinema', 13, S0, { _c: 0.5 }); this.add('partyHall', 13, S0 + 40, { _c: 0.15 }); this.floor(13, S0, S0 + 80); this.floor(14, S0, S0 + 80);
     this.add('lobby', 15, S0, { w: 60, _c: 0.6 });
     for (const o of this.objs.values()) if (o._c != null) cons(o, o._c);
@@ -285,8 +341,8 @@ export class MockTower {
     for (const p of this.walkers) {
       if (p.state !== 'walk') continue;
       p.x += p._v * minutes;
-      if (p.x < 11) { p.x = 11; p._v = Math.abs(p._v); }
-      if (p.x > 130) { p.x = 130; p._v = -Math.abs(p._v); }
+      if (p.x < this.walkMin) { p.x = this.walkMin; p._v = Math.abs(p._v); }
+      if (p.x > this.walkMax) { p.x = this.walkMax; p._v = -Math.abs(p._v); }
     }
     for (const e of this.elevators) {
       for (const c of e.cars) {

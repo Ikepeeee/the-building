@@ -43,21 +43,21 @@ export const storage = {
   },
 };
 
-export function makeSaveObject(sim) {
+export function makeSaveObject(sim, ui) {
   return {
     app: 'thebuilding',
     v: 1,
     savedAt: Date.now(),
-    meta: { star: sim.star, tower: !!sim.tower, pop: sim.pop, day: sim.day, money: sim.money },
+    meta: { star: sim.star, tower: !!sim.tower, pop: sim.pop, day: sim.day, money: sim.money, ...(ui ? { ui } : {}) },
     data: sim.serialize(),
   };
 }
 
 /** @returns {{ok:boolean, persisted:boolean, error?:string}} */
-export function saveGame(sim) {
+export function saveGame(sim, ui) {
   let json;
   try {
-    json = JSON.stringify(makeSaveObject(sim));
+    json = JSON.stringify(makeSaveObject(sim, ui));
   } catch (e) {
     return { ok: false, persisted: false, error: 'セーブデータを作れませんでした: ' + (e && e.message) };
   }
@@ -96,8 +96,8 @@ export function clearSave() {
   storage.remove(SAVE_KEY);
 }
 
-export function exportText(sim) {
-  return JSON.stringify(makeSaveObject(sim));
+export function exportText(sim, ui) {
+  return JSON.stringify(makeSaveObject(sim, ui));
 }
 
 /** 貼り付け・ファイルの文字列からセーブを取り出す。sim.serialize() の生データも受け付ける。 */

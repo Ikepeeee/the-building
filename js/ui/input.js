@@ -1,5 +1,6 @@
 // 入力（Pointer Events でマウス・タッチ・ペンをまとめて扱う＋キーボード）
 import { screenToWorld, worldToCell, TYPES } from '../sim/constants.js';
+import { SPEED_ONE, SPEED_RT } from './speeds.js';
 
 const SLOP_MOUSE = 5;
 const SLOP_TOUCH = 10;
@@ -103,6 +104,14 @@ export class Input {
       this.app.dragUpdate(this.drag);
       return;
     }
+    // タッチの施設設置・コピー貼り付け: 指を滑らせて位置合わせ
+    // （仮置きがあってそこから遠いところで始めたドラッグはスクロール、タップならそこへ置き直す）
+    if (touch && this.app.placeTool() && !(this.app.pending && !this.app.pendingHit(sx, sy))) {
+      this.mode = 'place';
+      this.placePt = { x: sx, y: sy, x0: sx, y0: sy };
+      this.app.placeStart(sx, sy);
+      return;
+    }
     this.mode = 'tap';
     // マウスの「調べる」でシャフトの端を掴んだら、動かしたときに伸縮を始める
     if (!touch && tool === 'inspect') this.resizeCand = this.app.resize.hitEnd(this.app.clampCell(this.cellAt(sx, sy)));
@@ -140,6 +149,12 @@ export class Input {
       case 'resize':
         this.app.resize.move(e.clientX, e.clientY);
         break;
+      case 'place': {
+        const pp = this.placePt;
+        pp.x = sx; pp.y = sy;
+        this.app.placeMove(sx, sy, Math.hypot(sx - pp.x0, sy - pp.y0) > SLOP_TOUCH);
+        break;
+      }
       case 'drag':
         this.drag.sx = sx; this.drag.sy = sy; this.drag.moved = true;
         this.drag.cur = this.cellAt(sx, sy);
@@ -154,6 +169,7 @@ export class Input {
     this.ptrs.clear();
     if (this.mode === 'drag') this.app.dragCancel();
     this.app.resize.cancel();
+    this.app.placeCancel();
     this.resizeCand = null;
     this.mode = null;
     this.drag = null;
@@ -189,10 +205,17 @@ export class Input {
     if (cancelled) {
       if (mode === 'drag') this.app.dragCancel();
       if (mode === 'resize') this.app.resize.cancel();
+      if (mode === 'place') this.app.placeCancel();
       this.drag = null;
       return;
     }
-    if (mode === 'tap') {
+    if (mode === 'place') {
+      this.app.placeEnd();
+    } else if (mode === 'tap' && pt.type !== 'mouse' && this.app.placeTool()) {
+      // 仮置きから離れた場所をタップ → そこ（指の少し上）へ置き直す
+      this.app.placeStart(pt.x, pt.y, true);
+      this.app.placeEnd();
+    } else if (mode === 'tap') {
       this.app.tapAt(this.cellAt(pt.x, pt.y), pt.type !== 'mouse');
     } else if (mode === 'drag') {
       this.app.dragEnd(this.drag);
@@ -204,6 +227,7 @@ export class Input {
 
   startPinch() {
     if (this.mode === 'drag') { this.app.dragCancel(); this.drag = null; }
+    if (this.mode === 'place') this.app.placeCancel();
     const [a, b] = [...this.ptrs.values()];
     const cam = this.app.cam;
     cam.anim = null;
@@ -273,6 +297,7 @@ export class Input {
       return;
     }
     if (e.code === 'Escape') { app.escape(); e.preventDefault(); return; }
+    if (e.code === 'F3') { e.preventDefault(); app.perf.toggle(); return; }
     if (e.key === 'Shift' && !e.repeat) { app.noSnap = true; if (app.hover) app.hoverAt(app.hover); }
     if (app.blocked()) return; // モーダル・タイトル中はゲーム操作をしない
     if ((e.ctrlKey || e.metaKey) && e.code === 'KeyS') { e.preventDefault(); app.manualSave(); return; }
@@ -285,7 +310,9 @@ export class Input {
     }
     if (PAN_KEYS[e.code]) { this.keys.add(e.code); e.preventDefault(); return; }
     if (e.repeat) return;
-    if (/^Digit[0-4]$/.test(e.code)) { app.setSpeed(+e.code.slice(5)); return; }
+    if (e.code === 'Digit0') { app.setSpeed(0); return; }
+    if (/^Digit[1-4]$/.test(e.code)) { app.setSpeed(SPEED_ONE + (+e.code.slice(5)) - 1); return; }
+    if (e.code === 'Digit5' || e.code === 'Backquote') { app.setSpeed(SPEED_RT); return; }
     if (e.code === 'KeyP') { app.togglePause(); return; }
     if (e.code === 'Equal' || e.code === 'NumpadAdd' || e.key === '+') { app.cam.stepZoom(1); return; }
     if (e.code === 'Minus' || e.code === 'NumpadSubtract') { app.cam.stepZoom(-1); return; }
@@ -303,6 +330,15 @@ export class Input {
       let vx = 0, vy = 0;
       for (const k of this.keys) { const v = PAN_KEYS[k]; if (v) { vx += v[0]; vy += v[1]; } }
       if (vx || vy) cam.pan(-vx * KEY_PAN_SPEED * dt, -vy * KEY_PAN_SPEED * dt);
+    }
+    if (this.mode === 'place' && this.placePt && this.app.place && this.app.place.moved) {
+      const p = this.placePt;
+      let vx = 0, vy = 0;
+      if (p.y < cam.insetTop + EDGE) vy = 1;
+      else if (p.y > cam.vh - cam.insetBottom - EDGE) vy = -1;
+      if (p.x < EDGE) vx = 1;
+      else if (p.x > cam.vw - EDGE) vx = -1;
+      if (vx || vy) { cam.pan(vx * 400 * dt, vy * 400 * dt); this.app.placeMove(p.x, p.y, true); }
     }
     if (this.mode === 'drag' && this.drag && this.drag.moved) {
       const d = this.drag;

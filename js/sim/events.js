@@ -500,6 +500,7 @@ export const EventsMixin = {
     else if (bad && o.cStair > 1) line = '階段ばかりで疲れる！';
     else if (o.noisy) line = o.type === 'condo' ? '近くの店がうるさくて眠れない！' : '騒がしくて休めない！';
     else if (o.garbageBad) line = 'ごみが溜まっていて臭う！';
+    else if (o.parkingShort > 0) line = '車を停める場所がない！';
     else if (bad) line = 'ここは居心地が悪い！';
     return line ? `${who}: ${line}` : null;
   },

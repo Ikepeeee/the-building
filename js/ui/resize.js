@@ -123,12 +123,17 @@ export class ElevatorResize {
     this.update();
   }
 
+  measure() {
+    this.rects = { r: this.app.canvas.getBoundingClientRect(), root: this.app.root.getBoundingClientRect() };
+  }
+
   update() {
     const o = this.target();
     const show = !!o && !this.app.blocked();
+    if (!show && this.handles.top.hidden && this.handles.bot.hidden) return; // 何も出していなければ何もしない
     const cam = this.app.cam;
-    const r = this.app.canvas.getBoundingClientRect();
-    const root = this.app.root.getBoundingClientRect();
+    if (!this.rects) this.measure();
+    const { r, root } = this.rects;
     // つまみを置ける縦の範囲（HUD の下〜ツールバー・ボトムシートの上）
     const pEl = this.app.panel.el;
     let bottomLimit = r.top - root.top + r.height - cam.insetBottom - 20;

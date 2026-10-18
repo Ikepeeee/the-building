@@ -692,55 +692,49 @@ function escalatorArt(p, v) {
     p.p(x, Math.round(fy - 1 - t * (fy - 1)) - 5, '#2c3e50');
   }
 }
-export function shaftSeg(w, express, stop, top, bottom) {
+export function shaftSeg(w, express, label) {
+  // 本家風: 飾りのない暗いシャフトに、止まる階だけ大きく淡い階数
   const W = w * TILE_W;
   const p = new Painter(W, FLOOR_H);
-  const bg = express ? '#3e3646' : '#4a4a54';
+  const bg = express ? '#2e2c32' : '#3a3a3e';
   p.r(0, 0, W, 24, bg);
-  p.r(2, 0, 1, 24, express ? '#62566e' : '#6c6c78'); p.r(W - 3, 0, 1, 24, express ? '#62566e' : '#6c6c78');
-  p.r((W >> 1) - 3, 0, 1, 24, '#26262c'); p.r((W >> 1) + 2, 0, 1, 24, '#26262c');
-  p.r(1, 21, W - 2, 1, '#6a6670'); p.r(1, 22, W - 2, 1, '#5a5860'); p.r(1, 23, W - 2, 1, '#202024');
-  if (stop) { p.r(3, 2, W - 6, 1, '#8a8a96'); p.r((W >> 1) - 1, 0, 2, 2, '#f0c040'); }
-  if (top) { p.r(0, 0, W, 3, '#5a5a62'); p.r(0, 0, W, 1, '#000'); p.r((W >> 1) - 4, 3, 8, 2, '#2a2a2e'); }
-  if (bottom) { p.r(1, 17, W - 2, 4, '#3a3a40'); p.r(4, 18, 3, 3, '#8a7a30'); p.r(W - 7, 18, 3, 3, '#8a7a30'); }
-  p.r(0, 0, 1, 24, '#000'); p.r(W - 1, 0, 1, 24, '#000');
+  p.r(1, 0, 1, 24, shade(bg, 0.12)); p.r(W - 2, 0, 1, 24, shade(bg, -0.25));
+  p.r(1, 23, W - 2, 1, shade(bg, -0.3));
+  if (label) {
+    const len = label.length;
+    let k = 3;
+    while (k > 1 && len * 4 * k - k > W - 4) k--;
+    if (len * 4 * k - k > W - 2) k = 1;
+    const tw = len * 4 * k - k, th = 5 * k;
+    p.textK(label, Math.round((W - tw) / 2), Math.round((22 - th) / 2), express ? '#54505c' : '#5c5c62', k);
+  }
+  p.r(0, 0, 1, 24, '#141416'); p.r(W - 1, 0, 1, 24, '#141416');
   return p.c;
 }
 // エレベーターの機械室（hi+1 階）とピット（lo-1 階）
 export function machineRoom(w, express) {
+  // 小さな灰色の機械室: 上向きの ▲ と巻上機
   const W = w * TILE_W;
   const p = new Painter(W, FLOOR_H);
-  const wall = express ? '#b4a8a0' : '#b0aca2';
-  p.r(0, 6, W, 18, wall);
-  p.r(0, 3, W, 3, '#8a867c'); p.r(0, 2, W, 1, '#000');                 // 屋根
-  p.r(2, 1, 2, 1, '#000'); p.r(W - 4, 1, 2, 1, '#000');                // 換気筒
-  p.r(1, 6, 1, 18, shade(wall, 0.2)); p.r(W - 2, 6, 1, 18, shade(wall, -0.25));
-  p.box(3, 9, W - 6, 12, '#4a4c54');                                     // 室内
+  const bg = express ? '#3a3840' : '#46464c';
+  p.box(0, 2, W, 22, bg, '#141416');
+  p.r(1, 3, W - 2, 1, shade(bg, 0.2));
   const cx = W >> 1;
-  p.disc(cx - 3, 15, 3, '#2a2a2e'); p.disc(cx - 3, 15, 2, '#8a8e96'); p.p(cx - 3, 15, '#2a2a2e'); // 巻上機の綱車
-  p.box(cx + 1, 13, 6, 6, express ? '#b84a3a' : '#3a7ab0');            // モーター
-  p.r(cx + 2, 14, 4, 1, shade(express ? '#b84a3a' : '#3a7ab0', 0.3));
-  p.r(cx - 4, 19, 12, 2, '#5a5a62');
-  p.r(4, 10, 3, 2, '#e0c040'); p.p(5, 12, '#40e070');                  // 制御盤
-  p.r((W >> 1) - 3, 21, 1, 3, '#202024'); p.r((W >> 1) + 2, 21, 1, 3, '#202024'); // ロープ
-  p.r(0, 2, 1, 22, '#000'); p.r(W - 1, 2, 1, 22, '#000'); p.r(0, 23, W, 1, '#000');
+  for (let i = 0; i < 4; i++) p.r(cx - i, 5 + i, i * 2 + 1, 1, '#9a9aa2');     // ▲
+  p.disc(cx - 4, 15, 3, '#24242a'); p.disc(cx - 4, 15, 2, '#7a7a84'); p.p(cx - 4, 15, '#24242a');
+  p.box(cx + 1, 13, 6, 5, '#5a5a64'); p.r(cx + 2, 14, 4, 1, '#7a7a86');
+  p.r(cx - 7, 19, 15, 2, '#2e2e34');
   return p.c;
 }
 export function pitSprite(w, express) {
+  // ピット: 下向きの ▼
   const W = w * TILE_W;
   const p = new Painter(W, FLOOR_H);
-  p.r(0, 0, W, 20, '#5a5650');
-  p.r(2, 0, W - 4, 17, express ? '#2e2834' : '#34343a');
-  p.r(2, 0, 1, 17, '#6c6c78'); p.r(W - 3, 0, 1, 17, '#6c6c78');
-  for (const bx of [5, W - 9]) {                                         // 緩衝器（ばね）
-    p.r(bx, 9, 4, 1, '#c8c8c8');
-    for (let y = 10; y < 16; y += 2) { p.r(bx, y, 4, 1, '#e0c020'); p.r(bx + 1, y + 1, 2, 1, '#202020'); }
-    p.r(bx - 1, 16, 6, 1, '#7a7a80');
-  }
-  for (let y = 2; y < 16; y += 3) p.r((W >> 1) - 1, y, 3, 1, '#8a8478'); // はしご
-  p.r((W >> 1) - 1, 1, 1, 15, '#6a6458'); p.r((W >> 1) + 1, 1, 1, 15, '#6a6458');
-  p.r(0, 17, W, 3, '#6a665e'); p.r(0, 20, W, 1, '#000');
-  p.r(0, 0, 1, 21, '#000'); p.r(W - 1, 0, 1, 21, '#000');
+  const bg = express ? '#2a2830' : '#323236';
+  p.box(0, 0, W, 21, bg, '#141416');
+  const cx = W >> 1;
+  for (let i = 0; i < 4; i++) p.r(cx - 3 + i, 13 + i, 7 - i * 2, 1, '#8a8a92'); // ▼
+  for (const bx of [3, W - 6]) { p.r(bx, 8, 3, 1, '#9a9aa2'); for (let y = 9; y < 18; y += 2) p.r(bx, y, 3, 1, '#7a6a20'); }
   return p.c;
 }
 
@@ -797,38 +791,24 @@ function ruinArt(p, kind, v) {
 
 export const CAR_H = 20;
 export function carSprite(w, express, n, open) {
+  // サーモンピンクの箱に明るい横帯、中に乗客の影
   const W = w * TILE_W - 4;
   const p = new Painter(W, CAR_H);
-  const frame = express ? '#d89a5a' : '#e8d8a8';
-  p.box(0, 0, W, CAR_H, frame);
-  p.r(1, 1, W - 2, 1, shade(frame, 0.3));
-  p.p((W >> 1) - 1, 1, express ? '#ff6040' : '#40d060');
-  const ix = 2, iw = W - 4, iy = 3, ih = CAR_H - 5;
-  p.r(ix, iy, iw, ih, '#fff2c4');
+  const body = express ? '#d88878' : '#e8a090', band = express ? '#eebcae' : '#f6c8b8';
+  p.box(0, 0, W, CAR_H, body, '#2a1a18');
+  p.r(1, 1, W - 2, 1, shade(body, 0.2));
+  // 開いた扉の中は少し明るい
+  const iw = W - 4, ix = 2, half = iw >> 1;
+  const gap = Math.round(half * (open / 4));
+  if (gap > 0) p.r(ix + half - gap, 3, gap * 2, CAR_H - 6, '#fbe4da');
+  p.r(1, 7, W - 2, 4, band);
   const slots = Math.max(1, Math.floor((iw - 1) / 4));
-  const vis = Math.min(n, slots * 2);
-  for (let i = 0; i < Math.min(vis, slots); i++) standFig(p, ix + 1 + i * 4, iy + ih - 1, FIG, i % 2, 0);
-  if (vis > slots) for (let i = 0; i < vis - slots; i++) p.r(ix + 3 + i * 4, iy + ih - 9, 2, 2, '#4a4a4a');
-  // 扉
-  const half = iw >> 1;
-  const pw = Math.round(half * (1 - open / 4));
-  if (pw > 0) {
-    p.r(ix, iy, pw, ih, '#b4bcc6'); p.r(ix + iw - pw, iy, pw, ih, '#b4bcc6');
-    p.r(ix + pw - 1, iy, 1, ih, '#7a828c'); p.r(ix + iw - pw, iy, 1, ih, '#7a828c');
-    // 扉の窓（中の人の頭が見える）
-    const g = p.g;
-    if (pw > 2) {
-      g.save(); g.globalAlpha = 0.55; g.fillStyle = '#d8f0ff';
-      g.fillRect(ix + 1, iy + 2, pw - 3, 4); g.fillRect(ix + iw - pw + 2, iy + 2, pw - 3, 4);
-      g.restore(); p._fs = null;
-      // 窓越しの頭
-      for (let i = 0; i < Math.min(vis, slots); i++) {
-        const hx = ix + 1 + i * 4 + 1;
-        if (hx < ix + pw - 2 || hx >= ix + iw - pw + 2) p.r(hx, iy + ih - 8 < iy + 2 ? iy + 2 : iy + ih - 8, 2, 2, '#3a3a3a');
-      }
-    }
-  }
-  p.r(0, CAR_H - 2, W, 1, shade(frame, -0.4));
+  const vis = Math.min(n, slots);
+  for (let i = 0; i < vis; i++) standFig(p, ix + 1 + i * 4, CAR_H - 3, '#3a2420', i % 2, 0);
+  if (n > slots) for (let i = 0; i < Math.min(n - slots, slots); i++) p.r(ix + 2 + i * 4, 4, 2, 2, '#6a4a44');
+  // 扉の合わせ目
+  if (gap < half) { p.r(ix + half - gap - 1, 2, 1, CAR_H - 5, shade(body, -0.3)); if (gap > 0) p.r(ix + half + gap, 2, 1, CAR_H - 5, shade(body, -0.3)); }
+  p.r(1, CAR_H - 2, W - 2, 1, shade(body, -0.35));
   return p.c;
 }
 
@@ -909,46 +889,112 @@ export function fireEscapeTop() {
   return p.c;
 }
 
-// ---- ごみ収集室（w 8 = 64px）。v.n = ごみの量（0..8、9 = あふれ）、v.open = 回収作業中 ----
+// ---- ごみ集積所（地下2フロア、w16 = 128x48）。v.n = 袋の量（0..12、13 = あふれ）、v.open = シャッターが開いている ----
+function bag(p, bx, by, c) {
+  p.r(bx + 1, by - 4, 5, 5, '#000'); p.r(bx, by - 3, 7, 3, '#000');
+  p.r(bx + 1, by - 3, 5, 3, c); p.r(bx + 2, by - 4, 3, 1, c); p.p(bx + 2, by - 3, shade(c, 0.35));
+  p.r(bx + 3, by - 6, 1, 2, '#000'); p.p(bx + 2, by - 6, '#000'); p.p(bx + 4, by - 6, '#000');
+}
+export const GARBAGE_BAGS = 13;
 DRAW.garbage = (p, v) => {
+  const W = p.w, H = p.h, fy = H - 3;
+  shell(p, '#8a8a80', '#5a5a52', {});
+  // 天井の配管と照明
+  p.r(1, 2, W - 2, 2, '#6a6a62'); for (let x = 10; x < W; x += 32) { p.r(x, 4, 12, 1, '#f0f8d0'); p.r(x, 5, 12, 1, '#c8d0b0'); }
+  // 荷捌き場（左）: 床の黄黒ライン・矢印
+  for (let x = 1; x < 70; x += 4) p.r(x, fy - 1, 2, 1, ((x >> 2) & 1) ? '#f0d020' : '#202020');
+  for (let i = 0; i < 3; i++) { const x = 20 + i * 14; p.r(x, 30, 6, 1, '#d8d8c8'); p.r(x + 4, 29, 1, 3, '#d8d8c8'); p.p(x + 5, 30, '#d8d8c8'); }
+  // シャッター（左の壁）とスロープの気配
+  p.r(1, 6, 9, fy - 6, '#3a3a36');
+  p.line(1, 6, 9, 14, '#6a6a60');
+  const sh = v.open ? 10 : fy - 7;
+  p.r(2, 7, 7, sh, '#a8a8a0'); for (let y = 8; y < 7 + sh; y += 2) p.r(2, y, 7, 1, '#888880');
+  p.r(2, 7 + sh, 7, 1, '#5a5a52');
+  p.r(10, 6, 2, fy - 6, '#f0d020'); for (let y = 8; y < fy; y += 6) p.r(10, y, 2, 3, '#202020');
+  p.sign('GOMI', 40, 9, '#ffffff', '#3a7a3a');
+  // ごみ置き場（右）: フェンスとコンテナ
+  const gx = 72;
+  p.r(gx, 22, W - gx - 1, 1, '#6a6a60'); // 中二階
+  p.r(gx, 23, W - gx - 1, 1, '#4a4a42');
+  for (let x = gx; x < W - 1; x += 6) { p.r(x, 24, 1, fy - 24, '#9a9a90'); }
+  p.r(gx, 24, W - gx - 1, 1, '#9a9a90');
+  for (const cx of [gx + 30, gx + 42]) { p.box(cx, fy - 9, 11, 9, '#2f7a46'); p.r(cx - 1, fy - 10, 13, 1, '#1f5a32'); }
+  p.box(gx + 4, 14, 8, 8, '#3a6ad0'); p.box(gx + 14, 14, 8, 8, '#e0b020'); p.box(gx + 24, 14, 8, 8, '#3aa050');
+  // 袋の山（下の段から、あふれると中二階・通路にも）
+  const n = v.n | 0;
+  const slots = [];
+  for (let row = 0; row < 3; row++) for (let i = 0; i < 4; i++) slots.push([gx + 3 + i * 7 + (row & 1) * 3, fy - row * 4]);
+  for (let i = 0; i < 6; i++) slots.push([gx + 36 + (i % 3) * 8, 22 - ((i / 3) | 0) * 4]);
+  for (let i = 0; i < 6; i++) slots.push([50 + i * 6 - (i & 1), fy - (i & 1) * 3]);
+  const shown = n >= GARBAGE_BAGS ? slots.length : Math.round((n / 12) * 12);
+  const cols = ['#2a2a2e', '#e8e8e0', '#c8d8e8', '#3a3a40'];
+  for (let i = 0; i < Math.min(shown, slots.length); i++) bag(p, slots[i][0], slots[i][1], cols[i % 4]);
+  if (n >= GARBAGE_BAGS) for (let i = 0; i < 4; i++) { const x = gx + 6 + i * 12; p.p(x, 26, '#6a8a3a'); p.p(x + 1, 25, '#6a8a3a'); p.p(x, 24, '#6a8a3a'); }
+};
+
+// 収集車（パッカー車）。左向き（運転席が左、投入口が右）56x22
+export function truckSprite() {
+  const p = new Painter(56, 22);
+  // 荷箱
+  p.box(16, 2, 34, 15, '#f4f4f0'); p.r(17, 9, 32, 2, '#2f8a4a'); p.r(17, 3, 32, 1, '#ffffff');
+  p.text('ECO', 26, 4, '#2f8a4a');
+  // 投入口（後ろ）
+  p.box(49, 4, 7, 14, '#c8c8c0'); p.r(50, 8, 5, 6, '#202020'); p.r(50, 14, 5, 1, '#f0d020');
+  // 運転席
+  p.box(2, 6, 15, 11, '#3a6ad0'); p.r(4, 8, 7, 4, '#9ad8f0'); p.r(5, 8, 2, 1, '#e8f8ff'); p.r(1, 13, 2, 3, '#000'); p.p(1, 13, '#ffe080');
+  p.r(2, 16, 52, 2, '#3a3a3a');
+  // 車輪
+  for (const wx of [8, 30, 43]) { p.disc(wx, 18, 3, '#000'); p.disc(wx, 18, 1, '#9a9a9a'); }
+  p.r(17, 0, 2, 2, '#f08020');
+  return p.c;
+}
+
+// ---- 駐車場（w24 = 192x24）。v.n = 駐車台数、seed で車種と色 ----
+const CAR_COLS = ['#d03030', '#3a6ad0', '#f4f4f4', '#2a2a2e', '#c8c8d0', '#e0b020', '#2f8a4a', '#8a3aa0', '#e07030'];
+function parkedCar(p, x, kind, col) {
+  const y = 20;
+  const dk = shade(col, -0.35), win = '#9ad0e8';
+  if (kind === 0) { // セダン
+    p.r(x + 3, y - 7, 8, 1, '#000'); p.r(x + 2, y - 6, 10, 2, col); p.r(x + 4, y - 6, 3, 2, win); p.r(x + 8, y - 6, 2, 2, win);
+    p.r(x, y - 4, 15, 3, col); p.r(x, y - 2, 15, 1, dk);
+  } else if (kind === 1) { // ハッチバック
+    p.r(x + 3, y - 7, 7, 1, '#000'); p.r(x + 2, y - 6, 9, 2, col); p.r(x + 3, y - 6, 3, 2, win); p.r(x + 7, y - 6, 3, 2, win);
+    p.r(x + 1, y - 4, 12, 3, col); p.r(x + 1, y - 2, 12, 1, dk);
+  } else if (kind === 2) { // SUV
+    p.r(x + 2, y - 9, 11, 1, '#000'); p.r(x + 1, y - 8, 13, 4, col); p.r(x + 2, y - 7, 4, 2, win); p.r(x + 7, y - 7, 4, 2, win);
+    p.r(x, y - 4, 15, 3, col); p.r(x, y - 2, 15, 1, dk);
+  } else if (kind === 3) { // ワゴン車
+    p.r(x + 1, y - 10, 13, 1, '#000'); p.r(x, y - 9, 15, 7, col); p.r(x + 1, y - 8, 3, 3, win); p.r(x + 5, y - 8, 4, 2, win); p.r(x + 10, y - 8, 4, 2, win);
+    p.r(x, y - 2, 15, 1, dk);
+  } else { // スポーツカー
+    p.r(x + 4, y - 6, 6, 1, '#000'); p.r(x + 3, y - 5, 8, 1, col); p.r(x + 5, y - 5, 4, 1, win);
+    p.r(x, y - 4, 15, 3, col); p.r(x, y - 2, 15, 1, dk); p.p(x + 14, y - 4, '#ffe080');
+  }
+  p.disc(x + 3, y, 1, '#111'); p.disc(x + 11, y, 1, '#111');
+}
+DRAW.parking = (p, v) => {
   const W = p.w;
-  const fy = shell(p, '#b8b8a8', '#6a6a62', {});
-  p.r(1, 13, W - 2, 8, '#9a9a8c'); for (let x = 4; x < W; x += 6) p.r(x, 13, 1, 8, '#8a8a7e'); p.r(1, 13, W - 2, 1, '#7a7a6e');
-  // 換気扇と注意書き
-  p.disc(56, 5, 3, '#4a4a4a'); p.disc(56, 5, 2, '#9a9a9a'); p.p(56, 5, '#4a4a4a');
-  p.box(3, 2, 14, 6, '#f0e070'); p.r(5, 4, 10, 1, '#3a3a3a'); p.r(5, 6, 6, 1, '#3a3a3a');
-  const n = v.n | 0, over = n >= 9;
-  // 大型ごみ箱（コンテナ）×2
-  for (const bx of [3, 25]) {
-    p.box(bx, 11, 20, 10, '#2f7a46'); p.r(bx + 1, 12, 18, 1, '#4a9a60');
-    p.r(bx + 2, 15, 16, 1, '#26603a'); p.r(bx + 3, 21 - 1, 2, 1, INK); p.r(bx + 15, 20, 2, 1, INK);
-    // ふた（あふれると開く）
-    if (over || n > 6) { p.line(bx, 10, bx + 6, 4, '#1f5a32'); p.line(bx + 1, 10, bx + 7, 4, '#2f7a46'); }
-    else p.r(bx - 1, 10, 22, 2, '#1f5a32');
+  const fy = shell(p, '#9a9a92', '#6a6a64', {});
+  p.r(1, 14, W - 2, 7, '#8a8a82'); p.r(1, 14, W - 2, 1, '#7a7a72');
+  for (let x = 12; x < W; x += 40) { p.r(x, 1, 14, 1, '#f0f8d0'); p.r(x, 2, 14, 1, '#c8d0b0'); }
+  // 柱
+  for (let x = 48; x < W - 8; x += 48) { p.r(x - 2, 1, 4, 20, '#b0b0a8'); p.r(x - 2, 1, 1, 20, '#c8c8c0'); p.r(x + 1, 1, 1, 20, '#8a8a82'); p.r(x - 2, 10, 4, 2, '#f0d020'); }
+  // 区画の線と番号
+  const n = v.n | 0;
+  const r = rng(301 + (v.seed | 0) * 17);
+  for (let i = 0; i < 12; i++) {
+    const x = 2 + i * 16;
+    p.r(x, fy, 1, 1, '#ffffff'); p.r(x, fy - 1, 1, 1, '#d8d8d0');
+    p.text(String((i + 1) % 10), x + 6, 8, '#d8d8d0');
   }
-  // 資源ごみの箱
-  p.box(48, 14, 6, 7, '#3a6ad0'); p.box(55, 14, 6, 7, '#e0b020'); p.r(49, 13, 4, 1, '#2a4a9a'); p.r(56, 13, 4, 1, '#a07a10');
-  // ごみ袋（量に応じて山になる）
-  const bags = [[8, 12], [14, 11], [30, 12], [36, 11], [11, 9], [33, 9], [44, 20], [40, 20], [20, 20], [26, 20], [6, 20], [46, 18], [16, 7], [30, 7], [3, 20], [36, 20]];
-  const shown = Math.min(bags.length, over ? bags.length : Math.round(n * 1.5));
-  for (let i = 0; i < shown; i++) {
-    const [bx, by] = bags[i];
-    const c = i % 3 === 0 ? '#e8e8e0' : i % 3 === 1 ? '#2a2a2e' : '#c8d8e8';
-    p.r(bx + 1, by - 4, 5, 5, '#000'); p.r(bx, by - 3, 7, 3, '#000');
-    p.r(bx + 1, by - 3, 5, 3, c); p.r(bx + 2, by - 4, 3, 1, c); p.p(bx + 2, by - 3, shade(c, 0.35));
-    p.r(bx + 3, by - 6, 1, 2, '#000'); p.p(bx + 2, by - 6, '#000'); p.p(bx + 4, by - 6, '#000');
-  }
-  if (over) {
-    // あふれたごみ・におい
-    for (const [x, c] of [[22, '#c84a20'], [28, '#e8d040'], [43, '#7a5a3a'], [18, '#ffffff']]) p.r(x, 20, 2, 1, c);
-    for (let i = 0; i < 3; i++) { const x = 12 + i * 14; p.p(x, 4, '#6a8a3a'); p.p(x + 1, 3, '#6a8a3a'); p.p(x, 2, '#6a8a3a'); }
-  }
-  // 回収の作業員（オレンジのベスト）
-  if (v.open) {
-    standFig(p, 44, fy - 1, FIG, 0, 0);
-    p.r(44, fy - 9, 3, 1, '#f0d020'); p.r(44, fy - 6, 3, 3, '#f08020'); p.r(45, fy - 5, 1, 1, '#e8e8a0');
-    p.r(40, fy - 6, 3, 3, '#2a2a2e'); p.p(41, fy - 7, '#000');
-  }
+  // 出口の案内とスロープの矢印
+  p.box(W - 22, 3, 18, 6, '#2f8a4a'); p.text('EXIT', W - 20, 4, '#ffffff');
+  p.r(W - 30, 5, 5, 1, '#ffffff'); p.r(W - 27, 4, 1, 3, '#ffffff'); p.p(W - 26, 5, '#ffffff');
+  // 車（駐車台数ぶん。区画ごとに車種と色をずらす）
+  const order = [0, 2, 4, 6, 8, 10, 1, 3, 5, 7, 9, 11];
+  const kinds = [], colors = [];
+  for (let i = 0; i < 12; i++) { kinds.push((r() * 5) | 0); colors.push(CAR_COLS[(r() * CAR_COLS.length) | 0]); }
+  for (let k = 0; k < Math.min(12, n); k++) { const i = order[k]; parkedCar(p, 2 + i * 16 + 1, kinds[i], colors[i]); }
 };
 
 // ---- 工事中の骨組みタイル（16x24）とクレーン ----

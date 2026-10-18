@@ -29,9 +29,16 @@ export class Minimap {
     c.addEventListener('wheel', (e) => e.preventDefault(), { passive: false });
   }
 
-  size() {
+  /** 大きさは画面サイズが変わったときだけ測る（毎フレーム getBoundingClientRect しない） */
+  measure() {
     const r = this.c.getBoundingClientRect();
-    return [Math.max(1, Math.round(r.width)), Math.max(1, Math.round(r.height))];
+    this.sz = [Math.max(1, Math.round(r.width)), Math.max(1, Math.round(r.height))];
+    this.baseT = 0;
+  }
+
+  size() {
+    if (!this.sz || this.sz[0] <= 1) this.measure();
+    return this.sz;
   }
 
   /** 表示するフロアの範囲（建物の高さに合わせて縦を詰める） */
@@ -82,7 +89,14 @@ export class Minimap {
     const [cw, ch] = this.size();
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     if (this.c.width !== cw * dpr || this.c.height !== ch * dpr) { this.c.width = cw * dpr; this.c.height = ch * dpr; this.baseT = 0; }
-    if (now - this.baseT > 1000) { this.baseT = now; this.rebuild(); }
+    // 下絵は建物が変わったとき（sim.revision）だけ作り直す。revision が無い sim では 3 秒ごと
+    const sim = this.app.sim;
+    const rev = sim && typeof sim.revision === 'number' ? sim.revision : null;
+    if (!this.baseT || (rev !== null ? rev !== this.rev && now - this.baseT > 500 : now - this.baseT > 3000) || sim !== this.lastSim) {
+      this.baseT = now; this.rev = rev; this.lastSim = sim; this.rebuild();
+    }
+    if (now - (this.drawT || 0) < 100) return; // 枠の描き直しは 10fps で十分
+    this.drawT = now;
     const g = this.c.getContext('2d');
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.clearRect(0, 0, this.c.width, this.c.height);
@@ -100,6 +114,7 @@ export class Minimap {
 
   jump(e) {
     const r = this.c.getBoundingClientRect();
+    this.measure();
     const [cw, ch] = this.size();
     const [fb, ft] = this.range();
     const px = (e.clientX - r.left) / cw, py = (e.clientY - r.top) / ch;

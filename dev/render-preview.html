@@ -44,7 +44,7 @@ if (q.get('real') === '1') {
     for (let f = 12; f <= 13; f++) { for (let i = 0; i < 6; i++) B('hotelSingle', { f, x: 30 + i * 4 }); for (let i = 0; i < 4; i++) B('hotelTwin', { f, x: 80 + i * 6 }); }
     B('hotelSuite', { f: 14, x: 30 }); B('hotelSuite', { f: 14, x: 80 });
     B('metro', { f: -4, x: 32 }); B('recycling', { f: -4, x: 80 });
-    B('garbage', { f: 9, x: 96 }); B('garbage', { f: 6, x: 110 }); B('garbage', { f: 12, x: 54 });
+    B('garbage', { f: -2, x: 96 }); B('parking', { f: -1, x: 32 }); B('parking', { f: -1, x: 56 });
     window.__fails = fails;
   }
   if (q.has('steps')) for (let i = 0; i < +q.get('steps'); i++) sim.step(1);
@@ -56,11 +56,13 @@ if (q.get('real') === '1') {
   }
   if (q.has('evSteps')) for (let i = 0; i < +q.get('evSteps'); i++) sim.step(0.5);
 } else {
-  sim = new MockTower({ hour, people: num('people', 160), bombFound: q.get('bombFound') === '1', santa: q.get('santa') !== '0', santaF: q.has('santaF') ? +q.get('santaF') : undefined, heli: q.get('heli') === '1', heliT: num('heliT', 0), bomb: q.get('bomb') !== '0' });
+  sim = new MockTower({ hour, people: num('people', 160), bombFound: q.get('bombFound') === '1', santa: q.get('santa') !== '0', santaF: q.has('santaF') ? +q.get('santaF') : undefined, heli: q.get('heli') === '1', big: q.get('big') === '1', floors: num('floors', 60), truck: q.get('truck') || null, heliT: num('heliT', 0), bomb: q.get('bomb') !== '0' });
 }
 window.sim = sim;
 const canvas = document.getElementById('c');
 const r = new Renderer(canvas, sim);
+if (q.get('nocache') === '1') r.opts.cache = false;
+if (q.get('nolod') === '1') r.opts.lod = false;
 window.renderer = r;
 const cam = { x: 0, y: 0, zoom: num('zoom', 2) };
 function center(f, x) {
@@ -108,12 +110,12 @@ const speed = num('speed', 1);
 if (q.has('bench')) {
   const N = +q.get('bench');
   for (let i = 0; i < 5; i++) { sim.step(0.1); view.nowMs = i * 16; r.render(view); }
-  const t0 = performance.now();
-  for (let i = 0; i < N; i++) { sim.step(0.1); view.nowMs = 100 + i * 16; r.render(view); }
-  const avg = (performance.now() - t0) / N;
+  let tot = 0;
+  for (let i = 0; i < N; i++) { sim.step(0.1); view.nowMs = 100 + i * 16; const a = performance.now(); r.render(view); if (q.get('nosync') !== '1') r.ctx.getImageData(0, 0, 1, 1); tot += performance.now() - a; }
+  const avg = tot / N;
   document.title = 'BENCH ' + avg.toFixed(2);
   hud.style.fontSize = '20px';
-  window.__bench = `bench avg ${avg.toFixed(2)}ms/frame (incl. sim.step) people=${r.stats.people} objs=${r.stats.objs}`;
+  window.__bench = `bench avg ${avg.toFixed(2)}ms/frame (render) people=${r.stats.people} objs=${r.stats.objs}`;
 }
 let last = performance.now(), fps = 0, acc = 0, frames = 0;
 function loop(now) {

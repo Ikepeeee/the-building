@@ -34,7 +34,8 @@ export const SIM = {
   CROWD_STRESS: 0.3,    // 定員の8割を超えたカゴに乗っている間 /分
   STAIR_STRESS: 5,      // /階
   ESC_STRESS: 1,        // /階
-  TRIP_LIMIT: 360,      // これを超えた移動は救済（リーク防止）
+  TRIP_LIMIT: 360,
+  MAX_BACKLOG: 30,      // 予算付き step で持ち越すゲーム分の上限      // これを超えた移動は救済（リーク防止）
   EXTEND_COST: { elevator: 10000, express: 20000 },
   EXTERMINATE: 10000,
   HELI: 500000,
@@ -55,12 +56,15 @@ export const SIM = {
   SEARCH_PER: 7,
   FIGHT_TIME: 30,       // 警備員1人が1施設を消火するのにかかる時間（分）
   GARBAGE: {
-    cap: 200,                 // 収集室1つに置ける袋数（fill = bags / cap）
-    perDay: { office: 2, condo: 1.5, hotel: 1, shop: 6 },
+    perDay: { office: 1, condo: 1, hotel: 0.5, shop: 4 }, // 1日あたりの袋（容量は TYPES.garbage.capacity × 室数）
     fee: 20, feeRecycle: 10,  // 1袋あたりの回収料金
-    penalty: 12,              // 範囲外・満杯のときの評価（ストレス）加算
+    penalty: 12,              // 集積所が無い・満杯のときの評価（ストレス）加算
   },
-  MAINT: { garbage: 200, escalator: 300, security: 1500, housekeeping: 800, medical: 3000, recycling: 3000, metro: 8000, cathedral: 5000 },
+  PARKING: {
+    share: { office: 0.3, condo: 0.4 }, // ★3以上で車を持つ割合（スイートは全室）
+    penalty: 10,              // 駐車場が足りないテナントの評価（ストレス）加算
+  },
+  MAINT: { garbage: 300, parking: 300, escalator: 300, security: 1500, housekeeping: 800, medical: 3000, recycling: 3000, metro: 8000, cathedral: 5000 },
   STAFF: { security: 6, housekeeping: 6 },
   // 経路コスト（ダイクストラ）
   COST: { elevBase: 5, elevPer: 0.12, expBase: 5, expPer: 0.04, stairs: 2.2, esc: 1.6 },

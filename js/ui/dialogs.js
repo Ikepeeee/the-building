@@ -245,6 +245,8 @@ export class Dialogs {
       item(app.guide.hidden ? '📋 「次にやること」を表示する' : '📋 「次にやること」を隠す', '', () => app.guide.setHidden(!app.guide.hidden)),
       item('🔊 サウンド設定（効果音・環境音）', 'M で全体ミュート', () => this.soundSettings()),
       item('⛶ 全画面表示の切り替え', '', () => app.toggleFullscreen()),
+      item(app.perf.visible ? '📈 性能表示を隠す' : '📈 性能表示（FPS など）', 'F3', () => app.perf.toggle()),
+      item(app.perf.adaptive ? '🖥 重いときに解像度を自動で下げる: オン' : '🖥 重いときに解像度を自動で下げる: オフ', '', () => { app.perf.setAdaptive(!app.perf.adaptive); app.toasts.show({ text: `解像度の自動調整を${app.perf.adaptive ? 'オン' : 'オフ'}にしました`, kind: 'info' }); }),
       item('🏠 タイトルへ戻る', '', () => app.toTitle()));
     const p = this.open({ title: 'メニュー', body: list });
     close = () => { const top = this.stack[this.stack.length - 1]; if (top) top.close(null); };
@@ -414,7 +416,8 @@ export class Dialogs {
         <li>エレベーターが混んだら施設を選んで<b>カゴを増やす</b>。待ち時間が長いと人のストレス（ピンク→赤）が上がり、評価が下がって退去してしまう</li>
         <li>ホテルは<b>ハウスキーピング</b>、事件には<b>警備室</b>が必要</li>
         <li>建てた施設はしばらく<b>工事中</b>（足場とクレーン）。完成するまで使えません</li>
-        <li>「サービス」の<b>ごみ収集室</b>は上下5フロアのごみを集める。無い・満杯だと評価が下がる</li>
+        <li>地下に<b>ごみ集積所</b>（サービス・地下2フロア分）を建てる。ビル全体のごみを集め、毎朝収集車が回収する。無い・満杯だと評価が下がる</li>
+        <li>★3からは車で来る入居者がいる。地下に<b>駐車場</b>（★2で解放）を用意しないと評価が下がる</li>
       </ul>
       <h3>便利な機能</h3>
       <ul>
@@ -428,6 +431,7 @@ export class Dialogs {
       ${touch ? `
       <table class="keys">
         <tr><td>1本指でドラッグ</td><td>スクロール（建設ツールの「フロア・ロビー・撤去・エレベーター」選択中は配置）</td></tr>
+        <tr><td>指を置いて滑らせる</td><td>施設を選んでいるとき: ゴーストが指の少し上に出て、指に合わせて動く。離すと仮置き → ✓ で確定</td></tr>
         <tr><td>2本指</td><td>ピンチでズーム、ドラッグでスクロール</td></tr>
         <tr><td>タップ</td><td>施設を調べる／施設を仮置き → もう一度タップか「✓ 建設」で確定</td></tr>
         <tr><td>下のツールバー</td><td>横にスクロールして施設を選ぶ。もう一度押すと「調べる」に戻る</td></tr>
@@ -439,7 +443,8 @@ export class Dialogs {
         <tr><td><kbd>Ctrl</kbd>＋ホイール／ピンチ</td><td>ズーム（<kbd>+</kbd> <kbd>-</kbd> キーでも）</td></tr>
         <tr><td><kbd>←↑↓→</kbd> / <kbd>WASD</kbd></td><td>スクロール</td></tr>
         <tr><td><kbd>Space</kbd></td><td>一時停止／再開</td></tr>
-        <tr><td><kbd>0</kbd>〜<kbd>4</kbd></td><td>速度（停止・1・2・4・8倍）</td></tr>
+        <tr><td><kbd>0</kbd>〜<kbd>4</kbd> / <kbd>5</kbd></td><td>速度（停止・1・2・4・8倍）／リアルタイム</td></tr>
+        <tr><td><kbd>F3</kbd></td><td>性能表示</td></tr>
         <tr><td><kbd>Esc</kbd> / <kbd>I</kbd></td><td>「調べる」に戻る・閉じる</td></tr>
         <tr><td><kbd>F</kbd> <kbd>L</kbd> <kbd>E</kbd> <kbd>X</kbd> <kbd>T</kbd></td><td>フロア・ロビー・エレベーター・急行・階段</td></tr>
         <tr><td><kbd>O</kbd> <kbd>C</kbd> <kbd>H</kbd> <kbd>R</kbd> <kbd>B</kbd></td><td>オフィス・マンション・シングル・レストラン・撤去</td></tr>
@@ -458,7 +463,7 @@ export class Dialogs {
     const body = h('div');
     if (!importOnly && app.sim && app.started) {
       let text = '';
-      try { text = exportText(app.sim); } catch (e) { text = ''; }
+      try { text = exportText(app.sim, app.uiState()); } catch (e) { text = ''; }
       const ta = h('textarea', { class: 'io', readonly: true, spellcheck: 'false' });
       ta.value = text;
       body.append(

@@ -12,7 +12,7 @@ const STEPS = [
   { label: 'エレベーターを縦にドラッグして階をつなぐ', done: (s) => has(s, 'elevator', 'express', 'stairs', 'escalator') },
   { label: 'オフィスかマンションを建てる', done: (s) => has(s, 'office', 'condo') },
   { label: '入居を待つ（倍速ボタンで早送り。建てた直後は工事中）', done: (s) => (s.pop | 0) > 0 },
-  { label: 'ごみ収集室を建てる（サービス。上下5フロアのごみを集める）', done: (s) => has(s, 'garbage') },
+  { label: '地下にごみ集積所を建てる（サービス。ビル全体のごみを集める）', done: (s) => has(s, 'garbage') },
   { label: '混んできたらエレベーターを選んでカゴを増やす', done: (s) => { for (const o of s.objs.values()) if (o.cars && o.cars.length >= 2) return true; return false; } },
 ];
 
@@ -76,6 +76,12 @@ export class Guide {
       if (!d) basicsDone = false;
       out.push({ label: s.label, done: d });
     }
+    // ★2以上: 駐車場（★3から車で来る入居者が出てくる）
+    if (sim.star >= 2) {
+      const d = has(sim, 'parking');
+      if (!d) basicsDone = false;
+      out.push({ label: '地下に駐車場を建てる（★3から車で来る入居者がいる）', done: d });
+    }
     // 基本が済んだら（または★2以上なら）次の★の条件を並べる
     let prog = null;
     try { prog = sim.starProgress(); } catch { prog = null; }
@@ -84,7 +90,10 @@ export class Guide {
       const reqs = prog.reqs.map((r) => ({ label: r.label, done: !!r.done, sub: true }));
       // 基本がそろったら一度だけ自動でたたむ（建設の邪魔にならないように）
       if (basicsDone && !this.autoCollapsed) { this.autoCollapsed = true; this.collapsed = true; this.persist(); queueMicrotask(() => this.apply()); }
-      if (basicsDone || sim.star >= 2) return [{ label: `${name} の条件`, done: reqs.every((r) => r.done), head: true }, ...reqs];
+      if (basicsDone || sim.star >= 2) {
+        const extra = out.filter((it) => !it.done && sim.star >= 2); // 未達の基本（駐車場など）は残す
+        return [...extra, { label: `${name} の条件`, done: reqs.every((r) => r.done), head: true }, ...reqs];
+      }
       out.push({ label: `${name} の条件をそろえる（HUDの★で確認）`, done: false });
     }
     return out;

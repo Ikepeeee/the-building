@@ -97,6 +97,15 @@ export class Painter {
       for (let k = 0; k < 15; k++) if (g.charCodeAt(k) === 49) this.g.fillRect(x + i * 4 + (k % 3), y + ((k / 3) | 0), 1, 1);
     }
   }
+  // 拡大した 3x5 フォント（k 倍）
+  textK(s, x, y, c, k) {
+    this.col(c);
+    s = String(s).toUpperCase();
+    for (let i = 0; i < s.length; i++) {
+      const g = FONT[s[i]] || FONT[' '];
+      for (let j = 0; j < 15; j++) if (g.charCodeAt(j) === 49) this.g.fillRect(x + (i * 4 + (j % 3)) * k, y + ((j / 3) | 0) * k, k, k);
+    }
+  }
   // 看板（白いプレートに文字）
   sign(s, cx, y, fg = '#c02020', bg = '#f6f0dc', line = '#000') {
     const tw = textWidth(s);

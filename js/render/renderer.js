@@ -1,9 +1,9 @@
 // The Building Renderer（Canvas 2D・ピクセルアート）
 // const r = new Renderer(canvas, sim); r.resize(w, h); r.render(view); r.setSim(sim);
 import { TILE_W, FLOOR_H, W, MIN_F, MAX_F, DAY, LOBBY_FLOORS, TYPES, floorName } from '../sim/constants.js';
-import { makeFacilitySprite, lobbyTile, floorTile, shaftSeg, carSprite, CAR_H, SPRITE_TOP, treeSprite, machineRoom, pitSprite, fireEscapeSprite, fireEscapeTop, ESC_W, frameTile, craneSprite } from './facilities.js';
+import { makeFacilitySprite, lobbyTile, floorTile, shaftSeg, carSprite, CAR_H, SPRITE_TOP, treeSprite, machineRoom, pitSprite, fireEscapeSprite, fireEscapeTop, ESC_W, frameTile, craneSprite, truckSprite } from './facilities.js';
 import { heliSprite, planeSprite, bannerPlaneSprite, bannerSprite } from './vehicles.js';
-import { peopleAtlas, KIND_INDEX, PW, PH, stressIndex } from './people.js';
+import { peopleAtlas, KIND_INDEX, PW, PH, stressIndex, STRESS_COLORS } from './people.js';
 import {
   skyColors, nightness, cloudTint, cloudSprite, sunSprite, moonSprite, strataSprite, STRATA_W, STRATA_H,
   flameSprite, boomSprite, BOOM, bellSprite, bombSprite, santaSprite, bubbleSprite, roachIcon, dirtyIcon, warnIcon, mirrored,
@@ -12,6 +12,8 @@ import { hash2, Painter } from './pixel.js';
 
 const TW = TILE_W, FH = FLOOR_H;
 const WORLD_W = W * TW;
+const CH_W = 32 * TILE_W, CH_H = 8 * FLOOR_H;   // チャンクの大きさ（ワールドpx）
+const EMPTY = [];
 const LOBBY_SET = new Set(LOBBY_FLOORS);
 
 // 室内に描く人数の上限
@@ -26,6 +28,7 @@ const EVAL_TYPES = new Set(['office', 'condo', 'hotelSingle', 'hotelTwin', 'hote
 const EVAL_COL = { good: '#38d8ff', fair: '#f4d020', bad: '#f03030' };
 
 const isElev = (t) => t === 'elevator' || t === 'express';
+const FLOOR_LABEL = (f) => floorName(f).replace(/F$/, '');
 const num = (v, d = 0) => (typeof v === 'number' && isFinite(v) ? v : d);
 
 // 雲と星の配置（固定）
@@ -50,6 +53,7 @@ export class Renderer {
     this.dpr = 1;
     this.cssW = canvas.clientWidth || canvas.width || 300;
     this.cssH = canvas.clientHeight || canvas.height || 150;
+    this.opts = { cache: true, lod: true };   // cache: 静的レイヤーのチャンク化、lod: 引いたときの簡略描画
     this.cache = new Map();      // スプライトキャッシュ
     this.tiles = new Map();      // タイル
     this.carAnim = new WeakMap();
@@ -70,8 +74,10 @@ export class Renderer {
     this.walkDir = new WeakMap();
   }
 
-  resize(cssWidth, cssHeight) {
-    const dpr = Math.min(3, Math.max(1, (typeof window !== 'undefined' && window.devicePixelRatio) || 1));
+  // dpr を渡すとそれを使う（UI の解像度調整用）。省略時は window.devicePixelRatio
+  resize(cssWidth, cssHeight, dprArg) {
+    const want = (typeof dprArg === 'number' && dprArg > 0) ? dprArg : ((typeof window !== 'undefined' && window.devicePixelRatio) || 1);
+    const dpr = Math.min(3, Math.max(0.5, want));
     this.dpr = dpr;
     this.cssW = Math.max(1, cssWidth | 0);
     this.cssH = Math.max(1, cssHeight | 0);
@@ -124,7 +130,15 @@ export class Renderer {
       const fLo = Math.max(MIN_F, Math.floor(-wy1 / FH));
       const xA = Math.max(0, Math.floor(wx0 / TW)), xB = Math.min(W - 1, Math.floor(wx1 / TW));
       this.fLo = fLo; this.fHi = fHi; this.xA = xA; this.xB = xB;
-      this.phase(() => this.drawBuilding(view, fLo, fHi, xA, xB, dtMs));
+      this.lodOn = this.opts.lod && zoom < 0.6;
+      if (this.opts.cache) {
+        // 夜の度合いを 1/16 刻みにして、チャンクの描き直しを抑える
+        this.night = Math.round(this.night * 16) / 16;
+        this.phase(() => this.drawChunks(view));
+        this.phase(() => this.drawBuilding(view, fLo, fHi, xA, xB, dtMs, 'dynamic'));
+      } else {
+        this.phase(() => this.drawBuilding(view, fLo, fHi, xA, xB, dtMs));
+      }
       this.phase(() => this.drawPeople());
       this.phase(() => this.drawOverlays(view));
       this.phase(() => this.drawBadges());
@@ -331,17 +345,26 @@ export class Renderer {
     return c;
   }
 
-  drawBuilding(view, fLo, fHi, xA, xB, dtMs) {
+  // 毎フレーム描き直す（チャンクに焼かない）施設: 動きがあるもの
+  isDynamic(o) {
+    const t = o.type;
+    return t === 'metro' || t === 'escalator' || !!o.destroyed || (t === 'garbage' && !!o.truck) || this.isBuilding(o);
+  }
+
+  // mode: 'all' = 全部、'static' = チャンク用（動かないもの）、'dynamic' = 毎フレーム分（動くもの・カゴ）
+  // list があれば sim.objs の代わりにそれを走査する（チャンクの索引）
+  drawBuilding(view, fLo, fHi, xA, xB, dtMs, mode = 'all', list = null) {
     const sim = this.sim, ctx = this.ctx;
     const grid = sim.grid || {};
     const objs = sim.objs;
     const night = this.night;
     const nightOn = night > 0.5 ? 1 : 0;
-    const frameEsc = ((this.nowMs / 140) | 0) % 4;
+    const frameEsc = this.lodOn ? 0 : ((this.nowMs / 140) | 0) % 4;
     const week = (Math.floor(num(sim.day, Math.floor(this.simTime / DAY)) / 7)) % 4;
+    const doStatic = mode !== 'dynamic', doDyn = mode !== 'static';
 
     // 1) 空きフロア
-    for (let f = fLo; f <= fHi; f++) {
+    if (doStatic) for (let f = fLo; f <= fHi; f++) {
       const row = grid[f];
       if (!row) continue;
       const wy = -(f + 1) * FH;
@@ -361,15 +384,17 @@ export class Renderer {
     }
 
     // 2) 施設
-    const elevs = [];
+    const elevs = this._elevs || (this._elevs = []);
     const later = this._later || (this._later = []);
     const trans = this._trans || (this._trans = []);
-    later.length = 0; trans.length = 0;
-    this.visObjs = [];
+    elevs.length = 0; later.length = 0; trans.length = 0;
+    const vis = this._vis || (this._vis = []);
+    if (mode !== 'static') vis.length = 0;
     let count = 0;
-    const [wx0, wy0, wx1, wy1] = this.vb;
-    if (objs && typeof objs.values === 'function') {
-      for (const o of objs.values()) {
+    const vb = this.vb, wx0 = vb[0], wy0 = vb[1], wx1 = vb[2], wy1 = vb[3];
+    const iter = list || (objs && typeof objs.values === 'function' ? objs.values() : null);
+    if (iter) {
+      for (const o of iter) {
         if (!o || o.type == null) continue;
         const type = o.type;
         if (isElev(type)) {
@@ -387,33 +412,182 @@ export class Renderer {
         const x = num(o.x) * TW, y = -(f + th) * FH;
         if (x + tw * TW < wx0 || x > wx1 || y - top > wy1 || y + th * FH < wy0) continue;
         count++;
-        this.visObjs.push(o);
-        if (type === 'lobby') { this.guard(() => this.drawLobby(o, f, num(o.x), tw)); continue; }
-        if (type === 'floor') { for (let i = 0; i < tw; i++) this.img(this.tile('fl' + ((num(o.x) + i) & 3), () => floorTile((num(o.x) + i) & 3)), x + i * TW, y, TW, FH); continue; }
+        if (mode !== 'static') vis.push(o);
+        const dyn = mode === 'all' ? false : this.isDynamic(o);
+        if (mode === 'static' ? dyn : mode === 'dynamic' ? !dyn : false) continue;
+        try {
+          if (type === 'lobby') { this.drawLobby(o, f, num(o.x), tw); continue; }
+          if (type === 'floor') { this.floorRun(num(o.x), num(o.x) + tw, y); continue; }
+        } catch (e) { this._warn(e); continue; }
         if (type === 'stairs' || type === 'escalator') trans.push(o, tw, th, x, y, top);
         else later.push(o, tw, th, x, y, top);
       }
     }
+    if (mode !== 'static') this.visObjs = vis;
     // 施設 → 移動手段（階段・エスカレーター）の順に重ねる（v2: 移動手段は施設の上に置ける）
-    for (const list of [later, trans]) {
-      for (let i = 0; i < list.length; i += 6) {
-        const o = list[i];
-        this.guard(() => this.drawFacility(o, o.type, list[i + 1], list[i + 2], list[i + 3], list[i + 4], list[i + 5], nightOn, frameEsc, week));
+    for (let k = 0; k < 2; k++) {
+      const L = k ? trans : later;
+      for (let i = 0; i < L.length; i += 6) {
+        try { this.drawFacility(L[i], L[i].type, L[i + 1], L[i + 2], L[i + 3], L[i + 4], L[i + 5], nightOn, frameEsc, week); }
+        catch (e) { this._warn(e); ctx.globalAlpha = 1; }
       }
     }
-    this.stats.objs = count;
+    if (mode !== 'static') this.stats.objs = count;
 
-    // 3) 外壁・屋上・非常階段
-    this.drawFacade(grid, fLo, fHi, xA, xB);
-    this.guard(() => this.drawFireEscapes(grid, fLo, fHi));
-
-    // 4) エレベーターのシャフト・機械室・ピット（施設の上に重ねる）
-    for (const e of elevs) this.guard(() => this.drawShaft(e, fLo, fHi));
+    if (doStatic) {
+      // 3) 外壁・屋上・非常階段
+      this.drawFacade(grid, fLo, fHi, xA, xB);
+      try { this.drawFireEscapes(grid, fLo, fHi); } catch (e) { this._warn(e); }
+    }
+    // 4) エレベーターのシャフト・機械室・ピット（施設の上に重ねる）。工事中のシャフトは動きがあるので毎フレーム
+    for (const e of elevs) {
+      const b = this.isBuilding(e);
+      if (mode === 'all' || (mode === 'static' && !b) || (mode === 'dynamic' && b)) {
+        try { this.drawShaft(e, fLo, fHi); } catch (err) { this._warn(err); }
+      }
+      if (doDyn && !this.lodOn) try { this.drawQueueLamps(e, fLo, fHi); } catch (err) { this._warn(err); }
+    }
 
     // 5) カゴ
-    for (const e of elevs) this.guard(() => this.drawCars(e, dtMs));
-    this.guard(() => this.drawStopPlates(elevs, fLo, fHi));
-    this.elevs = elevs;
+    if (doDyn) {
+      for (const e of elevs) { try { this.drawCars(e, dtMs); } catch (err) { this._warn(err); } }
+      this.elevs = elevs;
+    }
+  }
+
+  drawQueueLamps(e, fLo, fHi) {
+    const q = e.q;
+    if (!q) return;
+    const w = num(e.w, e.type === 'express' ? 6 : 4), x = num(e.x) * TW;
+    const lo = num(e.lo, num(e.f)), hi = num(e.hi, lo);
+    for (let f = Math.max(lo, fLo); f <= Math.min(hi, fHi); f++) {
+      const qf = q[f];
+      if (!qf) continue;
+      if (qf.up && qf.up.length) this.rect(x + 1, -(f + 1) * FH + 5, 1, 2, '#ffd040');
+      if (qf.down && qf.down.length) this.rect(x + w * TW - 2, -(f + 1) * FH + 5, 1, 2, '#ff8040');
+    }
+  }
+
+  // ---------------- 静的レイヤーのチャンク ----------------
+  // 32 マス × 8 フロアごとに、動かないもの（フロア・施設・外壁・非常階段・シャフト）を
+  // オフスクリーンに焼いておき、中身の状態が変わったときだけ描き直す。
+  chunkIndex() {
+    const sim = this.sim, objs = sim.objs;
+    const rev = typeof sim.revision === 'number' ? sim.revision : -1;
+    const size = objs && objs.size || 0;
+    const ci = this._cidx;
+    this._cidxFrame = (this._cidxFrame || 0) + 1;
+    if (ci && ci.sim === sim && ci.rev === rev && ci.size === size && (rev >= 0 || this._cidxFrame % 120)) return ci;
+    const map = new Map();
+    const put = (key, o) => { let a = map.get(key); if (!a) { a = []; map.set(key, a); } a.push(o); };
+    if (objs) for (const o of objs.values()) {
+      if (!o || o.type == null) continue;
+      let x0, x1, y0, y1;
+      if (isElev(o.type)) {
+        const lo = num(o.lo, num(o.f)), hi = num(o.hi, lo);
+        x0 = num(o.x) * TW; x1 = x0 + num(o.w, 4) * TW; y0 = -(hi + 2) * FH; y1 = -(lo - 1) * FH;
+      } else {
+        const tw = num(o.w, (TYPES[o.type] && TYPES[o.type].w) || 1), th = num(o.h, (TYPES[o.type] && TYPES[o.type].h) || 1);
+        x0 = num(o.x) * TW; x1 = x0 + tw * TW; y0 = -(num(o.f) + th) * FH - (SPRITE_TOP[o.type] || 0); y1 = -num(o.f) * FH;
+      }
+      for (let cx = Math.floor((x0 - 4) / CH_W); cx <= Math.floor((x1 + 3) / CH_W); cx++) {
+        for (let cy = Math.floor((y0 - 4) / CH_H); cy <= Math.floor((y1 + 3) / CH_H); cy++) put(cx * 4096 + cy, o);
+      }
+    }
+    this._cidx = { sim, rev, size, map };
+    return this._cidx;
+  }
+
+  chunkSig(list, base, nightOn, frameEsc, week) {
+    const sim = this.sim;
+    let h = base | 0;
+    if (!list) return h;
+    for (let i = 0; i < list.length; i++) {
+      const o = list[i];
+      let s;
+      if (isElev(o.type)) {
+        const st = Array.isArray(o.stops) ? o.stops : null;
+        s = (num(o.lo) * 977 + num(o.hi) * 131 + (st ? st.length * 7 + (st[0] | 0) * 3 + (st[st.length - 1] | 0) : 1) + (this.isBuilding(o) ? 5 : 0)) | 0;
+      } else if (this.isDynamic(o)) {
+        s = 17;
+      } else {
+        // 割り当てなしの軽い署名（見た目に効くものだけ）
+        const t = o.type;
+        let n = o.inCount | 0;
+        const cap = VIS_CAP[t];
+        if (cap != null && n > cap) n = cap;
+        if (t === 'garbage') n = ((num(o.fill) * 12) | 0) + ((num(o.bags) > 0) ? 100 : 0);
+        else if (t === 'parking') n = o.used | 0;
+        let open = 1;
+        if (COMMERCE.has(t) && typeof sim.isOpen === 'function') { try { open = sim.isOpen(o) ? 1 : 0; } catch (e) { open = 1; } }
+        s = (n | ((o.occupied !== false) << 7) | ((o.dirty ? 1 : 0) << 8) | (open << 9) | ((o.variant | 0) << 10) | (((num(o.burnt) * 8) | 0) << 14)
+          | ((o.infested ? 1 : 0) << 18) | (o.unreachable ? 1 << 19 : 0) | (t === 'cinema' ? week << 20 : 0)) ^ (nightOn << 23);
+      }
+      h = Math.imul(h ^ s, 16777619) ^ num(o.id);
+    }
+    return h;
+  }
+
+  drawChunks(view) {
+    const sim = this.sim;
+    this._frame = (this._frame || 0) + 1;
+    const S = this.S;
+    const cs = S >= 1 ? 1 : S >= 0.5 ? 0.5 : 0.25;
+    const idx = this.chunkIndex();
+    const vb = this.vb;
+    const cx0 = Math.floor((vb[0] - 24) / CH_W), cx1 = Math.floor((vb[2] + 24) / CH_W);
+    const cy0 = Math.max(Math.floor(-(MAX_F + 6) * FH / CH_H), Math.floor(vb[1] / CH_H)), cy1 = Math.min(Math.ceil(-MIN_F * FH / CH_H) + 1, Math.floor(vb[3] / CH_H));
+    const xMinC = Math.floor(-40 / CH_W), xMaxC = Math.floor((WORLD_W + 40) / CH_W);
+    const nightOn = this.night > 0.5 ? 1 : 0;
+    const week = (Math.floor(num(sim.day, Math.floor(this.simTime / DAY)) / 7)) % 4;
+    const rev = typeof sim.revision === 'number' ? sim.revision : 0;
+    const base = (rev * 7919 + Math.round(this.night * 16) * 131 + cs * 1000) | 0;
+    const cache = this.chunks || (this.chunks = new Map());
+    for (let cy = cy0; cy <= cy1; cy++) {
+      for (let cx = Math.max(cx0, xMinC); cx <= Math.min(cx1, xMaxC); cx++) {
+        const key = cs * 1e9 + cx * 4096 + cy;
+        const list = idx.map.get(cx * 4096 + cy) || null;
+        let ch = cache.get(key);
+        if (ch) { cache.delete(key); cache.set(key, ch); }
+        // 中身の確認は 3 フレームに 1 回ずつ分散（構造や夜の段階が変わったときは即時）
+        const b2 = base ^ (idx.size * 31);
+        const check = !ch || ch.base !== b2 || ((cx + cy * 7 + this._frame) % 3 === 0);
+        const sig = check ? this.chunkSig(list, b2, nightOn, 0, week) : ch.sig;
+        if (ch) ch.base = b2;
+        if (!ch || ch.sig !== sig) {
+          if (!ch) { ch = { c: makeCanvasLike(Math.ceil(CH_W * cs), Math.ceil(CH_H * cs)), sig: 0, base: b2 }; cache.set(key, ch); this._chunkPx = (this._chunkPx || 0) + ch.c.width * ch.c.height; }
+          this.renderChunk(view, ch, cx * CH_W, cy * CH_H, cs, list);
+          ch.sig = sig;
+          this.stats.chunkRedraw = (this.stats.chunkRedraw || 0) + 1;
+        }
+        this.img(ch.c, cx * CH_W, cy * CH_H, CH_W, CH_H);
+      }
+    }
+    // 古いチャンクを捨てる（約 8M ピクセル = 32MB まで）
+    while (this._chunkPx > 8e6 && cache.size > 4) {
+      const k = cache.keys().next().value;
+      const c = cache.get(k).c;
+      this._chunkPx -= c.width * c.height;
+      cache.delete(k);
+    }
+  }
+
+  renderChunk(view, ch, x0, y0, cs, list) {
+    const save = [this.ctx, this.S, this.cx, this.cy, this.vb, this.fLo, this.fHi, this.xA, this.xB];
+    const g = ch.c.getContext('2d');
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, ch.c.width, ch.c.height);
+    g.imageSmoothingEnabled = false;
+    this.ctx = g; this.S = cs; this.cx = x0; this.cy = y0;
+    this.vb = [x0, y0, x0 + CH_W, y0 + CH_H];
+    const fHi = Math.min(MAX_F, Math.floor(-y0 / FH)), fLo = Math.max(MIN_F, Math.floor(-(y0 + CH_H) / FH));
+    const xA = Math.max(0, Math.floor(x0 / TW) - 1), xB = Math.min(W - 1, Math.floor((x0 + CH_W) / TW) + 1);
+    this.fLo = fLo; this.fHi = fHi; this.xA = xA; this.xB = xB;
+    try { this.drawBuilding(view, fLo, fHi, xA, xB, 0, 'static', list || EMPTY); }
+    catch (e) { this._warn(e); }
+    finally {
+      [this.ctx, this.S, this.cx, this.cy, this.vb, this.fLo, this.fHi, this.xA, this.xB] = save;
+    }
   }
 
   // 空きフロアの連続を、まとめた帯のスプライトから一度に描く
@@ -458,17 +632,22 @@ export class Renderer {
       } else n = Math.min(cap, n);
     }
     let open = 1;
-    if (type === 'garbage') open = 0;
-    else if (COMMERCE.has(type)) {
+    if (COMMERCE.has(type)) {
       try { open = typeof sim.isOpen === 'function' ? (sim.isOpen(o) ? 1 : 0) : 1; } catch (e) { open = 1; }
     }
     const dirty = o.dirty ? 1 : 0;
     const alt = (num(o.id) % 3 + 3) % 3;
+    if (type === 'metro' && this.hour < 5) n = 0;
     if (type === 'garbage') {
-      const fl = Math.max(0, num(o.fill));
-      n = fl >= 1 ? 9 : Math.min(8, Math.round(fl * 8));
-      const h = this.hour;
-      open = h >= 4.5 && h < 6.2 ? 1 : 0;
+      // 袋の量（fill 0..1 → 0..12、満杯以上は 13 = あふれ）。fill が無ければ bags / capacity
+      let fl = num(o.fill, NaN);
+      if (!(fl === fl)) fl = num(o.bags) / ((TYPES.garbage && TYPES.garbage.capacity) || 400);
+      fl = Math.max(0, fl);
+      n = fl >= 1 ? 13 : Math.min(12, Math.round(fl * 12));
+      if (n === 0 && num(o.bags) > 0) n = 1;
+      open = o.truck ? 1 : 0;
+    } else if (type === 'parking') {
+      n = Math.max(0, Math.min((TYPES.parking && TYPES.parking.spaces) || 12, num(o.used) | 0));
     }
     const frame = type === 'escalator' ? frameEsc : 0;
     const wk = type === 'cinema' ? week : 0;
@@ -519,6 +698,7 @@ export class Renderer {
       this.drawTrain(x, y, ww);
       this.img(m.fg, x, y, ww, hh);
     }
+    if (type === 'garbage' && o.truck) this.drawTruck(o.truck, x, y, ww, hh);
     // 暗さ（夜の無人・閉店・空室）
     const night = this.night;
     let dark = 0;
@@ -644,13 +824,53 @@ export class Renderer {
     }
   }
 
+  // ごみ収集車: in = 左のシャッターから後ろ向きに入る、load = 作業員が袋を積む、out = 前向きに出ていく
+  drawTruck(tr, x, y, ww, hh) {
+    const ctx = this.ctx, ms = this.nowMs;
+    const t = Math.max(0, Math.min(1, num(tr.t)));
+    const park = x + 12, outside = x - 62;
+    const ease = (k) => k * k * (3 - 2 * k);
+    let tx = park;
+    if (tr.phase === 'in') tx = outside + (park - outside) * ease(t);
+    else if (tr.phase === 'out') tx = park + (outside - park) * ease(t);
+    const spr = this.tile('truck', truckSprite);
+    const ty = y + hh - 3 - 21;
+    ctx.save();
+    try {
+      const cx0 = this.X(x + 1), cx1 = this.X(x + ww);
+      ctx.beginPath(); ctx.rect(cx0, this.Y(y), cx1 - cx0, this.Y(y + hh) - this.Y(y)); ctx.clip();
+      const bob = tr.phase === 'load' ? 0 : ((ms / 120) | 0) % 2 * 0.5;
+      this.img(spr, tx, ty + bob, spr.width, spr.height);
+      // 回転灯
+      if (((ms / 250) | 0) % 2) this.rect(tx + 17, ty, 2, 2, '#ffb030');
+      if (tr.phase === 'load') {
+        // 作業員が袋を投入口へ運ぶ
+        const hop = tx + 52, pile = x + 80;
+        for (let i = 0; i < 2; i++) {
+          const ph = ((ms / 1400) + i * 0.5) % 1;
+          const k = ph < 0.5 ? ph * 2 : (1 - ph) * 2;
+          const wx = pile + (hop + 4 - pile) * k;
+          const feet = y + hh - 4;
+          this.rect(wx, feet - 8, 3, 1, '#f0d020'); this.rect(wx + 1, feet - 7, 2, 2, '#1a1a1a');
+          this.rect(wx, feet - 5, 3, 3, '#3a8a4a'); this.rect(wx + 1, feet - 4, 1, 1, '#e8e8a0');
+          this.rect(wx, feet - 2, 1, 2, '#2a2a3a'); this.rect(wx + 2, feet - 2, 1, 2, '#2a2a3a');
+          if (ph < 0.5) { this.rect(wx - 3, feet - 7, 4, 3, '#000'); this.rect(wx - 2, feet - 6, 2, 2, i ? '#e8e8e0' : '#2a2a2e'); }
+        }
+        // 投入口の圧縮動作
+        if (((ms / 300) | 0) % 2) this.rect(hop - 1, ty + 9, 5, 1, '#f0d020');
+      }
+    } finally { ctx.restore(); }
+  }
+
   drawTrain(x, y, ww) {
-    // 20 ゲーム分周期で到着 → 停車 → 発車
-    const t = (((this.simTime % 20) + 20) % 20);
+    // 5:00〜24:00 に 75 ゲーム分ごと: 4分で到着 → 8分停車 → 3分で発車
+    const tod = this.hour * 60;
+    if (tod < 300) return;
+    const t = (tod - 300) % 75;
     let off;
-    if (t < 3) off = (1 - t / 3) * (ww + 20);
-    else if (t < 10) off = 0;
-    else if (t < 13) off = -((t - 10) / 3) * (ww + 240);
+    if (t < 4) off = (1 - t / 4) * (ww + 20);
+    else if (t < 12) off = 0;
+    else if (t < 15) off = -((t - 12) / 3) * (ww + 240);
     else return;
     off = Math.round(off);
     const ctx = this.ctx;
@@ -665,6 +885,7 @@ export class Renderer {
     }
   }
 
+
   drawShaft(e, fLo, fHi) {
     const express = e.type === 'express' ? 1 : 0;
     const w = num(e.w, express ? 6 : 4);
@@ -673,16 +894,9 @@ export class Renderer {
     const q = e.q || null;
     const stops = this.stopSet(e);
     for (let f = Math.max(lo, fLo); f <= Math.min(hi, fHi); f++) {
-      const stop = stops.has(f) ? 1 : 0;
-      const key = 'sh' + w + express + stop;
-      this.img(this.tile(key, () => shaftSeg(w, express, stop, 0, 0)), x, -(f + 1) * FH, w * TW, FH);
-      if (q) {
-        const qf = q[f];
-        if (qf) {
-          if (qf.up && qf.up.length) this.rect(x + 1, -(f + 1) * FH + 5, 1, 2, '#ffd040');
-          if (qf.down && qf.down.length) this.rect(x + w * TW - 2, -(f + 1) * FH + 5, 1, 2, '#ff8040');
-        }
-      }
+      const label = stops.has(f) ? FLOOR_LABEL(f) : '';
+      const key = 'sh' + w + express + label;
+      this.img(this.tile(key, () => shaftSeg(w, express, label)), x, -(f + 1) * FH, w * TW, FH);
     }
     this.drawMachinePit(x, w, express, lo, hi, fLo, fHi);
     if (this.isBuilding(e)) this.drawConstruction(e, x, -(hi + 2) * FH, w * TW, (hi - lo + 3) * FH, lo - 1, hi - lo + 3, false);
@@ -706,40 +920,6 @@ export class Renderer {
     return set;
   }
 
-  // 乗り場の階数プレート（止まる階だけ）。ズーム 1 以上で文字、引くと小さな印だけ
-  drawStopPlates(elevs, fLo, fHi) {
-    const ctx = this.ctx, dpr = this.dpr, zc = this.S / dpr;
-    if (zc < 0.45) return;
-    const fs = Math.round(Math.max(8, Math.min(12, FH * zc * 0.34)) * dpr);
-    if (zc >= 0.95) { ctx.font = `bold ${fs}px ui-monospace, Menlo, Consolas, monospace`; ctx.textBaseline = 'middle'; }
-    for (const e of elevs) {
-      if (this.isBuilding(e)) continue;
-      const express = e.type === 'express';
-      const w = num(e.w, express ? 6 : 4), x = num(e.x) * TW;
-      const lo = num(e.lo, num(e.f)), hi = num(e.hi, lo);
-      const stops = this.stopSet(e);
-      const cx = this.X(x + w * TW / 2);
-      for (let f = Math.max(lo, fLo); f <= Math.min(hi, fHi); f++) {
-        if (!stops.has(f)) continue;
-        const top = this.Y(-(f + 1) * FH);
-        if (zc < 0.95) {
-          const s = Math.max(2, Math.round(2 * this.S));
-          ctx.fillStyle = '#000'; ctx.fillRect(cx - s - 1, top + Math.round(this.S) - 1, s * 2 + 2, s + 2);
-          ctx.fillStyle = express ? '#ff9a40' : '#ffd040'; ctx.fillRect(cx - s, top + Math.round(this.S), s * 2, s);
-          continue;
-        }
-        const label = floorName(f).replace(/F$/, '');
-        const tw = ctx.measureText(label).width;
-        const pw = Math.round(tw + fs * 0.6), ph = Math.round(fs * 1.15);
-        const px = Math.round(cx - pw / 2), py = top + Math.round(1.5 * this.S);
-        ctx.fillStyle = '#c8c8d0'; ctx.fillRect(px - dpr, py - dpr, pw + 2 * dpr, ph + 2 * dpr);
-        ctx.fillStyle = '#14161c'; ctx.fillRect(px, py, pw, ph);
-        ctx.fillStyle = LOBBY_SET.has(f) ? '#7ae0ff' : express ? '#ffa850' : '#ffd040';
-        ctx.fillText(label, px + (pw - tw) / 2, py + ph / 2 + dpr * 0.5);
-      }
-    }
-  }
-
   drawMachinePit(x, w, express, lo, hi, fLo, fHi) {
     if (hi + 1 >= fLo && hi + 1 <= fHi + 1) this.img(this.tile('mr' + w + express, () => machineRoom(w, express)), x, -(hi + 2) * FH, w * TW, FH);
     if (lo - 1 >= fLo - 1 && lo - 1 <= fHi) this.img(this.tile('pit' + w + express, () => pitSprite(w, express)), x, -lo * FH, w * TW, FH);
@@ -761,15 +941,15 @@ export class Renderer {
       const pos = num(car.pos, num(e.lo));
       const top = -(pos + 1) * FH + 1;
       const vel = num(car.v, 0);
-      // ロープ（カゴの上から機械室へ）と釣り合いおもり
-      if (top > wy0 - 4 && shaftTop < wy1) {
+      // ロープ（カゴの上から機械室へ）と釣り合いおもり（引いた視点では省略）
+      if (!this.lodOn && top > wy0 - 4 && shaftTop < wy1) {
         const cx = x + (cw >> 1);
         this.rect1(cx - 2, Math.max(shaftTop, wy0 - 2), 0.5, top - Math.max(shaftTop, wy0 - 2), '#15151a');
         this.rect1(cx + 1, Math.max(shaftTop, wy0 - 2), 0.5, top - Math.max(shaftTop, wy0 - 2), '#15151a');
       }
       const cwPos = lo + hi - pos;
       const cwTop = -(cwPos + 1) * FH + 4;
-      if (ci === 0 && cwTop + 10 > wy0 && cwTop < wy1) {
+      if (!this.lodOn && ci === 0 && cwTop + 10 > wy0 && cwTop < wy1) {
         const cwx = x + cw - 3 + (ci & 1);
         this.rect(cwx, shaftTop, 1, cwTop - shaftTop, '#2a2a30');
         this.rect(cwx - 1, cwTop, 3, 10, '#6a6458'); this.rect(cwx - 1, cwTop, 3, 1, '#2a2a2a'); this.rect(cwx - 1, cwTop + 9, 3, 1, '#2a2a2a');
@@ -787,7 +967,7 @@ export class Renderer {
       const spr = this.sprite('car' + w + express + '|' + nv + '|' + a.open, () => carSprite(w, express, nv, a.open));
       this.img(spr, x, top, w * TW - 4, CAR_H);
       // 速度に応じた動きの線（加減速が見える）
-      const sp = Math.abs(vel);
+      const sp = this.lodOn ? 0 : Math.abs(vel);
       if (sp > 1.5) {
         const k = Math.min(1, (sp - 1.5) / 8);
         this.ctx.globalAlpha = 0.25 + 0.35 * k;
@@ -903,9 +1083,21 @@ export class Renderer {
     const [wx0, wy0, wx1, wy1] = this.vb;
     let count = 0;
     const S = this.S;
+    const lod = this.lodOn;
+    const dw = Math.max(1, Math.round(3 * S)), dh = Math.max(1, Math.round(7 * S));
+    let lastCol = null;
     const drawOne = (p, wx, fpos, facing, moving) => {
       const feet = -fpos * FH - 3;
       if (feet < wy0 || feet - PH > wy1 || wx + 4 < wx0 || wx - 4 > wx1) return;
+      if (lod) {
+        // 引いた視点: スプライトの代わりに小さな四角（ストレス色）
+        const k = p.kind;
+        const c = k === 'guard' ? '#2f5ce0' : k === 'vip' ? '#f2c418' : (k === 'bride' || k === 'groom') ? '#ffffff' : STRESS_COLORS[stressIndex(num(p.stress))];
+        if (c !== lastCol) { ctx.fillStyle = c; lastCol = c; }
+        ctx.fillRect(Math.round((wx - 1.5 - this.cx) * S), Math.round((feet - this.cy) * S) - dh, dw, dh);
+        count++;
+        return;
+      }
       let kind = p.kind;
       let ki = KIND_INDEX[kind];
       if (ki === undefined) ki = 0;
@@ -982,7 +1174,7 @@ export class Renderer {
       const tw = num(o.w, (TYPES[type] && TYPES[type].w) || 1), th = num(o.h, (TYPES[type] && TYPES[type].h) || 1);
       const x = num(o.x) * TW, y = -(num(o.f) + th) * FH;
       if (o.destroyed || this.isBuilding(o)) continue;
-      if (o.infested) { this.drawRoaches(o, x, y, tw * TW, ms); this.badges.push(1, x + tw * TW, y); }
+      if (o.infested) { if (!this.lodOn) this.drawRoaches(o, x, y, tw * TW, ms); this.badges.push(1, x + tw * TW, y); }
       else if (o.dirty) this.badges.push(2, x + tw * TW, y);
       if (o.unreachable === true) {
         this.badges.push(3, x + tw * TW / 2, y);
@@ -990,7 +1182,7 @@ export class Renderer {
         this.strokeWorld([x, y, tw * TW, th * FH], `rgba(255,60,40,${a.toFixed(3)})`, Math.max(1, Math.round(this.dpr * 1.5)), false);
       }
       if (num(o.complaintUntil, -1) > now) bubbles.push([x + tw * TW - 15, y - 9]);
-      if (evalFn && EVAL_TYPES.has(type) && o.occupied !== false) {
+      if (evalFn && !this.lodOn && EVAL_TYPES.has(type) && o.occupied !== false) {
         let lv = null;
         try { lv = evalFn(o); } catch (e) { lv = null; }
         const c = lv && EVAL_COL[lv];

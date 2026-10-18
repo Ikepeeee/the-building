@@ -116,7 +116,11 @@ export const BuildMixin = {
       if (this.cell(f, x) !== 0) continue;
       if (this.supported(f, x)) cells.push(x); else unsupported++;
     }
-    if (!cells.length) return fail(unsupported ? (f < 0 ? '上の階に支えがありません' : '下の階に支えがありません') : 'すでにフロアがあります');
+    if (!cells.length) {
+      // 一括コピーでは、すでにフロアがあるマスは飛ばすだけ（費用 0・何もしない）
+      if (p.tolerant && !unsupported) return { ok: true, reason: '', cost: 0, ghost, apply: () => null };
+      return fail(unsupported ? (f < 0 ? '上の階に支えがありません' : '下の階に支えがありません') : 'すでにフロアがあります');
+    }
     const cost = cells.length * T.costPerTile;
     return {
       ok: true, reason: '', cost, ghost,
@@ -234,7 +238,8 @@ export const BuildMixin = {
     const o = {
       id: id ?? this.nextId++, type, f, x, w, h,
       occupied: !(TENANT.has(type) || HOTEL.has(type)),
-      inCount: 0, dead: false, destroyed: null, unreachable: false, constructStart: 0, constructUntil: 0, fill: 0, bags: 0, garbageBad: false,
+      inCount: 0, dead: false, destroyed: null, unreachable: false, constructStart: 0, constructUntil: 0, fill: 0, bags: 0, truck: null, garbageBad: false,
+      used: 0, needsParking: 0, parkingShort: 0, moveSeq: 0,
       variant: 0, brand: '',
       eval: 0, evalSum: 0, evalN: 0, badDays: 0, cWait: 0, cStair: 0,
       rs: this.newReasons(),
@@ -265,9 +270,8 @@ export const BuildMixin = {
   },
   finishConstruction(o) {
     o.constructStart = 0; o.constructUntil = 0;
-    this.reindex();
+    this._needReindex = true; // 同じ tick に完成した分はまとめて索引を作り直す
     this.sound('built');
-    this.checkStar();
   },
   isUnderConstruction(o) { return !!o && o.constructUntil > 0; },
   // すべての工事をすぐ終える（デバッグ・テスト用）
@@ -403,6 +407,7 @@ export const BuildMixin = {
       for (const k of ['f', 'f2', 'lo', 'hi']) if (typeof q[k] === 'number') q[k] += of;
       for (const k of ['x', 'x2']) if (typeof q[k] === 'number') q[k] += ox;
       if (q.config && Array.isArray(q.config.skip)) q.config = { ...q.config, skip: q.config.skip.map((s) => s + of) };
+      q.tolerant = true;
       return q;
     };
     const res = { ok: true, cost: 0, reason: '', failedIndex: -1, ghosts: [] };

@@ -49,11 +49,22 @@ export class AutoPlayer {
 
   money() { return this.s.money; }
 
+  basement() {
+    if (this.bdone) return;
+    const s = this.s;
+    if (s.money < 150000) return;
+    // 必要な分だけ掘る（あとで広げる）
+    s.build('floor', { f: -1, x: 30, x2: 45 });
+    s.build('floor', { f: -2, x: 30, x2: 45 });
+    if (s.build('garbage', { f: -2, x: 30 }).ok) this.bdone = true;
+  }
+
   setup() {
     const s = this.s;
     mustBuild(s, 'lobby', { f: 0, x: this.X0, x2: this.X1 });
     for (let f = 1; f <= 2; f++) this.buildFloor(f);
     mustBuild(s, 'elevator', { f: 0, f2: 2, x: this.shaftX[0][0] });
+    this.basement();
   }
 
   elevatorsFor(tier) {
@@ -85,8 +96,6 @@ export class AutoPlayer {
     if (!r.ok && r.reason !== 'すでにフロアがあります') return false;
     const plan = f <= 2 ? (f === 1 ? 'office' : 'condo') : this.roomPlan(f);
     let [s1, s2, s3] = this.segs;
-    // 10フロアごとにごみ収集室（上下5フロアを担当）
-    if (f % 10 === 2 && s.build('garbage', { f, x: s1[0] }).ok) s1 = [s1[0] + TYPES.garbage.w, s1[1]];
     switch (plan) {
       case 'office': this.place('office', f, s1); this.place('office', f, s2); this.place('office', f, s3); break;
       case 'condo': this.place('condo', f, s1); this.place('condo', f, s2); this.place('condo', f, s3); break;
@@ -147,6 +156,16 @@ export class AutoPlayer {
       const want = Math.max(1, Math.ceil((e.hi - e.lo) / 10));
       if ((e.cars.length < want || e.peakWaitYesterday > 2.5) && e.cars.length < TYPES[e.type].maxCars && this.money() > reserve + TYPES[e.type].carCost) s.act(e, 'addCar');
     }
+    // 地下: ごみ集積所（B2〜B1）を必要に応じて増やす。★3からは駐車場（B3）も
+    this.basement();
+    if (this.bdone && s.money > 150000 && (s.garbageProblem() || s.garbageBags > s.garbageCap * 0.7)) {
+      if (!this.bwide) { s.build('floor', { f: -1, x: this.X0, x2: this.X1 }); s.build('floor', { f: -2, x: this.X0, x2: this.X1 }); this.bwide = true; }
+      for (const x of [30, 46, 62, 78]) if (s.build('garbage', { f: -2, x }).ok) break;
+    }
+    if (s.star >= 3 && s.parkingShort > 0 && s.money > 200000) {
+      if (!this.b3) { s.build('floor', { f: -3, x: this.X0, x2: this.X1 }); this.b3 = true; }
+      for (const x of [30, 54, 78]) if (s.build('parking', { f: -3, x }).ok) break;
+    }
     // ★3: 医療センターとリサイクルセンター、スイート
     if (s.star >= 3) {
       if (!s.byType.medical.length && this.money() > 900000) {
@@ -155,9 +174,8 @@ export class AutoPlayer {
         s.build('medical', { f: this.top, x: 60 });
       }
       if (!s.byType.recycling.length && this.money() > 700000) {
-        s.build('floor', { f: -1, x: this.X0, x2: this.X1 });
-        s.build('floor', { f: -2, x: this.X0, x2: this.X1 });
-        s.build('recycling', { f: -2, x: 30 });
+        if (!this.bwide) { s.build('floor', { f: -1, x: this.X0, x2: this.X1 }); s.build('floor', { f: -2, x: this.X0, x2: this.X1 }); this.bwide = true; }
+        s.build('recycling', { f: -2, x: 94 });
       }
       if (!s.byType.hotelSuite.length && this.money() > 300000) {
         const f = this.top + 1;
@@ -247,21 +265,18 @@ export function buildMegaTower(sim, topF = 98) {
     const o2 = sim.objAt(f, 10); if (o2) sim.removeObj(o2);
   }
   sim.build('security', { f: 2, x: 0 });
-  // ごみ収集室（上下5フロアを担当）
-  for (const f of [1, 11, 21, 31, 41, 51, 61, 71, 81, 91, 97]) {
-    for (const x of [0, 140]) {
-      const o = sim.objAt(f, x); if (o && !['security', 'housekeeping', 'lobby'].includes(o.type)) sim.removeObj(o);
-      sim.build('garbage', { f, x });
-    }
-  }
   sim.build('housekeeping', { f: 4, x: 0 });
   sim.build('housekeeping', { f: 6, x: 0 });
   sim.build('medical', { f: -1, x: 0 });
   sim.build('recycling', { f: -3, x: 0 });
   sim.build('metro', { f: -3, x: 84 });
+  // ごみ集積所（地下2フロア分、ビル全体で共有）
+  for (const x of [24, 40, 56, 114, 130]) mustBuild(sim, 'garbage', { f: -3, x });
   sim.build('cathedral', { f: 99, x: 65 });
-  // 全テナント入居
+  // 全テナント入居（★2のうちに入居させて、駐車場の需要は付けない）
+  sim.star = 2;
   for (const o of [...sim.byType.office, ...sim.byType.condo]) if (!o.occupied) sim.moveIn(o);
+  sim.star = 5;
   sim.recalcPop();
 }
 
@@ -441,4 +456,31 @@ export function elevatorStress(seed, minutes = 600, opts = {}) {
     if (problems.length > 5) break;
   }
   return { problems, rescues: s.stats.rescues, trips: s.stats.trips, sim: s };
+}
+
+// 性能測定用: 横幅480・60フロアのビル（急行＋2段の各停、80マスごとのバンク）
+export function buildWideTower(sim, floors = 60) {
+  sim.money = 1e12; sim.star = 3;
+  const top = floors - 1;
+  for (const f of [0, -1, -2]) mustBuild(sim, 'floor', { f, x: 0, x2: W - 1 });
+  for (let f = 1; f <= top; f++) mustBuild(sim, 'floor', { f, x: 0, x2: W - 1 });
+  for (const f of LOBBY_FLOORS) if (f <= top) mustBuild(sim, 'lobby', { f, x: 0, x2: W - 1 });
+  for (let b = 30; b < W; b += 80) {
+    mustBuild(sim, 'express', { f: 0, f2: Math.min(top, 59), x: b });
+    for (let i = 0; i < 2; i++) {
+      const lo = i * 29, hi = Math.min(top, lo + 29);
+      if (hi <= lo) continue;
+      mustBuild(sim, 'elevator', { f: lo, f2: hi, x: b + 8 + i * 6 });
+    }
+  }
+  for (const e of sim.elevs) while (e.cars.length < 8) sim.act(e, 'addCar');
+  for (let f = 1; f <= top; f++) {
+    if (LOBBY_FLOORS.includes(f)) continue;
+    for (let x = 0; x + TYPES.office.w <= W; x += TYPES.office.w) sim.build(f % 7 === 3 ? 'condo' : 'office', { f, x });
+  }
+  for (let x = 0; x + 16 <= W; x += 16) sim.build('garbage', { f: -2, x });
+  sim.star = 2;
+  for (const o of [...sim.byType.office, ...sim.byType.condo]) sim.moveIn(o);
+  sim.star = 3;
+  sim.recalcPop();
 }

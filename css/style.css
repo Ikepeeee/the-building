@@ -618,3 +618,11 @@ textarea.io {
 #panel .p-cons-t { background: #fff6c8; font-size: 12px; font-weight: 800; padding: 2px 6px; }
 #panel .p-cons-bar { height: 6px; background: #555; margin-top: 2px; }
 #panel .p-cons-bar i { display: block; height: 100%; background: #3fcf5f; width: 0; transition: width .3s steps(4); }
+.hud-speed button.rt { font-family: var(--font); font-size: 11px; min-width: 46px; letter-spacing: -.02em; }
+.hud-speed button.rt.is-on { background: #1e7a5e; box-shadow: inset 2px 2px 0 #0b3d2e, inset -2px -2px 0 #6fd1b0; }
+#perf {
+  position: absolute; z-index: 35; left: 50%; transform: translateX(-50%); top: calc(var(--hud-h, 52px) + 36px);
+  background: rgba(0, 0, 0, .72); color: #9effa0; font: 11px/1.4 var(--mono); padding: 4px 8px; white-space: pre;
+  pointer-events: none; border: 1px solid #3b6;
+}
+#app.is-title #perf { display: none !important; }

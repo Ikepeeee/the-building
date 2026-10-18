@@ -1,8 +1,7 @@
 // 上部 HUD（★・資金・人口・日付と時刻・速度・ミュート・メニュー）
-import { SPEEDS, WEEK, fmtMoney } from '../sim/constants.js';
+import { WEEK, fmtMoney } from '../sim/constants.js';
+import { UI_SPEEDS } from './speeds.js';
 
-const SPEED_LABEL = ['❚❚', '1×', '2×', '4×', '8×'];
-const SPEED_TITLE = ['一時停止 (Space / 0)', '等速 (1)', '2倍速 (2)', '4倍速 (3)', '8倍速 (4)'];
 
 export class Hud {
   constructor(app) {
@@ -10,12 +9,13 @@ export class Hud {
     const $ = (id) => document.getElementById(id);
     this.el = { stars: $('hud-stars'), star: $('hud-star'), money: $('hud-money-val'), net: $('hud-net'), pop: $('hud-pop'), day: $('hud-day'), time: $('hud-time'), speed: $('hud-speed'), mute: $('btn-mute'), menu: $('btn-menu'), moneyBtn: $('hud-money'), badge: $('pause-badge') };
     this.cache = {};
-    this.speedBtns = SPEEDS.map((s, i) => {
+    this.speedBtns = UI_SPEEDS.map((s, i) => {
       const b = document.createElement('button');
-      b.textContent = SPEED_LABEL[i] || `${s}×`;
-      b.title = SPEED_TITLE[i] || '';
-      b.setAttribute('aria-label', SPEED_TITLE[i] || `${s}倍速`);
+      b.textContent = s.label;
+      b.title = s.title;
+      b.setAttribute('aria-label', s.title);
       if (i === 0) b.classList.add('pause');
+      if (s.rt) b.classList.add('rt');
       b.addEventListener('click', () => { app.userGesture(); i === 0 ? app.togglePause() : app.setSpeed(i); });
       this.el.speed.append(b);
       return b;
@@ -61,7 +61,7 @@ export class Hud {
     this.el.badge.hidden = !(cur === 0 && !app.blocked());
     const ff = !!app.nightFF && cur > 0 && !app.blocked();
     if (this.el.night.hidden === ff) this.el.night.hidden = !ff;
-    if (ff) this.set('night', this.el.night, `🌙 早送り中 ×${(SPEEDS[cur] || 1) * 4}`);
+    if (ff) this.set('night', this.el.night, `🌙 早送り中 ×${((UI_SPEEDS[cur] || {}).v || 1) * 4}`);
     this.set('mute', this.el.mute, app.sound.muted ? '🔇' : '🔊');
   }
 }

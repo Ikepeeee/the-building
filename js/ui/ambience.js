@@ -5,6 +5,7 @@
 // - ロビー: 人の量に応じたざわめき
 // - 消防ヘリ: ローター音（sim.heli があるとき）
 // - 工事中の施設: トンカチとドリル
+// - ごみ集積所: 収集車のエンジン・バック警告音・積み込みの油圧音／駐車場: ドアの音・エンジン始動
 import { TILE_W, FLOOR_H, SAVE_KEY } from '../sim/constants.js';
 import { storage } from './save.js';
 
@@ -62,7 +63,14 @@ export class Ambience {
     const rLfo = c.createOscillator(); rLfo.type = 'square'; rLfo.frequency.value = 12; const rLfoG = gain(0.5); rLfo.connect(rLfoG); rLfoG.connect(rAm.gain); rLfo.start();
     const rotor = gain(0);
     noise().connect(rLp); rLp.connect(rAm); rAm.connect(rotor); rotor.connect(out);
-    this.n = { out, murmur, mBp, sizzle, motor, motorOsc, motorOsc2, motorLp, rotor, rLfo };
+    // ごみ収集車のエンジン（低いうなり）
+    const tOsc = c.createOscillator(); tOsc.type = 'sawtooth'; tOsc.frequency.value = 42;
+    const tLp = c.createBiquadFilter(); tLp.type = 'lowpass'; tLp.frequency.value = 180; tLp.Q.value = 3;
+    const tAm = gain(0.7);
+    const tLfo = c.createOscillator(); tLfo.frequency.value = 9; const tLfoG = gain(0.25); tLfo.connect(tLfoG); tLfoG.connect(tAm.gain); tLfo.start();
+    const truck = gain(0);
+    tOsc.connect(tLp); tLp.connect(tAm); tAm.connect(truck); truck.connect(out); tOsc.start();
+    this.n = { out, murmur, mBp, sizzle, motor, motorOsc, motorOsc2, motorLp, rotor, rLfo, truck, tOsc };
     return true;
   }
 
@@ -73,7 +81,7 @@ export class Ambience {
   silence() {
     const n = this.n;
     if (!n) return;
-    for (const k of ['murmur', 'sizzle', 'motor', 'rotor']) this.set(n[k].gain, 0, 0.15);
+    for (const k of ['murmur', 'sizzle', 'motor', 'rotor', 'truck']) this.set(n[k].gain, 0, 0.15);
   }
 
   /** app から 8Hz ほどで呼ぶ */
@@ -98,7 +106,7 @@ export class Ambience {
 
     const h = sim.hour, wd = sim.weekday ?? sim.day % 7;
     const work = wd < 5 && h >= 8 && h < 18;
-    let office = 0, food = 0, lobby = false, sumV = 0, maxRel = 0, works = 0;
+    let office = 0, food = 0, lobby = false, sumV = 0, maxRel = 0, works = 0, truck = null, cars = 0;
     for (const o of sim.objs.values()) {
       if (o.cars) {
         for (const car of o.cars) {
@@ -122,13 +130,16 @@ export class Ambience {
       }
       if (o.destroyed || !vis(o)) continue;
       if (Number.isFinite(o.constructUntil) && sim.time < o.constructUntil) { works++; continue; }
+      if (o.type === 'garbage' && o.truck && !truck) truck = o.truck;
+      else if (o.type === 'parking') cars += o.used || 0;
       if (o.type === 'office' && work) office += o.inCount || (o.occupied ? 2 : 0);
       else if (FOOD.has(o.type) && (!sim.isOpen || sim.isOpen(o))) food += (o.inCount || 0) + 1;
       else if (o.type === 'lobby') lobby = true;
     }
     let crowd = 0;
     if (sim.active && lobby) {
-      for (const p of sim.active) { const f = p.f; if (f !== undefined && f < fTop && f > fBot) crowd++; if (crowd > 400) break; }
+      let seen = 0;
+      for (const p of sim.active) { const f = p.f; if (f !== undefined && f < fTop && f > fBot) crowd++; if (crowd > 400 || ++seen > 3000) break; }
     }
     const n = this.n;
     // ざわめき（ロビー＋飲食店）
@@ -157,6 +168,16 @@ export class Ambience {
     if (office > 0 && Math.random() < Math.min(0.05, office * 0.0015)) this.phone(near);
     if (food > 0 && Math.random() < Math.min(0.5, food * 0.04)) this.voice(near);
     if (crowd > 0 && Math.random() < Math.min(0.4, crowd * 0.01)) this.voice(near * 0.8);
+    // ごみ収集車: エンジン、バックの警告音（入ってくるとき）、積み込みの油圧音
+    this.set(n.truck.gain, truck ? 0.09 * near : 0, 0.3);
+    if (truck) {
+      this.set(n.tOsc.frequency, truck.phase === 'load' ? 36 : 46, 0.4);
+      if (truck.phase === 'in' && now - (this.lastBeep || 0) > 600) { this.lastBeep = now; this.tone(this.s.ctx.currentTime, 1040, 0.28, 0.03 * near, 'square'); }
+      if (truck.phase === 'load' && Math.random() < 0.06) this.hydraulic(near);
+      if (truck.phase === 'load' && Math.random() < 0.25) this.burst(this.s.ctx.currentTime + Math.random() * 0.1, 0.12, { type: 'lowpass', freq: 500, vol: 0.05 * near }); // 袋を放り込む音
+    }
+    // 駐車場: ときどきドアの閉まる音やエンジン始動
+    if (cars > 0 && Math.random() < Math.min(0.08, cars * 0.004)) this.carSound(near);
     // 工事の音（トンカチ・ドリル）
     if (works > 0 && Math.random() < Math.min(0.7, 0.25 + works * 0.08)) this.hammer(near, 1 + Math.floor(Math.random() * 3));
     if (works > 0 && Math.random() < Math.min(0.12, 0.04 + works * 0.02)) this.drill(near);
@@ -229,6 +250,33 @@ export class Ambience {
     amG.connect(g.gain);
     o.connect(f); f.connect(g); g.connect(this.n.out);
     o.start(t); am.start(t); o.stop(t + dur + 0.02); am.stop(t + dur + 0.02);
+  }
+
+  hydraulic(k) {
+    const c = this.s.ctx, t = c.currentTime;
+    const o = c.createOscillator(); o.type = 'sawtooth';
+    o.frequency.setValueAtTime(220, t); o.frequency.linearRampToValueAtTime(420, t + 0.9);
+    const f = c.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 600; f.Q.value = 2;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.025 * k, t + 0.1);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 1);
+    o.connect(f); f.connect(g); g.connect(this.n.out);
+    o.start(t); o.stop(t + 1.05);
+  }
+
+  carSound(k) {
+    const t = this.s.ctx.currentTime + Math.random() * 0.2;
+    if (Math.random() < 0.6) {
+      this.burst(t, 0.08, { type: 'lowpass', freq: 350, vol: 0.06 * k }); // ドアの閉まる音
+    } else {
+      const c = this.s.ctx;
+      const o = c.createOscillator(); o.type = 'sawtooth';
+      o.frequency.setValueAtTime(30, t); o.frequency.linearRampToValueAtTime(70, t + 0.4); o.frequency.linearRampToValueAtTime(55, t + 1.2);
+      const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 260;
+      const g = c.createGain();
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.04 * k, t + 0.15); g.gain.exponentialRampToValueAtTime(0.0001, t + 1.3);
+      o.connect(f); f.connect(g); g.connect(this.n.out); o.start(t); o.stop(t + 1.35);
+    }
   }
 
   chime(k) {

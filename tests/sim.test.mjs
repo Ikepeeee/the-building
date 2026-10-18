@@ -1,7 +1,7 @@
 // node tests/sim.test.mjs
 // シミュレーション（js/sim/）の自動テスト。依存ライブラリなし。
 import assert from 'node:assert/strict';
-import { Tower, TYPES, DAY, W, LOBBY_FLOORS, AutoPlayer, autoPlay, buildMegaTower, mustBuild, stepTo, smallTower, bombTrial, fireTrial, securityTower, elevatorStress } from './helpers.mjs';
+import { Tower, TYPES, DAY, W, LOBBY_FLOORS, AutoPlayer, autoPlay, buildMegaTower, mustBuild, stepTo, smallTower, bombTrial, fireTrial, securityTower, elevatorStress, buildWideTower } from './helpers.mjs';
 import { VARIANTS } from '../js/sim/constants.js';
 import { runStrategy } from './balance.mjs';
 import { SIM } from '../js/sim/rules.js';
@@ -1281,11 +1281,12 @@ test('v2 §9: blueprint → buildBatch（アトミック）', () => {
   assert.equal(eop.p.cars, 2); assert.equal(eop.p.config.door, 'short');
   // 貼り付け: 1F の 100 マス右に、同じ高さで
   const before = { money: s.money, n: s.objs.size, rev: s.revision };
-  const ck = s.checkBatch(bp2.ops, { f: 0, x: 100 });
+  assert.ok(s.checkBatch(bp2.ops, { f: 0, x: 100 }).ok, 'ロビーの上（既存のフロア）にも貼れる');
+  const ck = s.checkBatch(bp2.ops, { f: 0, x: 5 });
   assert.equal(ck.ghosts.length, bp2.ops.length);
   assert.equal(s.money, before.money, 'check は何も変えない');
   assert.equal(s.objs.size, before.n);
-  assert.ok(!ck.ok, '1F はロビーと重なる'); assert.ok(ck.failedIndex >= 0); assert.equal(ck.ghosts[ck.failedIndex].ok, false);
+  assert.ok(!ck.ok, '元の施設と重なる'); assert.ok(ck.failedIndex >= 0); assert.equal(ck.ghosts[ck.failedIndex].ok, false);
   // 2F 以上を空中に貼るのは支えがなくて失敗 → 何も変わらない
   const bad = s.buildBatch(bp.ops, { f: 1, x: 350 });
   assert.equal(bad.ok, false);
@@ -1337,41 +1338,200 @@ test('v2 §12: 工事期間（使えない → 完成で built、保存しても
   assert.ok(ev2.sound.some((x) => x.name === 'built'));
 });
 
-test('v2 §12: ごみ収集室（たまる・5時に回収・リサイクルで安い・無いと評価の内訳と苦情）', () => {
+test('§13: ごみ集積所（地下・ビル全体で共有・収集車 4:30〜5:30・袋に比例した料金・無い/満杯で評価と苦情）', () => {
   const s = new Tower({ seed: 112 });
   s.money = 1e9; s.star = 3;
   smallTower(s, 12);
   for (let f = 1; f <= 12; f++) for (let x = 40; x + OW <= 60; x += OW) s.build('office', { f, x });
+  s.star = 2; // 駐車場の需要は付けない
   for (const o of s.byType.office) s.moveIn(o);
+  s.star = 3;
   s.step(70);
   const far = s.objAt(12, 40), near = s.objAt(2, 40);
-  assert.ok(far.garbageBad && near.garbageBad, '収集室がない');
-  assert.ok(s.evalScore(far) >= SIM.GARBAGE.penalty);
+  assert.equal(s.garbageProblem(), 'none');
+  assert.ok(far.garbageBad && near.garbageBad, '集積所がない → ビル全体');
+  assert.ok(s.describe(far).reasons.some((r) => /ごみ集積所がない/.test(r.label)));
   s.complaints(true);
   assert.match(far.complaint, /ごみ/);
-  mustBuild(s, 'garbage', { f: 3, x: 64 });
-  const g = s.objAt(3, 64);
+  assert.match(s.check('garbage', { f: 3, x: 64 }).reason, /地下/);
+  for (const f of [-1, -2]) mustBuild(s, 'floor', { f, x: 40, x2: 120 });
+  mustBuild(s, 'garbage', { f: -2, x: 40 });
+  mustBuild(s, 'garbage', { f: -2, x: 56 });
+  const [g1, g2] = s.byType.garbage;
+  assert.equal(g1.h, 2);
+  assert.equal(s.garbageCap, 2 * TYPES.garbage.capacity);
+  s.step(60);
+  assert.equal(far.garbageBad, false, '距離に関係なくビル全体を受け持つ');
   stepTo(s, 1, 4);
-  assert.ok(g.bags > 0 && g.fill > 0 && g.fill <= 1);
-  assert.equal(near.garbageBad, false, '範囲内（上下5フロア）');
-  assert.equal(far.garbageBad, true, '範囲外');
-  assert.ok(s.describe(far).reasons.some((r) => /ごみが溜まっている/.test(r.label)));
-  const bags = Math.round(g.bags), m = s.money;
-  stepTo(s, 1, 5); s.step(1);
-  assert.equal(g.bags, 0);
-  assert.ok(Math.abs((m - s.money) - bags * SIM.GARBAGE.fee) < SIM.GARBAGE.fee * 2, '1袋ごとに料金');
+  assert.ok(g1.bags > 0 && Math.abs(g1.bags - g2.bags) < 1e-9, '各室に割り振る');
+  assert.ok(Math.abs(g1.bags + g2.bags - s.garbageBags) < 1e-6);
+  assert.equal(g1.truck, null);
+  const bags = Math.round(s.garbageBags), m = s.money;
+  stepTo(s, 1, 4); s.step(35);  // 4:35
+  assert.equal(g1.truck.phase, 'in');
+  s.step(15);                   // 4:50
+  assert.equal(g1.truck.phase, 'load');
+  assert.ok(g1.bags < bags / 2, '積み込み中に減る');
+  assert.ok(g1.truck.t > 0 && g1.truck.t < 1);
+  s.step(30);                   // 5:20
+  assert.equal(g1.truck.phase, 'out');
+  assert.equal(s.garbageBags, 0);
+  assert.ok(Math.abs((m - s.money) - bags * SIM.GARBAGE.fee) <= SIM.GARBAGE.fee * 2, '袋に比例した料金');
+  s.step(15);
+  assert.equal(g1.truck, null, '5:30 以降は null');
   // リサイクルセンターがあると安い
-  mustBuild(s, 'floor', { f: -1, x: 40, x2: 100 }); mustBuild(s, 'floor', { f: -2, x: 40, x2: 100 });
-  mustBuild(s, 'recycling', { f: -2, x: 40 });
-  stepTo(s, 2, 4);
-  const b2 = Math.round(g.bags), m2 = s.money;
-  stepTo(s, 2, 5); s.step(1);
-  assert.ok(m2 - s.money <= b2 * SIM.GARBAGE.feeRecycle + SIM.MAINT.garbage + 1);
+  mustBuild(s, 'recycling', { f: -2, x: 72 });
+  stepTo(s, 2, 4); s.step(25);
+  const b2 = Math.round(s.garbageBags), m2 = s.money;
+  stepTo(s, 2, 5); s.step(25);
+  assert.ok(Math.abs((m2 - s.money) - b2 * SIM.GARBAGE.feeRecycle) <= SIM.GARBAGE.feeRecycle * 2);
   // 満杯
-  g.bags = SIM.GARBAGE.cap; g.fill = 1;
+  s.garbageBags = s.garbageCap;
   s.hourlyGarbage();
-  assert.equal(near.garbageBad, true, '満杯なら範囲内でも溜まる');
-  assert.match(s.describe(g).warning || '', /満杯/);
+  assert.equal(s.garbageProblem(), 'full');
+  assert.equal(near.garbageBad, true);
+  assert.match(s.describe(g1).warning || '', /満杯/);
+  assert.ok(s.describe(far).reasons.some((r) => /満杯/.test(r.label)));
+  // 保存
+  const r = new Tower(); r.restore(JSON.parse(JSON.stringify(s.serialize())));
+  assert.equal(r.garbageBags, s.garbageBags);
+  assert.equal(r.byType.garbage.length, 2);
+});
+
+test('§13: 古い1フロアのごみ収集室は地下に移す（置けなければ読み飛ばす）', () => {
+  const rows = { 0: '1'.repeat(150), '-1': '1'.repeat(150), '-2': '1'.repeat(150), 1: '1'.repeat(150) };
+  const d = { v: 3, seed: 1, time: 700, money: 1e6, star: 2, rows, nextId: 10,
+    objs: [{ id: 1, type: 'lobby', f: 0, x: 0, w: 60, h: 1 }, { id: 2, type: 'garbage', f: 1, x: 10, w: 8, h: 1, bags: 30 }, { id: 3, type: 'garbage', f: 1, x: 30, w: 8, h: 1 }] };
+  const s = new Tower(); s.restore(d);
+  const gs = s.byType.garbage;
+  assert.equal(gs.length, 2);
+  for (const g of gs) { assert.ok(g.f < 0 && g.f + g.h - 1 < 0, '地下に移った'); assert.equal(g.w, TYPES.garbage.w); }
+  assert.equal(Math.round(s.garbageBags), 30);
+  const s2 = new Tower(); s2.restore({ ...d, rows: { 0: '1'.repeat(150), 1: '1'.repeat(150) } });
+  assert.equal(s2.byType.garbage.length, 0, '地下が無ければ読み飛ばす');
+});
+
+test('§13: 駐車場（★3以上で需要・先に入居した順に割り当て・不足で評価と苦情）', () => {
+  const s = new Tower({ seed: 114 });
+  s.money = 1e9; s.star = 2;
+  smallTower(s, 10);
+  for (let f = 1; f <= 10; f++) for (let x = 40; x + OW <= 100; x += OW) s.build('office', { f, x });
+  const offices = s.byType.office;
+  for (const o of offices.slice(0, 10)) s.moveIn(o);
+  assert.ok(offices.slice(0, 10).every((o) => o.needsParking === 0), '★2 では車なし');
+  s.star = 3;
+  for (const o of offices.slice(10)) s.moveIn(o);
+  const cars = offices.reduce((a, o) => a + o.needsParking, 0);
+  const share = offices.slice(10).filter((o) => o.needsParking > 0).length / offices.slice(10).length;
+  assert.ok(share > 0.1 && share < 0.55, `約3割 ${share}`);
+  s.updateParking();
+  assert.equal(s.parkingShort, cars);
+  const needy = offices.filter((o) => o.needsParking > 0);
+  assert.ok(needy.every((o) => o.parkingShort === o.needsParking));
+  assert.ok(s.describe(needy[0]).reasons.some((r) => /駐車場がない/.test(r.label)));
+  assert.ok(s.evalScore(needy[0]) >= SIM.PARKING.penalty);
+  s.complaints(true);
+  assert.match(needy[0].complaint, /車/);
+  assert.match(s.check('parking', { f: 2, x: 40 }).reason, /地下/);
+  mustBuild(s, 'floor', { f: -1, x: 40, x2: 100 });
+  mustBuild(s, 'parking', { f: -1, x: 40 });
+  s.updateParking();
+  const lot = s.byType.parking[0];
+  assert.equal(lot.used, Math.min(TYPES.parking.spaces, cars));
+  assert.equal(s.parkingShort, Math.max(0, cars - TYPES.parking.spaces));
+  // 先に入居した順
+  const sorted = [...needy].sort((a, b) => a.moveSeq - b.moveSeq);
+  let left = TYPES.parking.spaces;
+  for (const o of sorted) { const got = Math.min(left, o.needsParking); left -= got; assert.equal(o.parkingShort, o.needsParking - got); }
+  assert.match(s.describe(lot).stats.find(([k]) => k === '駐車場')[1], /使用 \d+ \/ 12台/);
+  // スイートは全室
+  s.star = 3;
+  for (let f = 11; f <= 11; f++) mustBuild(s, 'floor', { f, x: 40, x2: 100 });
+  mustBuild(s, 'hotelSuite', { f: 11, x: 70 });
+  const suite = s.byType.hotelSuite[0];
+  stepTo(s, 0, 17);
+  if (suite.occupied) assert.equal(suite.needsParking, 1);
+  // 保存
+  const r = new Tower(); r.restore(JSON.parse(JSON.stringify(s.serialize())));
+  assert.equal(r.parkingShort, s.parkingShort);
+});
+
+test('コピー: すでにフロアがある場所・何もない場所・一部重なる場所に貼り付けられる', () => {
+  const s = new Tower({ seed: 115 });
+  s.money = 1e9;
+  mustBuild(s, 'floor', { f: 0, x: 0, x2: 400 });
+  for (let f = 1; f <= 3; f++) mustBuild(s, 'floor', { f, x: 0, x2: 40 });
+  mustBuild(s, 'office', { f: 1, x: 0 }); mustBuild(s, 'office', { f: 2, x: 10 }); mustBuild(s, 'condo', { f: 3, x: 20 });
+  mustBuild(s, 'stairs', { f: 1, x: 30 });
+  const bp = s.blueprint({ f1: 1, x1: 0, f2: 3, x2: 40 });
+  // 1) すでにフロアだけがある場所
+  for (let f = 1; f <= 3; f++) mustBuild(s, 'floor', { f, x: 100, x2: 140 });
+  const m = s.money;
+  const a = s.buildBatch(bp.ops, { f: 1, x: 100 });
+  assert.ok(a.ok, a.reason);
+  assert.equal(s.objAt(1, 100).type, 'office');
+  assert.equal(s.objAt(3, 120).type, 'condo');
+  assert.equal(s.transportAt(1, 130).type, 'stairs');
+  assert.equal(a.cost, TYPES.office.cost * 2 + TYPES.condo.cost + TYPES.stairs.cost, 'フロア代はかからない');
+  assert.equal(s.money, m - a.cost);
+  assert.ok(a.ghosts.every((g) => g.ok));
+  // 2) 何もない場所（1F の上）
+  const b = s.buildBatch(bp.ops, { f: 1, x: 200 });
+  assert.ok(b.ok, b.reason);
+  assert.ok(b.cost > a.cost, 'フロア代が加わる');
+  // 3) 一部だけフロアがある場所
+  mustBuild(s, 'floor', { f: 1, x: 300, x2: 315 });
+  const c = s.buildBatch(bp.ops, { f: 1, x: 300 });
+  assert.ok(c.ok, c.reason);
+  assert.equal(s.objAt(2, 310).type, 'office');
+  // 4) 施設と重なる場所は失敗し、何も変わらない
+  const before = s.objs.size, mb = s.money;
+  const d = s.checkBatch(bp.ops, { f: 1, x: 105 });
+  assert.equal(d.ok, false);
+  assert.match(d.reason, /重なって/);
+  assert.equal(s.objs.size, before); assert.equal(s.money, mb);
+  // 単独の floor ツールは従来どおり
+  assert.match(s.check('floor', { f: 1, x: 100, x2: 110 }).reason, /すでにフロア/);
+});
+
+test('性能: step の予算（1フレームの上限）と持ち越し・lastStepMs', () => {
+  const s = new Tower({ seed: 116 });
+  buildWideTower(s, 60);
+  stepTo(s, 1, 8); // 朝の混雑
+  const tStart = s.time;
+  const ms = s.step(20, 2);
+  assert.ok(s.lastStepMs === ms && ms < 2 + 5, `予算どおりに止まる ${ms.toFixed(2)}ms`);
+  assert.ok(s.backlog > 0, '残りは持ち越す');
+  for (let i = 0; i < 2000 && s.backlog > 0; i++) s.step(0, 2);
+  assert.equal(s.backlog, 0);
+  assert.ok(Math.abs(s.time - (tStart + 20)) < 1e-9, '持ち越した分も含めて全部進む');
+  // 持ち越しは上限まで（追いつけない分は捨てる）
+  s.step(1000, 1);
+  assert.ok(s.backlog <= SIM.MAX_BACKLOG);
+  // 予算なしなら全部進む
+  const t1 = s.time; s.backlog = 0;
+  s.step(30);
+  assert.equal(s.time, t1 + 30);
+  // 1フレーム（8倍速 60fps = 0.8分）が 4ms を超えないこと（予算 4ms）
+  let worst = 0;
+  for (let i = 0; i < 300; i++) { s.step(0.8, 4); worst = Math.max(worst, s.lastStepMs); }
+  console.log(`    480×60 人口 ${s.pop}: 1フレーム最悪 ${worst.toFixed(2)}ms`);
+  assert.ok(worst < 8);
+});
+
+test('歩行は事象駆動: drawPos は毎フレーム正しい位置を返す', () => {
+  const s = new Tower({ seed: 117 });
+  mustBuild(s, 'lobby', { f: 0, x: 0, x2: 300 });
+  const p = s.newPerson('visitor', null);
+  p.f = 0; p.x = 10; p.state = 'walk'; s.active.add(p);
+  let done = false;
+  s.startTrip(p, 0, 210, () => { done = true; s.leave(p); });
+  const xs = [];
+  for (let i = 0; i < 400 && !done; i++) { s.step(0.25); if (!done) xs.push(s.drawPos(p).x); }
+  assert.ok(done);
+  for (let i = 1; i < xs.length; i++) assert.ok(Math.abs(xs[i] - xs[i - 1] - SIM.WALK * 0.25) < 1e-6 || xs[i] === 210, '一定の速さで進む');
+  assert.ok(Math.abs(xs.length * 0.25 - 200 / SIM.WALK) <= 0.5, '着く時刻');
+  assert.ok(p.stress > 0, `長く歩くとストレス ${p.stress}`);
 });
 
 test('性能: 横幅480・30フロア・人口6000超の横長ビルで 1 ゲーム日', () => {
@@ -1388,9 +1548,13 @@ test('性能: 横幅480・30フロア・人口6000超の横長ビルで 1 ゲー
     while (e.cars.length < 8) s.act(e, 'addCar');
   }
   for (let f = 1; f <= 29; f++) {
-    for (let x = 0; x + OW <= W; x += OW) s.build(f % 10 === 2 && x % 80 === 0 ? 'garbage' : f % 6 === 3 ? 'condo' : 'office', { f, x });
+    for (let x = 0; x + OW <= W; x += OW) s.build(f % 6 === 3 ? 'condo' : 'office', { f, x });
   }
+  for (const f of [-1, -2]) mustBuild(s, 'floor', { f, x: 0, x2: W - 1 });
+  for (let x = 0; x + 16 <= 160; x += 16) mustBuild(s, 'garbage', { f: -2, x });
+  s.star = 2;
   for (const o of [...s.byType.office, ...s.byType.condo]) s.moveIn(o);
+  s.star = 3;
   s.recalcPop();
   stepTo(s, 1, 0);
   const t0 = performance.now();
