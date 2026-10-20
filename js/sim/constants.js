@@ -51,10 +51,9 @@ export const TYPES = {
   partyHall:   { name: 'パーティーホール', cat: 'commerce', w: 30, h: 2, cost: 100000, price: 2000, open: [12, 22], star: 3, desc: '2フロア分。団体客が来る' },
   security:    { name: '警備室', cat: 'service', w: 16, cost: 100000, cap: 6, star: 2, desc: '爆弾捜索・消火を行う。★3の条件' },
   housekeeping:{ name: 'ハウスキーピング', cat: 'service', w: 15, cost: 50000, cap: 6, star: 2, desc: 'ホテルの客室を清掃する' },
-  garbage:     { name: 'ごみ集積所', cat: 'service', w: 16, h: 2, cost: 60000, star: 1, only: 'basement', capacity: 400, desc: '地下2フロア分。ビル全体のごみを集め、毎朝収集車が回収する' },
+  garbage:     { name: 'ごみ・リサイクルセンター', cat: 'service', w: 24, h: 2, cost: 150000, star: 1, only: 'basement', capacity: 600, desc: '地下2フロア分。ビル全体のごみを集めて分別し、毎朝収集車が回収する' },
   parking:     { name: '駐車場', cat: 'service', w: 24, cost: 80000, star: 2, only: 'basement', spaces: 12, desc: '地下のみ。★3以上では車で来る入居者が駐車場を求める' },
   medical:     { name: '医療センター', cat: 'service', w: 24, cost: 500000, star: 3, desc: '★4の条件' },
-  recycling:   { name: 'リサイクルセンター', cat: 'service', w: 24, h: 2, cost: 500000, star: 3, only: 'basement', desc: '地下2フロア分。★4の条件' },
   metro:       { name: '地下鉄駅', cat: 'special', w: 30, h: 3, cost: 1000000, star: 4, only: 'basement', desc: '地下3フロア分。第2の出入口。★5の条件' },
   cathedral:   { name: '大聖堂', cat: 'special', w: 30, cost: 3000000, star: 5, only: 'top', desc: '100Fのみ。結婚式が挙がればタワー達成' },
 };

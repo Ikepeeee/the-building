@@ -39,7 +39,7 @@ export class Toolbar {
     this.seenStar = 1;
     this.newKeys = new Set();
 
-    for (const [key, label, title] of [['inspect', '調べる', '施設を調べる (Esc / I)'], ['bulldoze', '撤去', '撤去する (B)'], ['copy', 'コピー', '範囲をまとめてコピー (K)']]) {
+    for (const [key, label, title] of [['inspect', '調べる', '施設を調べる (Esc / I)'], ['bulldoze', '撤去', '撤去する (B)'], ['copy', 'コピー', '範囲をまとめてコピー (K)'], ['eval', '評価', '施設の評価を色で表示 (V)']]) {
       const b = this.makeButton(key, label, '', title);
       b.classList.add('fixed');
       this.fixedEl.append(b);
@@ -81,6 +81,7 @@ export class Toolbar {
     if (title) b.title = title;
     b.addEventListener('click', () => {
       this.app.userGesture();
+      if (key === 'eval') { this.app.toggleOverlay(); return; }
       this.app.setTool(this.app.tool === key && key !== 'inspect' ? 'inspect' : key);
     });
     b.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') this.showTip(b, key); });
@@ -117,6 +118,7 @@ export class Toolbar {
     const tip = this.tip;
     if (key === 'inspect') tip.innerHTML = '<b>調べる</b><br><span class="tt-meta">施設をクリックすると詳細を表示。ドラッグでスクロール。</span>';
     else if (key === 'bulldoze') tip.innerHTML = '<b>撤去</b><br><span class="tt-meta">横にドラッグした範囲を撤去する（移動手段が優先）。返金はありません。</span>';
+    else if (key === 'eval') tip.innerHTML = '<b>評価</b><br><span class="tt-meta">すべての施設の評価を色の網掛けで表示します（良い＝青・普通＝黄・悪い＝赤・空室＝灰）。もう一度押すと消えます。</span>';
     else if (key === 'copy') tip.innerHTML = '<b>コピー</b><br><span class="tt-meta">ドラッグで範囲を選び、貼り付けたい場所でクリック。フロア・施設・移動手段をまとめて建てます。</span>';
     else {
       const t = TYPES[key];
@@ -149,7 +151,7 @@ export class Toolbar {
       this.seenStar = sim.star;
     }
     const tool = this.app.tool;
-    let sig = `${sim.star}|${tool}|${[...this.newKeys].join()}|`;
+    let sig = `${sim.star}|${tool}|${this.app.overlay}|${[...this.newKeys].join()}|`;
     for (const [key, b] of this.buttons) {
       if (!TYPES[key] || !b.isConnected) continue;
       sig += sim.money >= toolCost(key) ? '1' : '0';
@@ -157,7 +159,7 @@ export class Toolbar {
     if (!force && sig === this.state) return;
     this.state = sig;
     for (const [key, b] of this.buttons) {
-      b.classList.toggle('is-on', key === tool);
+      b.classList.toggle('is-on', key === 'eval' ? this.app.overlay === 'eval' : key === tool);
       const t = TYPES[key];
       if (!t) continue;
       const locked = sim.star < t.star;

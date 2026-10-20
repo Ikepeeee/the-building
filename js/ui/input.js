@@ -56,7 +56,9 @@ export class Input {
 
   cellAt(sx, sy) {
     const [wx, wy] = screenToWorld(this.app.cam, sx, sy);
-    return worldToCell(wx, wy);
+    const c = worldToCell(wx, wy);
+    c.fx = wx / 8; // マスの小数（人を拾うとき用）
+    return c;
   }
 
   get busy() { return this.mode !== null; }
@@ -88,6 +90,7 @@ export class Input {
 
     if (!touch && (e.button === 1 || e.button === 2 || (e.button === 0 && this.space))) {
       e.preventDefault();
+      this.app.follow = false;
       if (this.space) this.spaceUsed = true;
       this.mode = 'pan';
       this.updateCursor();
@@ -119,7 +122,7 @@ export class Input {
 
   onMove(e) {
     const [sx, sy] = this.local(e);
-    if (e.pointerType === 'mouse') this.app.noSnap = !!e.shiftKey;
+    if (e.pointerType === 'mouse') { this.app.noSnap = !!e.shiftKey; this.app.shiftHeld = !!e.shiftKey; }
     const pt = this.ptrs.get(e.pointerId);
     if (e.pointerType === 'mouse') this.app.hoverAt(this.mode === 'pan' ? null : this.cellAt(sx, sy), this.mode === 'drag');
     if (!pt) return;
@@ -138,6 +141,7 @@ export class Input {
           this.resizeCand = null;
         } else if (Math.hypot(sx - pt.x0, sy - pt.y0) > slop) {
           this.mode = 'pan';
+          this.app.follow = false;
           this.app.cam.pan(sx - pt.x0, sy - pt.y0);
           this.updateCursor();
         }
@@ -275,6 +279,7 @@ export class Input {
         this.wheelSnapTimer = setTimeout(() => cam.animateZoom(cam.nearestStep(), sx, sy), 220);
       }
     } else {
+      this.app.follow = false;
       if (e.shiftKey && !dx) { dx = dy; dy = 0; }
       cam.pan(-dx, -dy);
     }
@@ -288,7 +293,7 @@ export class Input {
     if (down) app.userGesture();
     if (!down) {
       this.keys.delete(e.code);
-      if (e.key === 'Shift') { app.noSnap = false; if (app.hover) app.hoverAt(app.hover); }
+      if (e.key === 'Shift') { app.noSnap = false; app.shiftHeld = false; if (app.hover) app.hoverAt(app.hover); }
       if (e.code === 'Space') {
         this.space = false;
         if (!this.spaceUsed && !app.blocked()) app.togglePause();
@@ -298,7 +303,9 @@ export class Input {
     }
     if (e.code === 'Escape') { app.escape(); e.preventDefault(); return; }
     if (e.code === 'F3') { e.preventDefault(); app.perf.toggle(); return; }
-    if (e.key === 'Shift' && !e.repeat) { app.noSnap = true; if (app.hover) app.hoverAt(app.hover); }
+    if (e.code === 'KeyV' && !e.ctrlKey && !e.metaKey && !app.blocked()) { app.toggleOverlay(); return; }
+    if (e.key === 'Shift' && !e.repeat) { app.noSnap = true; app.shiftHeld = true; if (app.hover) app.hoverAt(app.hover); }
+    if (e.code === 'Enter' && !app.blocked() && app.tool === 'copy' && app.copy.phase === 'select' && app.copy.marked.size) { app.startCopyPaste(); return; }
     if (app.blocked()) return; // モーダル・タイトル中はゲーム操作をしない
     if ((e.ctrlKey || e.metaKey) && e.code === 'KeyS') { e.preventDefault(); app.manualSave(); return; }
     if ((e.ctrlKey || e.metaKey) && e.code === 'KeyC' && !String(window.getSelection?.() || '')) { e.preventDefault(); app.setTool('copy'); return; }

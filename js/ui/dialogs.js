@@ -264,6 +264,22 @@ export class Dialogs {
     return box;
   }
 
+  /** 全画面 API が無いブラウザ（iPhone の Safari など）向けの案内 */
+  installGuide() {
+    const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const body = h('div', { html: ios ? `
+      <p><b>共有ボタン →「ホーム画面に追加」で全画面で遊べます。</b></p>
+      <ol class="steps">
+        <li>Safari の下（または上）にある <span class="kbdish">共有 <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 1v9M5 4l3-3 3 3M3 7v7h10V7" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></span> ボタンを押す</li>
+        <li>メニューを下へスクロールして「<b>ホーム画面に追加</b>」を選ぶ</li>
+        <li>ホーム画面にできた「The Building」のアイコンから起動する</li>
+      </ol>
+      <p class="small">ホーム画面から起動すると、アドレスバーなどが消えて画面いっぱいに表示されます。セーブデータは Safari とは別に保存されるので、続きから遊ぶときは「セーブデータの書き出し／読み込み」で移してください。</p>` : `
+      <p>このブラウザでは全画面表示が使えません。</p>
+      <p>ブラウザのメニューから「<b>ホーム画面に追加</b>」（または「アプリをインストール」）を選ぶと、全画面のアプリとして遊べます。</p>` });
+    return this.open({ title: '全画面で遊ぶには', body, buttons: [{ label: 'OK', primary: true }] });
+  }
+
   soundSettings() {
     const app = this.app;
     const body = h('div');
@@ -416,14 +432,17 @@ export class Dialogs {
         <li>エレベーターが混んだら施設を選んで<b>カゴを増やす</b>。待ち時間が長いと人のストレス（ピンク→赤）が上がり、評価が下がって退去してしまう</li>
         <li>ホテルは<b>ハウスキーピング</b>、事件には<b>警備室</b>が必要</li>
         <li>建てた施設はしばらく<b>工事中</b>（足場とクレーン）。完成するまで使えません</li>
-        <li>地下に<b>ごみ集積所</b>（サービス・地下2フロア分）を建てる。ビル全体のごみを集め、毎朝収集車が回収する。無い・満杯だと評価が下がる</li>
+        <li>地下に<b>ごみ・リサイクルセンター</b>（サービス・地下2フロア分）を建てる。ビル全体のごみを集めて分別し、毎朝収集車が回収する。無い・溢れると評価が下がる（★4の条件にもなる）</li>
         <li>★3からは車で来る入居者がいる。地下に<b>駐車場</b>（★2で解放）を用意しないと評価が下がる</li>
       </ul>
       <h3>便利な機能</h3>
       <ul>
         <li><b>全体図</b>（右下）: タップでその場所へ移動</li>
         <li><b>エレベーター</b>を選ぶと ▲▼ のつまみで伸縮。「⚙ 運転設定」で止まる階・速度・ドア・待機・ラッシュ運転</li>
-        <li><b>コピー</b>: 範囲を選んで、別の場所にまとめて建てる</li>
+        <li><b>コピー</b>: 範囲や施設を選んで（✔）、別の階にまとめて建てる。横位置は元と同じ（Shift／「↔」で解除）</li>
+        <li><b>評価</b>ボタン: 施設の評価を色の網掛けで一覧</li>
+        <li>「調べる」で<b>人</b>を選ぶとプロフィール。追いかけることもできる</li>
+        <li>ホテルの客室では<b>レビュー</b>（★とコメント）が読める</li>
         <li>深夜 0〜6 時は自動で ×4 の<b>早送り</b>（事件中は止まる）</li>
         <li>施設のパネルの<b>評価の内訳</b>で、評価が悪い理由がわかる</li>
       </ul>
@@ -448,7 +467,8 @@ export class Dialogs {
         <tr><td><kbd>Esc</kbd> / <kbd>I</kbd></td><td>「調べる」に戻る・閉じる</td></tr>
         <tr><td><kbd>F</kbd> <kbd>L</kbd> <kbd>E</kbd> <kbd>X</kbd> <kbd>T</kbd></td><td>フロア・ロビー・エレベーター・急行・階段</td></tr>
         <tr><td><kbd>O</kbd> <kbd>C</kbd> <kbd>H</kbd> <kbd>R</kbd> <kbd>B</kbd></td><td>オフィス・マンション・シングル・レストラン・撤去</td></tr>
-        <tr><td><kbd>K</kbd> / <kbd>Ctrl+C</kbd></td><td>コピー</td></tr>
+        <tr><td><kbd>K</kbd> / <kbd>Ctrl+C</kbd></td><td>コピー（Enter で貼り付けへ、Shift で横にも）</td></tr>
+        <tr><td><kbd>V</kbd></td><td>評価の一括表示</td></tr>
         <tr><td><kbd>Home</kbd> / <kbd>M</kbd> / <kbd>Ctrl+S</kbd></td><td>1Fへ戻る／効果音／セーブ</td></tr>
       </table>`}
       <h3>セーブ</h3>

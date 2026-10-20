@@ -19,7 +19,7 @@ const LOBBY_SET = new Set(LOBBY_FLOORS);
 // 室内に描く人数の上限
 const VIS_CAP = {
   office: 6, condo: 4, hotelSingle: 1, hotelTwin: 2, hotelSuite: 3, fastfood: 9, restaurant: 8, shop: 5,
-  cinema: 10, partyHall: 14, security: 6, housekeeping: 6, medical: 6, recycling: 4, metro: 14, cathedral: 12,
+  cinema: 10, partyHall: 14, security: 6, housekeeping: 6, medical: 6, metro: 14, cathedral: 12,
 };
 const COMMERCE = new Set(['fastfood', 'restaurant', 'shop', 'cinema', 'partyHall']);
 const ROOMS = new Set(['office', 'condo', 'hotelSingle', 'hotelTwin', 'hotelSuite']);
@@ -107,6 +107,7 @@ export class Renderer {
     const S = zoom * this.dpr;
     this.S = S; this.cx = num(cam.x); this.cy = num(cam.y);
     this.nowMs = num(view.nowMs, t0);
+    this._view = view;
     const dtMs = this.lastMs ? Math.min(200, Math.max(0, this.nowMs - this.lastMs)) : 16;
     this.lastMs = this.nowMs;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -139,6 +140,7 @@ export class Renderer {
       } else {
         this.phase(() => this.drawBuilding(view, fLo, fHi, xA, xB, dtMs));
       }
+      if (view.overlay === 'eval') this.phase(() => this.drawEvalOverlay());
       this.phase(() => this.drawPeople());
       this.phase(() => this.drawOverlays(view));
       this.phase(() => this.drawBadges());
@@ -1086,8 +1088,11 @@ export class Renderer {
     const lod = this.lodOn;
     const dw = Math.max(1, Math.round(3 * S)), dh = Math.max(1, Math.round(7 * S));
     let lastCol = null;
+    const sel = this._view && this._view.selectedPerson || null;
+    this._selPos = null;
     const drawOne = (p, wx, fpos, facing, moving) => {
       const feet = -fpos * FH - 3;
+      if (p === sel) this._selPos = { wx, feet };
       if (feet < wy0 || feet - PH > wy1 || wx + 4 < wx0 || wx - 4 > wx1) return;
       if (lod) {
         // 引いた視点: スプライトの代わりに小さな四角（ストレス色）
@@ -1571,6 +1576,8 @@ export class Renderer {
       this.strokeWorld([num(h.x) * TW, -(num(h.f) + 1) * FH, TW, FH], 'rgba(255,255,255,0.75)', Math.max(1, dpr), false);
     }
     // ゴースト
+    if (sim && view.marked && typeof view.marked.forEach === 'function') this.guard(() => this.drawMarked(view.marked));
+    if (sim && view.selectedPerson) this.guard(() => this.drawSelectedPerson(view.selectedPerson));
     if (view.ghost) this.drawGhost(view.ghost);
     if (Array.isArray(view.ghosts)) for (const g of view.ghosts) if (g) this.guard(() => this.drawGhost(g));
     // 爆弾のアラーム（画面の縁）
@@ -1580,6 +1587,105 @@ export class Renderer {
       ctx.fillStyle = `rgba(255,30,30,${a.toFixed(3)})`;
       ctx.fillRect(0, 0, cw, t); ctx.fillRect(0, ch - t, cw, t); ctx.fillRect(0, 0, t, ch); ctx.fillRect(cw - t, 0, t, ch);
     }
+  }
+
+  // ---- 評価の一括表示（斜線ハッチ＋半透明）。チャンクとは別に、見えている施設だけ毎フレーム重ねる ----
+  hatch(col) {
+    const m = this._hatch || (this._hatch = new Map());
+    let pat = m.get(col);
+    if (!pat) {
+      const k = Math.max(1, Math.round(this.dpr));
+      const c = makeCanvasLike(8 * k, 8 * k), g = c.getContext('2d');
+      g.strokeStyle = col; g.lineWidth = 2 * k; g.lineCap = 'square';
+      g.beginPath(); g.moveTo(-2 * k, 2 * k); g.lineTo(2 * k, -2 * k); g.moveTo(0, 8 * k); g.lineTo(8 * k, 0); g.moveTo(6 * k, 10 * k); g.lineTo(10 * k, 6 * k); g.stroke();
+      pat = this.ctx.createPattern(c, 'repeat');
+      m.set(col, pat);
+    }
+    return pat;
+  }
+  drawEvalOverlay() {
+    const sim = this.sim, ctx = this.ctx;
+    const evalFn = typeof sim.evalLevel === 'function' ? sim.evalLevel.bind(sim) : null;
+    const COL = { good: '#3a8aff', fair: '#f0c820', bad: '#ff3030' };
+    for (const o of this.visObjs || EMPTY) {
+      const t = o.type;
+      if (t === 'lobby' || t === 'floor' || t === 'stairs' || t === 'escalator' || isElev(t)) continue;
+      const b = this.objBounds(o);
+      let col, a = 0.28;
+      if (o.destroyed) { col = '#1a1a1a'; a = 0.45; }
+      else if (this.isBuilding(o)) col = '#ff9a20';
+      else {
+        let lv = null;
+        try { lv = evalFn ? evalFn(o) : null; } catch (e) { lv = null; }
+        col = COL[lv] || '#9a9aa4';
+      }
+      const x0 = this.X(b[0]), y0 = this.Y(b[1]), x1 = this.X(b[0] + b[2]), y1 = this.Y(b[1] + b[3] - 2);
+      ctx.globalAlpha = a; ctx.fillStyle = col; ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+      ctx.globalAlpha = 0.6; ctx.fillStyle = this.hatch(col); ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+      if (o.destroyed) { ctx.fillStyle = this.hatch('#e8e8e8'); ctx.globalAlpha = 0.35; ctx.fillRect(x0, y0, x1 - x0, y1 - y0); }
+      ctx.globalAlpha = 0.9; ctx.strokeStyle = col; ctx.lineWidth = Math.max(1, this.dpr);
+      ctx.strokeRect(x0 + 0.5, y0 + 0.5, x1 - x0 - 1, y1 - y0 - 1);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // ---- コピー用に選んだ施設: 薄い枠と、スマホの複数選択のようなチェックのバッジ ----
+  drawMarked(marked) {
+    const ctx = this.ctx, dpr = this.dpr, objs = this.sim.objs;
+    if (!objs || typeof objs.get !== 'function') return;
+    const vb = this.vb;
+    const r = Math.max(7 * dpr, Math.min(11 * dpr, 6 * this.S));
+    marked.forEach((id) => {
+      const o = objs.get(id);
+      if (!o) return;
+      const b = this.objBounds(o);
+      if (b[0] > vb[2] || b[0] + b[2] < vb[0] || b[1] > vb[3] || b[1] + b[3] < vb[1]) return;
+      const x0 = this.X(b[0]), y0 = this.Y(b[1]), x1 = this.X(b[0] + b[2]), y1 = this.Y(b[1] + b[3]);
+      ctx.globalAlpha = 0.18; ctx.fillStyle = '#2a7aff'; ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+      ctx.globalAlpha = 1; ctx.strokeStyle = '#2a7aff'; ctx.lineWidth = 2 * dpr;
+      ctx.strokeRect(x0 + dpr, y0 + dpr, x1 - x0 - 2 * dpr, y1 - y0 - 2 * dpr);
+      const cx = x1 - r - 3 * dpr, cy = y0 + r + 3 * dpr;
+      ctx.beginPath(); ctx.arc(cx, cy, r + 1.5 * dpr, 0, Math.PI * 2); ctx.fillStyle = '#ffffff'; ctx.fill();
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fillStyle = '#1a73e8'; ctx.fill();
+      ctx.beginPath(); ctx.moveTo(cx - r * 0.45, cy + r * 0.02); ctx.lineTo(cx - r * 0.1, cy + r * 0.38); ctx.lineTo(cx + r * 0.5, cy - r * 0.35);
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(1.5 * dpr, r * 0.28); ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.stroke();
+      ctx.lineCap = 'butt'; ctx.lineJoin = 'miter';
+    });
+  }
+
+  // ---- 選択中の人: 頭上で弾む矢印と、体のまわりの枠。乗車中はカゴ、室内なら施設に印 ----
+  drawSelectedPerson(p) {
+    const ctx = this.ctx, dpr = this.dpr, ms = this.nowMs;
+    let box = null;   // ワールド座標 [x, y, w, h]
+    if (this._selPos) {
+      const { wx, feet } = this._selPos;
+      box = [wx - 3, feet - 9, 6, 10];
+    } else if (p.state === 'ride') {
+      for (const e of this.elevs || EMPTY) {
+        for (const c of e.cars || EMPTY) {
+          if (c && Array.isArray(c.pass) && c.pass.indexOf(p) >= 0) {
+            const w = num(e.w, e.type === 'express' ? 6 : 4);
+            box = [num(e.x) * TW + 2, -(num(c.pos) + 1) * FH + 1, w * TW - 4, CAR_H];
+          }
+        }
+      }
+    } else if (p.loc && p.loc.type) {
+      box = this.objBounds(p.loc);
+    }
+    if (!box) return;
+    const x0 = this.X(box[0]), y0 = this.Y(box[1]), x1 = this.X(box[0] + box[2]), y1 = this.Y(box[1] + box[3]);
+    const pulse = 0.65 + 0.35 * Math.sin(ms / 160);
+    ctx.lineWidth = 2 * dpr;
+    ctx.strokeStyle = '#000'; ctx.strokeRect(x0 - 2 * dpr, y0 - 2 * dpr, x1 - x0 + 4 * dpr, y1 - y0 + 4 * dpr);
+    ctx.strokeStyle = `rgba(255,224,48,${pulse.toFixed(3)})`; ctx.strokeRect(x0 - 3 * dpr, y0 - 3 * dpr, x1 - x0 + 6 * dpr, y1 - y0 + 6 * dpr);
+    // 弾む矢印
+    const cx = (x0 + x1) / 2, bob = Math.abs(Math.sin(ms / 220)) * 6 * dpr;
+    const ay = y0 - 6 * dpr - bob, aw = 10 * dpr, ah = 12 * dpr;
+    ctx.globalAlpha = 0.35; ctx.fillStyle = '#ffe030'; ctx.beginPath(); ctx.arc((x0 + x1) / 2, (y0 + y1) / 2, Math.max(x1 - x0, y1 - y0) * 0.9 + 4 * dpr, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+    ctx.beginPath(); ctx.moveTo(cx - aw, ay - ah); ctx.lineTo(cx + aw, ay - ah); ctx.lineTo(cx, ay); ctx.closePath();
+    ctx.fillStyle = '#ffe030'; ctx.fill(); ctx.lineWidth = 1.5 * dpr; ctx.strokeStyle = '#000'; ctx.stroke();
+    ctx.fillStyle = '#ffe030'; ctx.fillRect(cx - 3 * dpr, ay - ah - 6 * dpr, 6 * dpr, 6 * dpr);
+    ctx.strokeRect(cx - 3 * dpr, ay - ah - 6 * dpr, 6 * dpr, 6 * dpr);
   }
 
   objBounds(o) {

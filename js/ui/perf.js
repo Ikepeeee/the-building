@@ -75,18 +75,9 @@ export class Perf {
     this.app.layoutNow && this.app.layoutNow();
   }
 
-  /** renderer.resize を、指定した DPR で呼ぶ（renderer が第3引数に対応していなくても効くように一時的に上書き） */
+  /** renderer.resize を、指定した DPR で呼ぶ（renderer は第3引数の dpr に対応している） */
   resizeRenderer(renderer, w, h) {
-    const d = this.dpr;
-    if (d === this.native) { renderer.resize(w, h, d); return; }
-    const own = Object.getOwnPropertyDescriptor(window, 'devicePixelRatio');
-    let patched = false;
-    try { Object.defineProperty(window, 'devicePixelRatio', { configurable: true, get: () => d }); patched = true; } catch { /* 上書きできない環境 */ }
-    try { renderer.resize(w, h, d); } finally {
-      if (patched) {
-        try { if (own) Object.defineProperty(window, 'devicePixelRatio', own); else delete window.devicePixelRatio; } catch { /* */ }
-      }
-    }
+    renderer.resize(w, h, this.dpr);
   }
 
   update(now, force) {

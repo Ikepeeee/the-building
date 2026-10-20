@@ -2,6 +2,7 @@
 import { TYPES, floorName, fmtMoney } from './constants.js';
 import { ELEV, HOTEL, COMMERCE, SIM, KIND_NAME } from './rules.js';
 import { STANDBY } from './elevator.js';
+import { starText } from './people.js';
 
 const LEVEL_TEXT = { good: '良い', fair: '普通', bad: '悪い' };
 const STATE_TEXT = { walk: '歩いている', wait: 'エレベーター待ち', ride: 'エレベーターに乗っている', stairs: '階段を移動中', in: '室内', out: '外出中' };
@@ -19,9 +20,9 @@ export const PanelMixin = {
     if (r.fail >= 0.5) out.push({ label: `たどり着けなかった人がいる（${Math.round(r.fail)}人）`, level: 'bad' });
     if (r.n >= 0.5) {
       const w = r.wait / r.n, st = r.stairs / r.n, wk = r.walk / r.n, cr = r.crowd / r.n;
-      out.push({ label: `エレベーター待ち 平均${w.toFixed(1)}分`, level: lv3(w, 3, 8) });
+      out.push({ label: `エレベーター待ち 平均${w.toFixed(1)}分`, level: lv3(w, 1, 3) });
       if (st > 0.5) out.push({ label: `階段の上り下り（ストレス ${st.toFixed(0)}）`, level: lv3(st, 6, 15) });
-      out.push({ label: `移動距離 歩き平均${wk.toFixed(0)}分`, level: lv3(wk, 15, 30) });
+      out.push({ label: `移動距離 歩き平均${wk.toFixed(1)}分`, level: lv3(wk, 3, 6) });
       if (cr > 0.2) out.push({ label: `エレベーターの混雑（ストレス ${cr.toFixed(1)}）`, level: lv3(cr, 2, 6) });
     }
     if (o.noisy) out.push({ label: '騒音（近くの飲食店・映画館など）', level: 'bad' });
@@ -108,6 +109,11 @@ export const PanelMixin = {
       stats.push(['宿泊料', `${fmtMoney(T.price)}/泊`]);
       stats.push(['宿泊客', `${o.occupied ? o.members.length : 0}人`]);
       stats.push(['清掃', o.dirty ? (o.cleaner ? '清掃中' : '要清掃') : 'きれい']);
+      const avg = this.reviewAverage(o);
+      if (avg !== null) {
+        stats.push(['レビュー', `★${avg.toFixed(1)}（${o.reviews.length}件）`]);
+        for (const r of o.reviews.slice(-3).reverse()) stats.push([`${starText(r.stars)} ${r.name}`, r.text]);
+      } else stats.push(['レビュー', 'まだありません']);
       actions.push({ id: 'exterminate', label: 'ゴキブリ駆除', cost: SIM.EXTERMINATE, enabled: !!o.infested && this.money >= SIM.EXTERMINATE, danger: false });
     } else if (COMMERCE.has(o.type)) {
       subtitle = `${T.name}・${where}・${this.isOpen(o) ? '営業中' : '準備中'}`;
@@ -130,7 +136,7 @@ export const PanelMixin = {
     } else if (o.type === 'garbage') {
       stats.push(['この集積所', `${Math.round(o.bags)} / ${TYPES.garbage.capacity}袋（${Math.round(o.fill * 100)}%）`]);
       stats.push(['ビル全体', `${Math.round(this.garbageBags)} / ${this.garbageCap}袋（${this.byType.garbage.length}室）`]);
-      stats.push(['回収', `毎朝4:30〜5:30・1袋 ${fmtMoney(this.byType.recycling.length ? SIM.GARBAGE.feeRecycle : SIM.GARBAGE.fee)}`]);
+      stats.push(['回収', `毎朝4:30〜5:30・1袋 ${fmtMoney(SIM.GARBAGE.fee)}`]);
       if (o.truck) stats.push(['収集車', { in: '到着中', load: '積み込み中', out: '出発' }[o.truck.phase]]);
       stats.push(['維持費', `${fmtMoney(SIM.MAINT.garbage)}/日`]);
       if (this.garbageProblem() === 'full') d0warn = '満杯です。ごみ集積所を増やしてください';
@@ -158,7 +164,7 @@ export const PanelMixin = {
       const r = o.rs;
       if (r.n >= 0.5) {
         stats.push(['平均待ち', `${(r.wait / r.n).toFixed(1)}分`]);
-        stats.push(['平均の歩き', `${(r.walk / r.n).toFixed(0)}分`]);
+        stats.push(['平均の歩き', `${(r.walk / r.n).toFixed(1)}分`]);
         stats.push(['平均ストレス', `${(r.stress / r.n).toFixed(0)}`]);
       }
     }
@@ -167,18 +173,11 @@ export const PanelMixin = {
     if (o.complaintUntil > this.time && o.complaint) stats.push(['苦情', o.complaint.replace(/^[^:]*:\s*/, '')]);
     actions.push({ id: 'remove', label: '撤去', cost: 0, enabled: true, danger: true });
     const d = { title, subtitle, stats, level, actions };
+    if (HOTEL.has(o.type)) d.reviews = (o.reviews || []).slice().reverse();
     if (d0warn) d.warning = d0warn;
     if (reasons) d.reasons = reasons;
     if (o.unreachable) { stats.unshift(['⚠ 警告', 'ロビーから行けません']); d.warning = d.warning || 'ロビーから行けません'; }
     return d;
-  },
-
-  describePerson(p) {
-    const stats = [['ストレス', `${Math.round(p.stress)}`], ['状態', STATE_TEXT[p.state] || p.state]];
-    if (p.home && TYPES[p.home.type]) stats.push(['所属', `${floorName(p.home.f)}の${p.home.brand || TYPES[p.home.type].name}`]);
-    if (p.dest) stats.push(['行き先', floorName(p.dest.f)]);
-    const lv = p.stress < 30 ? 'good' : p.stress < 60 ? 'fair' : 'bad';
-    return { title: KIND_NAME[p.kind] || '人', subtitle: floorName(Math.round(p.f)), stats, level: lv, actions: [] };
   },
 
   act(o, id) {

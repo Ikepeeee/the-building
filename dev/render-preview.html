@@ -43,7 +43,7 @@ if (q.get('real') === '1') {
     for (let f = 9; f <= 11; f++) { B('condo', { f, x: 30 }); B('condo', { f, x: 46 }); B('condo', { f, x: 80 }); }
     for (let f = 12; f <= 13; f++) { for (let i = 0; i < 6; i++) B('hotelSingle', { f, x: 30 + i * 4 }); for (let i = 0; i < 4; i++) B('hotelTwin', { f, x: 80 + i * 6 }); }
     B('hotelSuite', { f: 14, x: 30 }); B('hotelSuite', { f: 14, x: 80 });
-    B('metro', { f: -4, x: 32 }); B('recycling', { f: -4, x: 80 });
+    B('metro', { f: -4, x: 32 });
     B('garbage', { f: -2, x: 96 }); B('parking', { f: -1, x: 32 }); B('parking', { f: -1, x: 56 });
     window.__fails = fails;
   }
@@ -82,6 +82,13 @@ if (q.get('ghost') === '3') view.ghost = { x: 50, w: 4, lo: 2, hi: 12, ok: true,
 if (q.get('ghosts') === '1') view.ghosts = [
   { x: 150, w: 9, f: 13, h: 1, ok: true, type: 'office', label: 'コピー 3件 $480,000' }, { x: 159, w: 16, f: 13, h: 1, ok: true, type: 'condo' },
   { x: 175, w: 4, lo: 13, hi: 16, ok: true }, { x: 179, w: 12, f: 13, h: 1, ok: false, type: 'shop' }];
+if (q.get('overlay')) view.overlay = q.get('overlay');
+if (q.get('marked') === '1') { view.marked = new Set(); let k = 0; for (const o of sim.objs.values()) { if (o.f >= 5 && o.f <= 7 && o.x >= 30 && o.x < 70 && k < 6) { view.marked.add(o.id); k++; } } }
+if (q.has('selp')) {
+  const want = q.get('selp');
+  const pool = [...sim.active].filter((p) => (want === 'ride' ? p.state === 'ride' : want === 'wait' ? p.state === 'wait' : p.state === 'walk' && p.f >= 0 && p.f <= 3));
+  view.selectedPerson = pool[(pool.length / 2) | 0] || null;
+}
 if (q.get('sel') === '1') { const o = sim.objAt ? sim.objAt(1, 20) : null; if (o) view.selectedId = o.id; }
 if (q.has('hx')) view.hover = { f: num('hf', 0), x: num('hx', 0) };
 

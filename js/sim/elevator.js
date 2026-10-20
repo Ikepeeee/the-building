@@ -5,12 +5,19 @@ import { NF, FI, LOBBY_SET, SIM, isStopFloor } from './rules.js';
 const dk = (d) => (d > 0 ? 'up' : 'down');
 const legTo = (p) => p.legs[p.li].to;
 
-export const DOOR_TIME = { short: 0.2, normal: 0.35, long: 0.6 };
+// ドアの開閉（分）。標準 0.12分 ≈ 7秒
+export const DOOR_TIME = { short: 0.08, normal: 0.12, long: 0.2 };
 export const STANDBY = ['none', 'lobby', 'spread'];
 // 最高速度（フロア/分）と加速度（フロア/分²）。speed:2（高速モーター）で ×1.6 / ×1.4
-export const KIN = { elevator: { vmax: 6, acc: 12 }, express: { vmax: 15, acc: 30 } };
-const SUB = 0.04;          // 運動の積分刻み（分）。最高速でも1刻みで1フロア未満しか進まない
-const CLAIM_PATIENCE = 4;  // この分数以上待っている呼びは、他のカゴが向かっていても取りに行く
+// 1フロア = 4m。速さはフロア/分、加速度はフロア/分²（1 m/s² = 900 フロア/分²）
+//   通常: 105 m/分（高速モーター 240 m/分）、1.0 m/s²
+//   急行: 600 m/分（高速モーター 1000 m/分）、1.2 m/s²
+export const KIN = {
+  elevator: { vmax: 105 / 4, vmax2: 240 / 4, acc: 900 },
+  express: { vmax: 600 / 4, vmax2: 1000 / 4, acc: 1080 },
+};
+const SUB = 0.04;          // 運動の積分刻みの上限（分）。実際は 1刻みで1フロア以下になるよう e.sub を使う
+const CLAIM_PATIENCE = 1;  // この分数以上待っている呼びは、他のカゴが向かっていても取りに行く
 
 // 既定の通過階: 急行はロビー階と地下階以外のすべて、通常は無し
 export const defaultSkip = (type, lo, hi) => {
@@ -35,8 +42,9 @@ export const ElevatorMixin = {
     for (let f = e.lo; f <= e.hi; f++) if (!skip.has(f)) { e.stops.push(f); e.isStop[FI(f)] = 1; }
     e.sLo = e.stops[0]; e.sHi = e.stops[e.stops.length - 1];
     const k = KIN[e.type], fast = cfg.speed === 2;
-    e.vmax = k.vmax * (fast ? 1.6 : 1);
-    e.acc = k.acc * (fast ? 1.4 : 1);
+    e.vmax = fast ? k.vmax2 : k.vmax;
+    e.acc = k.acc;
+    e.sub = Math.min(SUB, 1 / e.vmax);
     e.doorTime = DOOR_TIME[cfg.door] ?? DOOR_TIME.normal;
     e.cap = TYPES[e.type].cap;
     if (!e.qn) { e.qn = new Int32Array(NF); e.waitN = 0; }
@@ -128,12 +136,43 @@ export const ElevatorMixin = {
     if (hi - lo + 1 < 2) return fail('2フロア以上必要です');
     if (hi - lo + 1 > T.maxSpan) return fail(`最大${T.maxSpan}フロアまでです`);
     if (lo === e.lo && hi === e.hi) return fail('範囲が変わっていません');
-    const r = this.checkTransportCells(e.type, e.x, e.w, lo, hi, e.id);
+    // 延長先の階でシャフトのマスにフロアが無ければ、支えがある限り自動で作る（フロア代を加算）
+    const fresh = this.resizeFloorCells(e, lo, hi);
+    if (typeof fresh === 'string') return fail(fresh);
+    const r = this.checkTransportCells(e.type, e.x, e.w, lo, hi, e.id, fresh);
     if (r) return fail(r);
     if (countStops(lo, hi, this.resizedSkip(e, lo, hi)) < 2) return fail('停止階が2つ以上必要です');
     const added = Math.max(0, e.lo - lo) + Math.max(0, hi - e.hi);
-    const cost = added * SIM.EXTEND_COST[e.type];
-    return { ok: true, reason: '', cost, ghost, apply: () => this.applyResize(e, lo, hi) };
+    const cost = added * SIM.EXTEND_COST[e.type] + fresh.length * TYPES.floor.costPerTile;
+    return {
+      ok: true, reason: '', cost, ghost,
+      apply: () => {
+        for (const [f, x] of fresh) if (this.grid[f][x] === 0) this.grid[f][x] = -1;
+        if (fresh.length) this.revision++;
+        this.applyResize(e, lo, hi);
+      },
+    };
+  },
+
+  // 新しく加わる階の、シャフトの下にフロアが無いマス。支えが無ければ理由（文字列）を返す。
+  // 地上は下から、地下は上から順に作る前提で、作る予定のマスも支えとして数える。
+  resizeFloorCells(e, lo, hi) {
+    const out = [], planned = new Set();
+    const key = (f, x) => f * 1000 + x;
+    const has = (f, x) => this.cell(f, x) !== 0 || planned.has(key(f, x));
+    const floors = [];
+    for (let f = lo; f <= hi; f++) if (f < e.lo || f > e.hi) floors.push(f);
+    // 地上は下から、地下は上から
+    floors.sort((a, b) => (a >= 0 && b >= 0 ? a - b : a < 0 && b < 0 ? b - a : a >= 0 ? -1 : 1));
+    for (const f of floors) {
+      for (let x = e.x; x < e.x + e.w; x++) {
+        if (this.cell(f, x) !== 0) continue;
+        const ok = f === 0 || (f > 0 ? has(f - 1, x) : has(f + 1, x));
+        if (!ok) return `${floorName(f)}にフロアがなく、支えもありません`;
+        planned.add(key(f, x)); out.push([f, x]);
+      }
+    }
+    return out;
   },
 
   // 伸縮後の通過階: 既存の設定を残し、新しく加わった階は既定（急行ならロビー階・地下階以外は通過）
@@ -204,7 +243,7 @@ export const ElevatorMixin = {
     c.idleT = 0;
     let t = dt;
     while (t > 1e-9 && c.state === 'moving') {
-      const h = t < SUB ? t : SUB;
+      const h = t < e.sub ? t : e.sub;
       t -= h;
       this.moveCar(e, c, h);
     }

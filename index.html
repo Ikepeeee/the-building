@@ -13,6 +13,24 @@
 <title>The Building</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Crect width='16' height='16' fill='%232b4fa8'/%3E%3Crect x='0' y='13' width='16' height='3' fill='%235a3d22'/%3E%3Crect x='5' y='2' width='6' height='11' fill='%23222'/%3E%3Crect x='6' y='3' width='4' height='10' fill='%23d9d4c4'/%3E%3Crect x='6' y='4' width='1' height='1' fill='%23ffd34d'/%3E%3Crect x='8' y='4' width='1' height='1' fill='%23ffd34d'/%3E%3Crect x='7' y='6' width='1' height='1' fill='%23ffd34d'/%3E%3Crect x='9' y='6' width='1' height='1' fill='%23ffd34d'/%3E%3Crect x='6' y='8' width='1' height='1' fill='%23ffd34d'/%3E%3Crect x='8' y='8' width='1' height='1' fill='%23ffd34d'/%3E%3Crect x='7' y='11' width='2' height='2' fill='%23553'/%3E%3Crect x='7' y='0' width='2' height='2' fill='%23ffd34d'/%3E%3C/svg%3E">
 <link rel="manifest" href="manifest.json">
+<script>
+  // ホーム画面用のアイコン（iOS は PNG が必要なので、画像ファイルを置かずにその場で描いて data URI にする）
+  (function () {
+    try {
+      var c = document.createElement('canvas'); c.width = c.height = 180;
+      var g = c.getContext('2d'), u = 180 / 16;
+      var R = function (col, x, y, w, h) { g.fillStyle = col; g.fillRect(x * u, y * u, w * u, h * u); };
+      R('#2b4fa8', 0, 0, 16, 16); R('#5a3d22', 0, 13, 16, 3); R('#222', 5, 2, 6, 11); R('#d9d4c4', 6, 3, 4, 10);
+      [[6, 4], [8, 4], [7, 6], [9, 6], [6, 8], [8, 8]].forEach(function (p) { R('#ffd34d', p[0], p[1], 1, 1); });
+      R('#553', 7, 11, 2, 2); R('#ffd34d', 7, 0, 2, 2);
+      var l = document.createElement('link'); l.rel = 'apple-touch-icon'; l.href = c.toDataURL('image/png');
+      document.head.appendChild(l);
+    } catch (e) { /* アイコンが無くても遊べる */ }
+    // ホーム画面から起動したとき（ブラウザの UI なし）
+    var sa = window.navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches);
+    if (sa) document.documentElement.classList.add('standalone');
+  })();
+</script>
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -45,6 +63,14 @@
     <div class="cb-text"><b id="cb-name"></b><span id="cb-cost"></span></div>
     <button class="btn" id="cb-cancel">✕ やめる</button>
     <button class="btn btn-primary" id="cb-ok">✓ 建設</button>
+  </div>
+
+  <div id="copy-bar" class="frame" hidden>
+    <span id="cp-text"></span>
+    <button class="btn btn-small" id="cp-clear">選択解除</button>
+    <button class="btn btn-small" id="cp-free" aria-pressed="false">↔ 横も動かす</button>
+    <button class="btn btn-small" id="cp-back">◀ 選び直す</button>
+    <button class="btn btn-small btn-primary" id="cp-go">貼り付けへ ▶</button>
   </div>
 
   <nav id="toolbar" class="frame" aria-label="施設ツールバー">

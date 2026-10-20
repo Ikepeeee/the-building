@@ -66,12 +66,16 @@ export class App {
     this.minimap = new Minimap(this);
     this.ambience = new Ambience(this.sound);
     this.hoverGhosts = null;
+    this.selectedPerson = null;
+    this.follow = false;
+    this.overlay = null; // 'eval' で評価の網掛け
     this.ambTimer = 0;
     this.nightFF = false;
     this.simFailed = false; // sim.step が例外を出したら自動保存を止める
 
     this.perf = new Perf(this);
     this.setupConfirmBar();
+    this.setupCopyBar();
     this.setupTitle();
     this.setupResize();
     this.setupLifecycle();
@@ -191,6 +195,7 @@ export class App {
     this.input.update(dt);
     this.cam.update(now);
     this.updateNightFF();
+    this.updateFollow(dt);
 
     const spd = this.effectiveSpeed();
     if (spd > 0) {
@@ -231,7 +236,10 @@ export class App {
         cam: this.cam.view,
         ghost: this.started ? this.dragGhost || (this.pending && this.pending.ghost) || this.hoverGhost : null,
         ghosts: this.started ? (this.pending && this.pending.ghosts) || (this.tool === 'copy' && this.input.lastType === 'mouse' ? this.hoverGhosts : null) : null,
+        marked: this.started && this.tool === 'copy' && this.copy.marked.size ? this.copy.marked : null,
         selectedId: this.selectedId,
+        selectedPerson: this.selectedPerson || null,
+        overlay: this.started ? this.overlay : null,
         hover: this.started && this.input.lastType === 'mouse' ? this.hover : null,
         nowMs: now,
       });
@@ -324,6 +332,7 @@ export class App {
     this.dragGhost = null;
     this.copy.reset();
     this.resize.cancel();
+    this.updateCopyBar();
     if (key !== 'inspect') {
       if (TYPES[key]) this.toolbar.reveal(key);
       if (isTouchDevice() || this.root.clientWidth < 760) this.panel.close();
@@ -342,8 +351,8 @@ export class App {
     if (key === 'inspect') s = touch ? 'タップで詳細／1本指でスクロール／2本指でズーム' : '施設をクリックで詳細／ドラッグ・ホイールでスクロール／Ctrl+ホイールでズーム';
     else if (key === 'copy') {
       s = this.copy.phase === 'paste'
-        ? (touch ? 'コピー: 指を滑らせて貼り付け位置を合わせ ✓ で建設（✕で範囲を選び直す）' : 'コピー: 貼り付けたい場所でクリック（続けて何度でも）。Esc で範囲を選び直す')
-        : (touch ? 'コピー: 1本指でなぞってコピーする範囲を選ぶ' : 'コピー: ドラッグでコピーする範囲を選ぶ（フロア・施設・移動手段をまとめて複製）');
+        ? (touch ? 'コピー: 指で上下に動かして ✓ で建設（横は「↔」で解除）' : 'コピー: 貼り付けたい階でクリック（横はコピー元と同じ。Shift で横も動かす）。Esc で選び直す')
+        : (touch ? 'コピー: なぞって範囲を選ぶ／施設をタップして選ぶ → 「貼り付けへ」' : 'コピー: ドラッグで範囲、クリックで施設を選ぶ（✔が付く）→「貼り付けへ」か Enter');
     } else if (key === 'bulldoze') s = touch ? '撤去: 横になぞって範囲を選び ✓ で確定（返金なし）' : '撤去: 横にドラッグした範囲を撤去（施設があれば確認します。返金なし）';
     else {
       const t = TYPES[key];
@@ -477,16 +486,20 @@ export class App {
   dragEnd(d) {
     this.dragGhost = null;
     if (d.tool === 'copy') {
-      if (this.copy.finishSelect(this.clampCell(d.start), this.clampCell(d.cur))) {
+      const a = this.clampCell(d.start), b = this.clampCell(d.cur);
+      // クリック／タップ: 施設の選択を切り替える
+      if (a.f === b.f && a.x === b.x) {
+        const o = this.pickAt(a.f, a.x);
+        if (o) { this.copy.toggle(o.id); this.sound.play('click'); }
+        this.updateCopyBar();
+        return;
+      }
+      // 範囲ドラッグ: 中の施設を選択に加える。施設が無ければ（フロアだけ）範囲ごとコピー
+      if (this.copy.markRange(a, b) > 0) { this.sound.play('click'); this.updateCopyBar(); return; }
+      if (this.copy.marked.size) { this.updateCopyBar(); return; }
+      if (this.copy.finishSelect(a, b)) {
         this.updateHint();
-        if (d.touch) {
-          // スマホ: まずは元の範囲のすぐ右に仮置きして、見えるようにする
-          const src = this.copy.src;
-          const cell = { f: src.f1, x: Math.min(W - 1, src.x2 + 1 + Math.floor(this.copy.bp.w / 2)) };
-          this.setCopyPending(cell);
-          this.cam.focus(src.f1 + Math.floor(this.copy.bp.h / 2), cell.x, this.cam.zoom);
-        } else if (this.hover) this.hoverAt(this.hover);
-        this.toasts.show({ text: d.touch ? 'コピーしました。貼り付けたい場所をタップしてください' : 'コピーしました。貼り付けたい場所でクリックしてください', kind: 'info' });
+        this.afterCopyReady(d.touch);
       }
       return;
     }
@@ -526,6 +539,9 @@ export class App {
     if (!this.started) return;
     if (this.tool === 'inspect') {
       const c = this.clampCell(cell);
+      // 人を施設より優先（タッチは当たり判定を広めに）
+      const p = this.personAtCell(cell, touch);
+      if (p) { this.selectPerson(p); return; }
       let o = null;
       try { o = cell.f >= MIN_F && cell.f <= MAX_F && cell.x >= 0 && cell.x < W ? this.pickAt(c.f, c.x) : null; } catch (e) { this.reportError(e, 'sim.objAt'); }
       if (o) this.select(o.id);
@@ -547,12 +563,166 @@ export class App {
     this.setPending(this.tool, p);
   }
 
+  // ---------- 人のプロフィール ----------
+  personAtCell(cell, touch) {
+    const s = this.sim;
+    if (!s || typeof s.personAt !== 'function' || !cell) return null;
+    const fx = cell.fx ?? cell.x + 0.5;
+    const r = touch ? 2.5 : 1.2;
+    try {
+      // 指は少しずれやすいので、上下の階も見る（タッチ）
+      const fs = touch ? [cell.f, cell.f - 1, cell.f + 1] : [cell.f];
+      for (const f of fs) { const p = s.personAt(f, fx, r); if (p) return p; }
+    } catch (e) { this.reportError(e, 'sim.personAt'); }
+    return null;
+  }
+
+  selectPerson(p) {
+    this.selectedId = null;
+    this.selectedPerson = p;
+    this.follow = false;
+    this.panel.showPerson(p);
+    this.sound.play('click');
+  }
+
+  setFollow(on) {
+    this.follow = !!on && !!this.selectedPerson;
+    this.cam.anim = null;
+  }
+
+  /** 追いかけるカメラ、画面外に出たときの「追いかける」ボタン */
+  updateFollow(dt) {
+    const chip = this.followChip || (this.followChip = this.makeFollowChip());
+    const p = this.selectedPerson;
+    let pos = null;
+    if (p && this.started && this.sim && typeof this.sim.drawPos === 'function') {
+      try { pos = this.sim.drawPos(p); } catch { pos = null; }
+    }
+    const cam = this.cam;
+    let off = false;
+    if (pos) {
+      const sx = ((pos.x + 0.5) * TILE_W - cam.x) * cam.zoom, sy = (-(pos.f + 0.5) * FLOOR_H - cam.y) * cam.zoom;
+      off = sx < 0 || sx > cam.vw || sy < cam.insetTop || sy > cam.vh - cam.insetBottom;
+      if (this.follow) {
+        const usable = cam.vh - cam.insetTop - cam.insetBottom;
+        const tx = (pos.x + 0.5) * TILE_W - cam.vw / 2 / cam.zoom;
+        const ty = -(pos.f + 0.5) * FLOOR_H - (cam.insetTop + usable / 2) / cam.zoom;
+        const k = Math.min(1, dt * 5);
+        cam.x += (tx - cam.x) * k; cam.y += (ty - cam.y) * k;
+        cam.clamp();
+      }
+    }
+    const show = !!p && !!pos && off && !this.follow && !this.blocked();
+    if (chip.hidden === show) chip.hidden = !show;
+  }
+
+  makeFollowChip() {
+    const b = document.createElement('button');
+    b.id = 'follow-chip';
+    b.className = 'btn btn-primary';
+    b.textContent = '📍 選んだ人を追いかける';
+    b.hidden = true;
+    b.addEventListener('click', () => { this.setFollow(true); this.panel.sig = ''; this.panel.refresh(); });
+    this.root.append(b);
+    return b;
+  }
+
+  // ---------- 評価の一括表示 ----------
+  toggleOverlay() {
+    this.overlay = this.overlay === 'eval' ? null : 'eval';
+    this.sound.play('click');
+    this.toolbar.update(true);
+    let lg = document.getElementById('legend');
+    if (!lg) {
+      lg = document.createElement('div');
+      lg.id = 'legend';
+      lg.className = 'frame';
+      lg.innerHTML = '<b>評価</b><span><i class="lg-good"></i>良い</span><span><i class="lg-fair"></i>普通</span><span><i class="lg-bad"></i>悪い</span><span><i class="lg-none"></i>空室・なし</span>';
+      lg.addEventListener('click', () => this.toggleOverlay());
+      lg.title = 'タップで閉じる';
+      this.root.append(lg);
+    }
+    lg.hidden = this.overlay !== 'eval';
+    this.root.classList.toggle('overlay-on', this.overlay === 'eval');
+  }
+
   /** 移動手段を優先して拾う（v2: 移動手段は施設と重なる） */
   pickAt(f, x) {
     const s = this.sim;
     let o = null;
     if (s.transportAt) o = s.transportAt(f, x);
     return o || s.objAt(f, x);
+  }
+
+  // ---------- コピーの操作バー ----------
+  setupCopyBar() {
+    const $ = (id) => document.getElementById(id);
+    this.cpb = { el: $('copy-bar'), text: $('cp-text'), clear: $('cp-clear'), free: $('cp-free'), back: $('cp-back'), go: $('cp-go') };
+    this.cpb.clear.addEventListener('click', () => { this.copy.clearMarks(); this.sound.play('click'); this.updateCopyBar(); });
+    this.cpb.go.addEventListener('click', () => this.startCopyPaste());
+    this.cpb.back.addEventListener('click', () => this.backToCopySelect());
+    this.cpb.free.addEventListener('click', () => {
+      this.copy.freeX = !this.copy.freeX;
+      this.sound.play('click');
+      if (this.pending && this.pending.tool === 'copy') this.setCopyPending(this.pending.cell, true);
+      else if (this.hover) this.hoverAt(this.hover);
+      this.updateCopyBar();
+    });
+  }
+
+  startCopyPaste() {
+    this.userGesture();
+    if (!this.copy.startPasteMarked()) return;
+    this.updateHint();
+    this.afterCopyReady(isTouchDevice());
+  }
+
+  /** 貼り付けモードに入った直後: スマホは元の場所に仮置きして見せる */
+  afterCopyReady(touch) {
+    const src = this.copy.src;
+    if (touch && src) {
+      // 元の列の建物のいちばん上の、すぐ上に置いてみる（たいてい空いている）
+      let top = src.f2;
+      for (let f = src.f2 + 1; f <= MAX_F; f++) {
+        const row = this.sim.grid[f];
+        let any = false;
+        if (row) for (let x = src.x1; x <= src.x2; x++) if (row[x] !== 0) { any = true; break; }
+        if (!any) break;
+        top = f;
+      }
+      const cell = { f: Math.min(MAX_F - this.copy.bp.h + 1, top + 1), x: src.x1 + Math.floor(this.copy.bp.w / 2) };
+      this.setCopyPending(cell);
+      this.cam.focus(cell.f, cell.x, this.cam.zoom);
+    } else if (this.hover) this.hoverAt(this.hover);
+    this.toasts.show({ text: touch ? 'コピーしました。指で上下に動かして ✓ で建設（横も動かすときは「↔」）' : 'コピーしました。貼り付けたい階でクリック（横も動かすときは Shift）', kind: 'info' });
+    this.updateCopyBar();
+  }
+
+  backToCopySelect() {
+    this.copy.reset(true);
+    this.pending = null;
+    this.hoverGhosts = null;
+    this.updateConfirmBar();
+    this.updateHint();
+    this.updateCopyBar();
+  }
+
+  updateCopyBar() {
+    const b = this.cpb;
+    if (!b) return;
+    const on = this.started && this.tool === 'copy';
+    const paste = on && this.copy.phase === 'paste';
+    const n = this.copy.marked.size;
+    b.el.hidden = !on || (!paste && !n);
+    if (b.el.hidden) return;
+    b.text.textContent = paste ? 'コピー貼り付け中' : `✔ ${n}件選択中`;
+    b.clear.hidden = paste;
+    b.go.hidden = paste;
+    b.back.hidden = !paste;
+    b.free.hidden = !paste;
+    b.free.classList.toggle('is-on', this.copy.freeX);
+    b.free.setAttribute('aria-pressed', this.copy.freeX ? 'true' : 'false');
+    b.free.textContent = this.copy.freeX ? '↔ 横も動かす: オン' : '↔ 横も動かす';
   }
 
   setCopyPending(cell, silent) {
@@ -653,7 +823,7 @@ export class App {
 
   cancelPending() {
     // コピーの貼り付け中に「やめる」→ 範囲を選び直す
-    if (this.pending && this.pending.tool === 'copy') { this.copy.reset(); this.updateHint(); }
+    if (this.pending && this.pending.tool === 'copy') { this.copy.reset(true); this.updateHint(); this.updateCopyBar(); }
     this.pending = null;
     this.updateConfirmBar();
   }
@@ -661,6 +831,10 @@ export class App {
   /** 全画面表示の切り替え */
   toggleFullscreen() {
     const d = document, el = d.documentElement;
+    if (!(d.fullscreenEnabled || d.webkitFullscreenEnabled) || !(el.requestFullscreen || el.webkitRequestFullscreen)) {
+      this.dialogs.installGuide();
+      return;
+    }
     try {
       if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen).call(d);
       else (el.requestFullscreen || el.webkitRequestFullscreen).call(el, { navigationUI: 'hide' });
@@ -774,7 +948,8 @@ export class App {
     if (!this.started) return;
     if (this.input.mode === 'drag') { this.dragCancel(); this.input.mode = null; this.input.drag = null; return; }
     if (this.resize.active) { this.resize.cancel(); return; }
-    if (this.tool === 'copy' && this.copy.phase === 'paste') { this.copy.reset(); this.pending = null; this.hoverGhosts = null; this.updateConfirmBar(); this.updateHint(); return; }
+    if (this.tool === 'copy' && this.copy.phase === 'paste') { this.backToCopySelect(); return; }
+    if (this.tool === 'copy' && this.copy.marked.size) { this.copy.clearMarks(); this.updateCopyBar(); return; }
     if (this.pending) { this.cancelPending(); return; }
     if (this.tool !== 'inspect') { this.setTool('inspect'); return; }
     this.panel.close();

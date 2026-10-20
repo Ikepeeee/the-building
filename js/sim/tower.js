@@ -10,6 +10,8 @@ import { EventsMixin } from './events.js';
 import { PanelMixin } from './panel.js';
 import { BuildMixin } from './build.js';
 import { ElevatorMixin, STANDBY } from './elevator.js';
+import { RouteMixin } from './route.js';
+import { PeopleMixin } from './people.js';
 import { GarbageMixin } from './garbage.js';
 
 const K_ELEV = 1, K_EXP = 2, K_STAIR = 3, K_ESC = 4;
@@ -21,7 +23,7 @@ const DINNER = ['restaurant', 'fastfood'];
 const LEISURE = ['shop', 'restaurant', 'fastfood', 'cinema'];
 // 'sound' 通知の最小間隔（ゲーム分）
 const SOUND_GAP = { cash: 30, ding: 5, complaint: 30, roach: 30, built: 2 };
-const NO_VISIT = new Set(['metro', 'garbage', 'parking', 'recycling']);
+const NO_VISIT = new Set(['metro', 'garbage', 'parking']);
 const now = () => (globalThis.performance ? globalThis.performance.now() : Date.now());
 const MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
@@ -240,111 +242,38 @@ export class Tower {
     this.entrances = [];
     for (const o of byType.lobby) if (o.f === 0) this.entrances.push({ f: 0, x0: o.x, x1: o.x + o.w, obj: o });
     for (const o of byType.metro) this.entrances.push({ f: o.f + o.h - 1, x0: o.x, x1: o.x + o.w, obj: o, metro: true });
-    this.buildGraph();
-    // 到達不能フラグ（どの出入口からもその階へ行けない）
-    // 人が行かない設備（ごみ集積所・駐車場・リサイクル）は対象外
-    for (const o of this.facs) o.unreachable = !NO_VISIT.has(o.type) && this.entranceDist(o.f) === Infinity;
+    // 経路グラフと到達不能フラグ（人が行かない設備は対象外）は rebuildGraph で作る
+    this.revision++;
+    this.rebuildGraph();
     for (const o of byType.lobby) o.unreachable = false;
     this.indexGarbage();
-    this.revision++;
   }
+  noVisit(o) { return NO_VISIT.has(o.type); }
 
-  buildGraph() {
-    const cost = new Float64Array(NF * NF).fill(Infinity);
-    const kind = new Uint8Array(NF * NF);
-    const C = SIM.COST;
-    const set = (a, b, c, k) => {
-      const i = FI(a) * NF + FI(b);
-      if (c < cost[i]) { cost[i] = c; kind[i] = k; }
-    };
-    for (const e of this.elevs) {
-      const st = e.stops, exp = e.type === 'express';
-      const base = exp ? C.expBase : C.elevBase, per = exp ? C.expPer : C.elevPer, k = exp ? K_EXP : K_ELEV;
-      for (let i = 0; i < st.length; i++) {
-        for (let j = i + 1; j < st.length; j++) {
-          const c = base + per * (st[j] - st[i]);
-          set(st[i], st[j], c, k); set(st[j], st[i], c, k);
-        }
-      }
-    }
-    for (const [f] of this.stairsAt) { set(f, f + 1, C.stairs, K_STAIR); set(f + 1, f, C.stairs, K_STAIR); }
-    for (const [f] of this.escAt) { set(f, f + 1, C.esc, K_ESC); set(f + 1, f, C.esc, K_ESC); }
-    const adj = [];
-    for (let u = 0; u < NF; u++) {
-      const a = [];
-      for (let v = 0; v < NF; v++) if (cost[u * NF + v] < Infinity) a.push(v);
-      adj.push(Int16Array.from(a));
-    }
-    this.gCost = cost; this.gKind = kind; this.adj = adj;
-    this.rcache = new Map();
-  }
-
-  routeFrom(a) {
-    let r = this.rcache.get(a);
-    if (r) return r;
-    const dist = new Float64Array(NF).fill(Infinity);
-    const prev = new Int16Array(NF).fill(-1);
-    const done = new Uint8Array(NF);
-    const cost = this.gCost, adj = this.adj;
-    dist[FI(a)] = 0;
-    for (;;) {
-      let u = -1, best = Infinity;
-      for (let i = 0; i < NF; i++) if (!done[i] && dist[i] < best) { best = dist[i]; u = i; }
-      if (u < 0) break;
-      done[u] = 1;
-      const row = adj[u], base = u * NF;
-      for (let k = 0; k < row.length; k++) {
-        const v = row[k], d = best + cost[base + v];
-        if (d < dist[v]) { dist[v] = d; prev[v] = u; }
-      }
-    }
-    r = { dist, prev, legs: new Map() };
-    this.rcache.set(a, r);
-    return r;
-  }
-  dist(a, b) { return a === b ? 0 : this.routeFrom(a).dist[FI(b)]; }
-
-  route(a, b) {
-    if (a === b) return [];
-    const r = this.routeFrom(a);
-    if (r.dist[FI(b)] === Infinity) return null;
-    let legs = r.legs.get(b);
-    if (legs) return legs;
-    legs = [];
-    for (let f = b; f !== a;) {
-      const u = r.prev[FI(f)] + MIN_F;
-      legs.push({ kind: KIND_NAMES[this.gKind[FI(u) * NF + FI(f)]], from: u, to: f });
-      f = u;
-    }
-    legs.reverse();
-    r.legs.set(b, legs);
-    return legs;
-  }
-
-  // 出入口
-  pickEntranceTo(f) {
+  // 出入口（x はその階のどの区画かを決める。省略するといちばん広い区画）
+  pickEntranceTo(f, x) {
     let best = null, bd = Infinity;
     for (const e of this.entrances) {
-      const d = this.dist(e.f, f) + this.rand(0.5);
+      const d = this.dist(e.f, f, e.x0, x) + this.rand(0.5);
       if (d < bd) { bd = d; best = e; }
     }
     return best;
   }
-  pickExitFrom(f) {
+  pickExitFrom(f, x) {
     let best = null, bd = Infinity;
     for (const e of this.entrances) {
-      const d = this.dist(f, e.f) + this.rand(0.5);
+      const d = this.dist(f, e.f, x, e.x0) + this.rand(0.5);
       if (d < bd) { bd = d; best = e; }
     }
     return best;
   }
-  entranceDist(f) {
+  entranceDist(f, x) {
     let bd = Infinity;
-    for (const e of this.entrances) bd = Math.min(bd, this.dist(e.f, f));
+    for (const e of this.entrances) bd = Math.min(bd, this.dist(e.f, f, e.x0, x));
     return bd;
   }
-  pickVisitorEntrance(f) {
-    const ok = this.entrances.filter((e) => this.dist(e.f, f) < Infinity);
+  pickVisitorEntrance(f, x) {
+    const ok = this.entrances.filter((e) => this.dist(e.f, f, e.x0, x) < Infinity);
     if (!ok.length) return null;
     const metro = ok.filter((e) => e.metro), lobby = ok.filter((e) => !e.metro);
     if (metro.length && lobby.length) return this.pick(this.r() < 0.35 ? metro : lobby);
@@ -372,7 +301,7 @@ export class Tower {
     switch (n) {
       case 2: return [popReq(2)];
       case 3: return [popReq(3), { label: '警備室', done: c('security') }];
-      case 4: return [popReq(4), { label: '医療センター', done: c('medical') }, { label: 'リサイクルセンター', done: c('recycling') },
+      case 4: return [popReq(4), { label: '医療センター', done: c('medical') }, { label: 'ごみ・リサイクルセンター（ごみが溢れていない）', done: this.garbageOk() },
         { label: 'VIPの高評価', done: this.flags.vipOk }];
       case 5: return [popReq(5), { label: '地下鉄駅', done: c('metro') }];
       case 6: return [{ label: '100Fの大聖堂', done: c('cathedral') }, { label: '大聖堂での結婚式', done: this.tower }];
@@ -403,12 +332,14 @@ export class Tower {
 
   // ================= 人 =================
   newPerson(kind, home) {
-    return {
+    const p = {
       id: this.nextPid++, kind, home, state: 'out', stress: 0, f: 0, x: 0,
       legs: null, li: 0, tx: 0, dest: null, loc: null, elev: null, car: null, legObj: null,
       stairT: 0, stairDur: 1, esc: false, waitT: 0, tripT: 0, sWait: 0, sStair: 0,
-      task: null, patrol: null, checked: false,
+      task: null, patrol: null, checked: false, name: '', age: 0, job: '',
     };
+    this.rollProfile(p);
+    return p;
   }
 
   spotIn(o) { return o.x + 0.5 + this.rand(Math.max(0, o.w - 1)); }
@@ -424,14 +355,14 @@ export class Tower {
   // 入口の階から (f, x) へ向かう人が、どの扉から入るのがよいか。
   // 最初に乗る移動手段（行き先に近いもの）の前の扉。乗り継ぎ不要なら行き先の前の扉。
   doorAim(ent, f, x) {
-    const legs = this.route(ent.f, f);
+    const legs = this.route(ent.f, f, this.doorX(ent, x), x);
     if (!legs || !legs.length) return x;
     const leg = legs[0];
     if (leg.kind === 'elev' || leg.kind === 'express') {
       const e = this.pickElevator(leg, x);
       return e ? e.x + e.w / 2 : x;
     }
-    const st = this.pickStairs(leg.kind, Math.min(leg.from, leg.to), x);
+    const st = this.pickStairs(leg.kind, Math.min(leg.from, leg.to), x, leg);
     return st ? st.x + st.w / 2 : x;
   }
 
@@ -442,9 +373,9 @@ export class Tower {
   }
 
   startTrip(p, f, x, cb) {
-    const legs = this.route(p.f, f);
-    if (!legs) return false;
     if (p.walking) this.syncX(p);
+    const legs = this.route(p.f, f, p.x, x);
+    if (!legs) return false;
     if (p.state === 'wait' || p.state === 'ride') this.detach(p);
     if (p.state === 'in' && p.loc) p.loc.inCount--;
     p.loc = null;
@@ -460,7 +391,7 @@ export class Tower {
   reroute(p, depth = 0) {
     if (p.walking) this.syncX(p);
     if (!p.dest || depth > 3) { this.rescue(p); return; }
-    const legs = this.route(p.f, p.dest.f);
+    const legs = this.route(p.f, p.dest.f, p.x, p.dest.x);
     if (!legs) { this.rescue(p); return; }
     p.legs = legs; p.li = 0; p.state = 'walk';
     this.active.add(p);
@@ -477,7 +408,7 @@ export class Tower {
       p.legObj = e;
       this.walkTo(p, p.x < e.x + e.w / 2 ? e.x - 0.5 : e.x + e.w + 0.5);
     } else {
-      const s = this.pickStairs(leg.kind, Math.min(leg.from, leg.to), p.x);
+      const s = this.pickStairs(leg.kind, Math.min(leg.from, leg.to), p.x, leg);
       if (!s) { this.reroute(p, depth); return; }
       p.legObj = s;
       this.walkTo(p, leg.to > leg.from ? s.x + 0.5 : s.x + s.w - 0.5);
@@ -486,6 +417,9 @@ export class Tower {
 
   // ---- 歩行は事象駆動: 着く時刻を walkQ に積み、位置は drawPos/curX で計算する ----
   walkTo(p, tx) {
+    // 区画の外へは出ない（フロアの切れ目を宙歩きしない）
+    const sb = this.segBounds(p.f, p.x);
+    if (sb) { const a = sb.x0 + 0.3, b = sb.x1 - 0.3; tx = tx < a ? a : tx > b ? b : tx; }
     p.tx = tx;
     p.walkT0 = this.time;
     p.walking = true;
@@ -527,6 +461,7 @@ export class Tower {
     let best = null, bs = Infinity;
     for (const e of this.byType[type]) {
       if (!this.serves(e, a, b)) continue;
+      if (leg.fromN !== undefined && (this.nodeOf(a, e.x) !== leg.fromN || this.nodeOf(b, e.x) !== leg.toN)) continue;
       const q = e.q[a];
       // 歩く時間（分）と、行列による待ちの見込み（分）を同じ単位で比べる
       const s = Math.abs(e.x + e.w / 2 - x) / SIM.WALK + (q ? q[k].length : 0) / e.cars.length * 0.6;
@@ -535,11 +470,13 @@ export class Tower {
     return best;
   }
 
-  pickStairs(kind, f, x) {
+  pickStairs(kind, f, x, leg) {
     const list = (kind === 'esc' ? this.escAt : this.stairsAt).get(f);
     if (!list) return null;
     let best = null, bd = Infinity;
     for (const s of list) {
+      // 経路で決めた区画どうしをつなぐものだけ
+      if (leg && leg.fromN !== undefined && (this.nodeOf(leg.from, s.x) !== leg.fromN || this.nodeOf(leg.to, s.x) !== leg.toN)) continue;
       const d = Math.abs(s.x + s.w / 2 - x);
       if (d < bd) { bd = d; best = s; }
     }
@@ -692,7 +629,8 @@ export class Tower {
 
   // ---- 行動 ----
   exitTrip(p, cb) {
-    const ent = this.pickExitFrom(p.f);
+    if (p.walking) this.syncX(p);
+    const ent = this.pickExitFrom(p.f, p.x);
     if (!ent) return false;
     if (p.walking) this.syncX(p);
     return this.startTrip(p, ent.f, this.doorX(ent, p.x), cb);
@@ -702,8 +640,9 @@ export class Tower {
     const h = p.home;
     if (p.state !== 'out' || !h || h.dead) return;
     if ((TENANT.has(h.type) || HOTEL.has(h.type)) && !h.occupied) return;
-    const ent = this.pickEntranceTo(h.f);
-    if (!ent || this.dist(ent.f, h.f) === Infinity) { this.recordEvalValue(h, 100); return; }
+    const hx = h.x + h.w / 2;
+    const ent = this.pickEntranceTo(h.f, hx);
+    if (!ent || this.dist(ent.f, h.f, ent.x0, hx) === Infinity) { this.recordEvalValue(h, 100); return; }
     this.spawnAt(p, ent, this.doorAim(ent, h.f, h.x + h.w / 2));
     if (!this.startTrip(p, h.f, this.spotIn(h), (pp) => this.arriveHome(pp))) {
       this.recordEvalValue(h, 100);
@@ -715,6 +654,7 @@ export class Tower {
     const h = p.home;
     if (!h || h.dead || h.destroyed) return; // finishTrip が leave する
     this.recordEval(h, p);
+    if (HOTEL.has(h.type)) this.noteStay(h, p);
     this.settle(p, h);
     if (HOTEL.has(h.type) && !p.checked) { p.checked = true; h.checkedIn++; }
   }
@@ -760,12 +700,11 @@ export class Tower {
 
   outing(p, types) {
     if (p.state !== 'in') return;
-    const r = this.routeFrom(p.f);
     let best = null, bc = Infinity;
     for (const t of types) {
       for (const o of this.byType[t]) {
         if (o.burning || !this.isOpen(o)) continue;
-        const d = r.dist[FI(o.f)];
+        const d = this.dist(p.f, o.f, p.x, o.x + o.w / 2);
         if (d === Infinity) continue;
         const c = d + this.rand(6) + Math.abs(o.x - p.x) * 0.02;
         if (c < bc) { bc = c; best = o; }
@@ -778,7 +717,7 @@ export class Tower {
 
   visit(o) {
     if (o.dead || o.destroyed || !this.isOpen(o) || o.burning) return;
-    const ent = this.pickVisitorEntrance(o.f);
+    const ent = this.pickVisitorEntrance(o.f, o.x + o.w / 2);
     if (!ent) return;
     const p = this.newPerson('visitor', null);
     this.spawnAt(p, ent, this.doorAim(ent, o.f, o.x + o.w / 2));
@@ -828,6 +767,7 @@ export class Tower {
   }
 
   tick(h) {
+    this.ensureGraph();
     const t0 = this.time;
     this.time = t0 + h;
     if (Math.floor(this.time / DAY) !== Math.floor(t0 / DAY)) this.newDay();
@@ -992,7 +932,7 @@ export class Tower {
     for (const t of ['office', 'condo']) {
       for (const o of this.byType[t]) {
         if (o.occupied || o.burning) continue;
-        const d = this.entranceDist(o.f);
+        const d = this.entranceDist(o.f, o.x + o.w / 2);
         if (d === Infinity) continue;
         let f = d <= 11 ? 1 : d <= 20 ? 0.6 : 0.3;
         if (o.noisy) f *= 0.4;
@@ -1026,7 +966,7 @@ export class Tower {
     let w = -1;
     for (const e of this.elevs) if (e.isStop[FI(f)] && f >= e.lo && f <= e.hi) w = w < 0 ? (e.peakWaitRecent || 0) : Math.min(w, e.peakWaitRecent || 0);
     if (w < 0) return 1; // 階段だけ
-    return w < 5 ? 1 : w < 15 ? 0.5 : w < 30 ? 0.2 : 0.05;
+    return w < 2 ? 1 : w < 5 ? 0.5 : w < 10 ? 0.2 : 0.05;
   }
 
   moveIn(o) {
@@ -1053,7 +993,8 @@ export class Tower {
     if (!o.occupied || day % 7 >= 5) return;
     const b = day * DAY;
     for (const p of o.members) {
-      const tIn = b + 420 + this.rand(120), tOut = b + 1020 + this.rand(120);
+      // 出社は 7:30〜8:45、退社は 17:00〜18:30 に集中する（朝夕のラッシュ）
+      const tIn = b + 450 + this.rand(75), tOut = b + 1020 + this.rand(90);
       if (tIn >= from) this.at(tIn, () => this.enterBuilding(p));
       else if (tOut > from + 60 && p.state === 'out') this.at(from + this.rand(30), () => this.enterBuilding(p));
       if (this.r() < 0.6) {
@@ -1088,7 +1029,7 @@ export class Tower {
     for (const o of this.hotels) {
       if (o.occupied || o.dirty || o.infested || o.burning || o.vipHold) continue;
       if (vipComing && o.type === 'hotelSuite') continue; // VIP のために空けておく
-      if (this.entranceDist(o.f) === Infinity) continue;
+      if (this.entranceDist(o.f, o.x + o.w / 2) === Infinity) continue;
       if (this.r() >= 0.75 * demand * this.evalFactor(o)) continue;
       o.occupied = true; o.checkedIn = 0; o.members = [];
       if (o.type === 'hotelSuite') this.rollParking(o);
@@ -1114,6 +1055,7 @@ export class Tower {
     if (i >= 0) o.members.splice(i, 1);
     if (!o.members.length && o.occupied) {
       o.occupied = false;
+      if (o.checkedIn) this.addReview(o);
       o.needsParking = 0;
       if (o.checkedIn) {
         const pr = TYPES[o.type].price;
@@ -1133,7 +1075,7 @@ export class Tower {
       for (const o of this.byType[t]) {
         if (o.burning || !this.isOpen(o, h)) continue;
         if (t === 'partyHall' && h !== 12 && h !== 18) continue;
-        if (this.entranceDist(o.f) === Infinity) continue;
+        if (this.entranceDist(o.f, o.x + o.w / 2) === Infinity) continue;
         const lam = base * VISIT_RATE[t] * this.evalFactor(o);
         const n = Math.min(VISIT_CAP[t], Math.floor(lam * (0.5 + this.r())));
         for (let i = 0; i < n; i++) this.later(this.rand(55), () => this.visit(o));
@@ -1179,6 +1121,7 @@ export class Tower {
       if (o.destroyed) s.destroyed = o.destroyed;
       if (o.constructUntil > 0) { s.constructStart = o.constructStart; s.constructUntil = o.constructUntil; }
       if (o.needsParking) { s.needsParking = o.needsParking; s.moveSeq = o.moveSeq; }
+      if (o.reviews && o.reviews.length) s.reviews = o.reviews.map((r) => ({ ...r }));
       if (this.hasEval(o)) { s.eval = +o.eval.toFixed(2); s.badDays = o.badDays; }
       if (TENANT.has(o.type) || HOTEL.has(o.type)) s.occupied = !!o.occupied;
       if (HOTEL.has(o.type)) {
@@ -1238,8 +1181,10 @@ export class Tower {
     const elevs = [];
     const oldGarbage = [];
     let oldBags = 0;
-    for (const s of Array.isArray(d.objs) ? d.objs : []) {
+    for (let s of Array.isArray(d.objs) ? d.objs : []) {
       try {
+        // 旧 recycling は同じ場所の garbage として読む
+        if (s && s.type === 'recycling') s = { ...s, type: 'garbage' };
         const T = TYPES[s.type];
         if (!T || typeof s.id !== 'number' || this.objs.has(s.id) || s.type === 'floor') continue;
         if (TRANSPORT.has(s.type)) {
@@ -1259,7 +1204,19 @@ export class Tower {
         const h = T.h || 1, w = s.type === 'lobby' ? Math.max(1, s.w | 0) : T.w;
         // 古い1フロアのごみ収集室は、あとで地下に移す
         if (s.type === 'garbage' && (s.f + h - 1 >= 0 || (s.h || 1) !== h)) { oldGarbage.push(s); oldBags += Math.max(0, num(s.bags, 0)); continue; }
-        if (!fits(s.f, s.f + h - 1, s.x, w)) continue;
+        // 幅が変わった施設（例: オフィス 9→10）は、差の分だけ左右にずらして置ける場所を探す
+        let sx = s.x;
+        if (!fits(s.f, s.f + h - 1, sx, w) && typeof s.w === 'number' && s.w !== w) {
+          const dw = Math.abs(w - s.w);
+          for (let d = 1; d <= dw && sx === s.x; d++) {
+            if (fits(s.f, s.f + h - 1, s.x - d, w)) sx = s.x - d;
+            else if (fits(s.f, s.f + h - 1, s.x + d, w)) sx = s.x + d;
+          }
+        }
+        // 旧い幅の garbage（w16）は、置けなければ地下の空きへ移す
+        if (s.type === 'garbage' && !fits(s.f, s.f + h - 1, sx, w)) { oldGarbage.push(s); continue; }
+        if (!fits(s.f, s.f + h - 1, sx, w)) continue;
+        s = { ...s, x: sx };
         const o = this.makeObj(s.type, s.f, s.x, w, h, s.id);
         for (let r = 0; r < h; r++) for (let xi = o.x; xi < o.x + w; xi++) this.grid[o.f + r][xi] = o.id;
         o.eval = num(s.eval, 0); o.badDays = num(s.badDays, 0);
@@ -1269,6 +1226,10 @@ export class Tower {
         o.brand = typeof s.brand === 'string' ? s.brand.slice(0, 40) : '';
         if (s.destroyed === 'bomb' || s.destroyed === 'fire') o.destroyed = s.destroyed;
         if (num(s.constructUntil, 0) > 0) { o.constructStart = num(s.constructStart, this.time); o.constructUntil = s.constructUntil; }
+        if (Array.isArray(s.reviews) && HOTEL.has(o.type)) {
+          o.reviews = s.reviews.filter((r) => r && typeof r.text === 'string').slice(-20)
+            .map((r) => ({ stars: Math.max(1, Math.min(5, num(r.stars, 3) | 0)), text: r.text.slice(0, 60), day: num(r.day, 0), name: String(r.name || '宿泊客').slice(0, 20) }));
+        }
         if (s.needsParking) { o.needsParking = Math.max(0, num(s.needsParking, 0) | 0); o.moveSeq = num(s.moveSeq, 0); this.moveSeqN = Math.max(this.moveSeqN, o.moveSeq); }
         if (o.type === 'garbage') oldBags += Math.max(0, num(s.bags, 0));
         if (s.complaintUntil) { o.complaintUntil = num(s.complaintUntil, 0); o.complaint = String(s.complaint || ''); }
@@ -1431,5 +1392,5 @@ export class Tower {
   }
 }
 
-Object.assign(Tower.prototype, BuildMixin, ElevatorMixin, GarbageMixin, EventsMixin, PanelMixin);
+Object.assign(Tower.prototype, RouteMixin, BuildMixin, ElevatorMixin, GarbageMixin, EventsMixin, PanelMixin, PeopleMixin);
 export default Tower;

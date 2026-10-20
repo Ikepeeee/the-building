@@ -33,7 +33,7 @@ export function smallTower(sim, floors = 10, x0 = 40, x1 = 100) {
 // 自動プレイヤー: 「真面目にプレイする」簡単な戦略
 //   - 1F ロビー、エレベーター2基（30階ごとに乗り換え）
 //   - オフィス中心、マンションで資金を回す、★2 で警備室・ホテル・ハウスキーピング、
-//     ★3 で医療センター・リサイクルセンター・スイート
+//     ★3 で医療センター・スイート（ごみ・リサイクルセンターは最初から）
 // ---------------------------------------------------------------
 export class AutoPlayer {
   constructor(sim) {
@@ -54,8 +54,8 @@ export class AutoPlayer {
     const s = this.s;
     if (s.money < 150000) return;
     // 必要な分だけ掘る（あとで広げる）
-    s.build('floor', { f: -1, x: 30, x2: 45 });
-    s.build('floor', { f: -2, x: 30, x2: 45 });
+    s.build('floor', { f: -1, x: 30, x2: 30 + TYPES.garbage.w - 1 });
+    s.build('floor', { f: -2, x: 30, x2: 30 + TYPES.garbage.w - 1 });
     if (s.build('garbage', { f: -2, x: 30 }).ok) this.bdone = true;
   }
 
@@ -154,29 +154,26 @@ export class AutoPlayer {
     // 待ち時間を見てカゴを足す（1日1台まで）
     for (const e of s.elevs) {
       const want = Math.max(1, Math.ceil((e.hi - e.lo) / 10));
-      if ((e.cars.length < want || e.peakWaitYesterday > 2.5) && e.cars.length < TYPES[e.type].maxCars && this.money() > reserve + TYPES[e.type].carCost) s.act(e, 'addCar');
+      if ((e.cars.length < want || e.peakWaitYesterday > 1) && e.cars.length < TYPES[e.type].maxCars && this.money() > reserve + TYPES[e.type].carCost) s.act(e, 'addCar');
     }
     // 地下: ごみ集積所（B2〜B1）を必要に応じて増やす。★3からは駐車場（B3）も
     this.basement();
     if (this.bdone && s.money > 150000 && (s.garbageProblem() || s.garbageBags > s.garbageCap * 0.7)) {
       if (!this.bwide) { s.build('floor', { f: -1, x: this.X0, x2: this.X1 }); s.build('floor', { f: -2, x: this.X0, x2: this.X1 }); this.bwide = true; }
-      for (const x of [30, 46, 62, 78]) if (s.build('garbage', { f: -2, x }).ok) break;
+      for (const x of [30, 54, 78]) if (s.build('garbage', { f: -2, x }).ok) break;
     }
     if (s.star >= 3 && s.parkingShort > 0 && s.money > 200000) {
       if (!this.b3) { s.build('floor', { f: -3, x: this.X0, x2: this.X1 }); this.b3 = true; }
       for (const x of [30, 54, 78]) if (s.build('parking', { f: -3, x }).ok) break;
     }
-    // ★3: 医療センターとリサイクルセンター、スイート
+    // ★3: 医療センター、スイート
     if (s.star >= 3) {
       if (!s.byType.medical.length && this.money() > 900000) {
         s.build('floor', { f: this.top + 1, x: this.X0, x2: this.X1 });
         this.top++; this.reach(this.top);
         s.build('medical', { f: this.top, x: 60 });
       }
-      if (!s.byType.recycling.length && this.money() > 700000) {
-        if (!this.bwide) { s.build('floor', { f: -1, x: this.X0, x2: this.X1 }); s.build('floor', { f: -2, x: this.X0, x2: this.X1 }); this.bwide = true; }
-        s.build('recycling', { f: -2, x: 94 });
-      }
+
       if (!s.byType.hotelSuite.length && this.money() > 300000) {
         const f = this.top + 1;
         s.build('floor', { f, x: this.X0, x2: this.X1 });
@@ -211,7 +208,7 @@ export function buildMegaTower(sim, topF = 98) {
   const X0 = 0, X1 = 149; // 従来の幅150で測る（横長は別テスト）
   const localX = [[40, 106], [46, 112]];
   const expressX = [72, 78, 84];
-  // 地下: B1〜B3 フロア、地下鉄・リサイクル
+  // 地下: B1〜B3 フロア、地下鉄・ごみ・リサイクルセンター
   for (let f = 0; f >= -3; f--) mustBuild(sim, 'floor', { f, x: X0, x2: X1 });
   for (let f = 1; f <= topF; f++) mustBuild(sim, 'floor', { f, x: X0, x2: X1 });
   for (const f of LOBBY_FLOORS) if (f <= topF) mustBuild(sim, 'lobby', { f, x: 40, x2: 117 });
@@ -268,10 +265,9 @@ export function buildMegaTower(sim, topF = 98) {
   sim.build('housekeeping', { f: 4, x: 0 });
   sim.build('housekeeping', { f: 6, x: 0 });
   sim.build('medical', { f: -1, x: 0 });
-  sim.build('recycling', { f: -3, x: 0 });
   sim.build('metro', { f: -3, x: 84 });
   // ごみ集積所（地下2フロア分、ビル全体で共有）
-  for (const x of [24, 40, 56, 114, 130]) mustBuild(sim, 'garbage', { f: -3, x });
+  for (const x of [24, 48, 114]) mustBuild(sim, 'garbage', { f: -3, x });
   sim.build('cathedral', { f: 99, x: 65 });
   // 全テナント入居（★2のうちに入居させて、駐車場の需要は付けない）
   sim.star = 2;
@@ -284,7 +280,8 @@ export function buildMegaTower(sim, topF = 98) {
 // 素朴なプレイヤー: エレベーター1基・カゴ1台のまま 30F までオフィスとマンションを詰め込む
 // ---------------------------------------------------------------
 export class NaivePlayer {
-  constructor(sim) { this.s = sim; this.top = 0; this.X0 = 30; this.X1 = 119; }
+  // 横に広いフロア（240マス）を埋めるが、エレベーターは1基1台のまま
+  constructor(sim) { this.s = sim; this.top = 0; this.X0 = 30; this.X1 = 269; }
   setup() {
     const s = this.s;
     mustBuild(s, 'lobby', { f: 0, x: this.X0, x2: this.X1 });
@@ -295,9 +292,9 @@ export class NaivePlayer {
   }
   fill(f) {
     const s = this.s;
-    for (let x = this.X0; x + 16 <= 70; x += 16) s.build(f % 2 ? 'office' : 'condo', { f, x });
-    const w = TYPES[f % 2 ? 'condo' : 'office'].w;
-    for (let x = 74; x + w <= this.X1 + 1; x += w) s.build(f % 2 ? 'condo' : 'office', { f, x });
+    const t1 = f % 2 ? 'office' : 'condo', t2 = f % 2 ? 'condo' : 'office';
+    for (let x = this.X0; x + TYPES[t1].w <= 70; x += TYPES[t1].w) s.build(t1, { f, x });
+    for (let x = 74; x + TYPES[t2].w <= this.X1 + 1; x += TYPES[t2].w) s.build(t2, { f, x });
   }
   act() {
     const s = this.s;
@@ -478,7 +475,7 @@ export function buildWideTower(sim, floors = 60) {
     if (LOBBY_FLOORS.includes(f)) continue;
     for (let x = 0; x + TYPES.office.w <= W; x += TYPES.office.w) sim.build(f % 7 === 3 ? 'condo' : 'office', { f, x });
   }
-  for (let x = 0; x + 16 <= W; x += 16) sim.build('garbage', { f: -2, x });
+  for (let x = 0; x + TYPES.garbage.w <= W; x += TYPES.garbage.w) sim.build('garbage', { f: -2, x });
   sim.star = 2;
   for (const o of [...sim.byType.office, ...sim.byType.condo]) sim.moveIn(o);
   sim.star = 3;

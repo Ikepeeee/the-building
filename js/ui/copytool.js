@@ -1,4 +1,8 @@
-// 一括コピー: ドラッグで範囲を選ぶ → 貼り付け位置に合わせると全体のゴースト → クリック（スマホは確定）で建てる
+// 一括コピー:
+//  1) 範囲をドラッグ、または施設をクリック／タップして選ぶ（選んだ施設は view.marked でチェックマーク表示）
+//  2) 「貼り付けへ」で貼り付けモード。既定ではコピー元と同じ横位置に固定し、上下だけ動かす
+//     （PC は Shift を押している間、スマホは「横も動かす」で自由に動かせる）
+//  3) クリック（スマホは ✓）で建てる
 import { W, MIN_F, MAX_F, fmtMoney } from '../sim/constants.js';
 
 const shiftP = (p, a) => {
@@ -13,10 +17,14 @@ const shiftP = (p, a) => {
 export class CopyTool {
   constructor(app) {
     this.app = app;
+    this.marked = new Set();
+    this.freeX = false; // スマホの「横も動かす」
     this.reset();
   }
 
-  reset() {
+  /** keepMarks: 貼り付けから選択に戻るとき、選んだ施設は残す */
+  reset(keepMarks) {
+    if (!keepMarks) this.marked = new Set();
     this.phase = 'select';
     this.bp = null;
     this.anchor = null;
@@ -39,6 +47,67 @@ export class CopyTool {
     return { x: r.x1, w, f: r.f1, h, ok: true, label: `コピー範囲 ${w}マス×${h}階` };
   }
 
+  // ---------- 施設ごとの選択 ----------
+  toggle(id) {
+    if (this.marked.has(id)) this.marked.delete(id); else this.marked.add(id);
+    this.marked = new Set(this.marked); // renderer に変化が伝わるよう新しい Set にする
+  }
+
+  /** 範囲内に丸ごと入っている施設・移動手段を選択に加える。加えた数を返す */
+  markRange(a, b) {
+    const r = this.rect(a, b);
+    const sim = this.app.sim;
+    let n = 0;
+    const next = new Set(this.marked);
+    for (const o of sim.objs.values()) {
+      if (o.destroyed) continue;
+      const lo = o.lo ?? o.f, hi = o.hi ?? o.f + (o.h || 1) - 1;
+      if (o.x >= r.x1 && o.x + o.w - 1 <= r.x2 && lo >= r.f1 && hi <= r.f2 && !next.has(o.id)) { next.add(o.id); n++; }
+    }
+    this.marked = next;
+    return n;
+  }
+
+  clearMarks() { this.marked = new Set(); }
+
+  /** 選んだ施設の外枠 */
+  marksBox() {
+    const sim = this.app.sim;
+    let x1 = Infinity, x2 = -Infinity, f1 = Infinity, f2 = -Infinity;
+    for (const id of this.marked) {
+      const o = sim.objs.get(id);
+      if (!o) continue;
+      const lo = o.lo ?? o.f, hi = o.hi ?? o.f + (o.h || 1) - 1;
+      x1 = Math.min(x1, o.x); x2 = Math.max(x2, o.x + o.w - 1); f1 = Math.min(f1, lo); f2 = Math.max(f2, hi);
+    }
+    return x1 === Infinity ? null : { x1, x2, f1, f2 };
+  }
+
+  /** 選んだ施設から設計図を作って貼り付けモードへ */
+  startPasteMarked() {
+    const app = this.app, sim = app.sim;
+    for (const id of [...this.marked]) if (!sim.objs.has(id)) this.marked.delete(id);
+    if (!this.marked.size) { app.toasts.show({ text: 'コピーする施設を選んでください', kind: 'info' }); return false; }
+    const box = this.marksBox();
+    let bp = null;
+    try {
+      bp = typeof sim.blueprintOf === 'function' ? sim.blueprintOf([...this.marked]) : sim.blueprint(box);
+    } catch (e) { app.reportError(e, 'sim.blueprintOf'); }
+    if (!bp || !Array.isArray(bp.ops) || !bp.ops.length) {
+      app.toasts.show({ text: 'コピーできませんでした', kind: 'bad' });
+      app.sound.play('error');
+      return false;
+    }
+    this.bp = bp;
+    // 設計図の左下（sim が origin を返せばそれを使う）
+    const o = bp.origin || { f: box.f1, x: box.x1 };
+    this.src = { f1: o.f, x1: o.x, f2: o.f + bp.h - 1, x2: o.x + bp.w - 1 };
+    this.phase = 'paste';
+    this.anchor = null;
+    app.sound.play('click');
+    return true;
+  }
+
   /** 範囲選択を終えた。設計図が取れたら貼り付けモードへ */
   finishSelect(a, b) {
     const app = this.app;
@@ -52,19 +121,23 @@ export class CopyTool {
       return false;
     }
     this.bp = bp;
-    this.src = r;
+    this.src = bp.origin ? { f1: bp.origin.f, x1: bp.origin.x, f2: bp.origin.f + bp.h - 1, x2: bp.origin.x + bp.w - 1 } : r;
     this.phase = 'paste';
     this.anchor = null;
     app.sound.play('click');
     return true;
   }
 
-  /** 貼り付け位置: カーソルの位置が設計図の下の段の中央 */
+  /** 横も自由に動かすか（PC は Shift、スマホはトグル） */
+  get xFree() { return this.freeX || !!this.app.shiftHeld; }
+
+  /** 貼り付け位置: カーソルの位置が設計図の下の段（横はコピー元に固定、自由なら中央） */
   anchorFor(cell) {
     const bp = this.bp;
+    const x = this.xFree || !this.src ? cell.x - Math.floor(bp.w / 2) : this.src.x1;
     return {
       f: Math.max(MIN_F, Math.min(MAX_F - bp.h + 1, cell.f)),
-      x: Math.max(0, Math.min(W - bp.w, cell.x - Math.floor(bp.w / 2))),
+      x: Math.max(0, Math.min(W - bp.w, x)),
     };
   }
 

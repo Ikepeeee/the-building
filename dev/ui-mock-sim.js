@@ -25,6 +25,9 @@ export class Tower {
     this.santa = null;
     this.heli = null;
     this._h = {};
+    // 歩く人（プロフィール確認用）
+    const names = ['山田 太郎', '佐藤 花子', '鈴木 一郎', '高橋 美咲'];
+    for (let i = 0; i < 4; i++) this.active.add({ id: i + 1, kind: 'worker', state: 'walk', stress: i * 20, f: 0, x: 210 + i * 12, vx: (i % 2 ? 1 : -1) * 2, name: names[i], age: 25 + i * 9, job: 'モック商事 営業部' });
   }
   get day() { return Math.floor(this.time / DAY); }
   get hour() { return Math.floor((this.time % DAY) / 60); }
@@ -60,6 +63,7 @@ export class Tower {
         c.dir = Math.sign(c.v);
       });
     }
+    for (const p of this.active) { p.x += p.vx * min; if (p.x < 200 || p.x > 280) p.vx = -p.vx; }
     if (this.heli) {
       const h = this.heli;
       h.x += (h.phase === 'out' ? 1 : -1) * min * 2;
@@ -189,6 +193,25 @@ export class Tower {
     for (let f = o.f; f < o.f + o.h; f++) for (let x = o.x; x < o.x + o.w; x++) this.grid[f][x] = -1;
   }
 
+  personAt(f, x, r = 1) {
+    let best = null, bd = r;
+    for (const p of this.active) { if (Math.round(p.f) !== f) continue; const d = Math.abs(p.x - x); if (d <= bd) { bd = d; best = p; } }
+    return best;
+  }
+  drawPos(p) { return { x: p.x, f: p.f }; }
+  describePerson(p) {
+    return { title: p.name, subtitle: `${p.age}歳・${p.job}`, stats: [['いま', '1Fを歩いている'], ['行き先', '3F オフィス'], ['ストレス', `${Math.round(p.stress)}`], ['今日の予定', '9時出社・12時昼食・18時退社']], mood: p.stress < 30 ? 'good' : p.stress < 60 ? 'fair' : 'bad' };
+  }
+  blueprintOf(ids) {
+    let x1 = 1e9, x2 = -1e9, f1 = 1e9, f2 = -1e9;
+    for (const id of ids) { const o = this.objs.get(id); if (!o) continue; const lo = o.lo ?? o.f, hi = o.hi ?? o.f + o.h - 1; x1 = Math.min(x1, o.x); x2 = Math.max(x2, o.x + o.w - 1); f1 = Math.min(f1, lo); f2 = Math.max(f2, hi); }
+    const bp = this.blueprint({ f1, x1, f2, x2 });
+    const want = new Set(ids);
+    // 選ばれていない施設は除く（フロアは残す）
+    bp.ops = bp.ops.filter((op) => op.tool === 'floor' || [...this.objs.values()].some((o) => want.has(o.id) && o.type === op.tool && (o.lo ?? o.f) - f1 === op.p.f && o.x - x1 === op.p.x));
+    bp.origin = { f: f1, x: x1 };
+    return bp;
+  }
   objAt(f, x) { const v = this.grid[f]?.[x]; return v > 0 ? this.objs.get(v) : null; }
   transportAt(f, x) { const v = this.tgrid[f]?.[x]; return v > 0 ? this.objs.get(v) : null; }
   evalLevel(o) { return ['good', 'fair', 'bad'][o.id % 3]; }
@@ -205,7 +228,10 @@ export class Tower {
     }
     actions.push({ id: 'remove', label: '撤去する', cost: 0, enabled: true, danger: true });
     const reasons = o.cars ? [] : [{ label: 'エレベーター待ちが長い（平均 6分）', level: 'bad' }, { label: '移動距離は短い', level: 'good' }, { label: '近くがややうるさい', level: 'fair' }];
-    return { title: o.brand || t.name, subtitle: `${t.name}・${floorName(o.f)}`, stats, level: o.cars ? null : this.evalLevel(o), actions, reasons };
+    const reviews = t.cat === 'hotel' ? [
+      { stars: 5, text: '眺めが最高でした', day: 3, name: '田中様' }, { stars: 2, text: 'エレベーターが全然来ない', day: 2, name: '伊藤様' },
+      { stars: 4, text: '清潔で快適', day: 1, name: '渡辺様' }, { stars: 3, text: '隣の店が少しうるさい', day: 0, name: '中村様' }] : undefined;
+    return { title: o.brand || t.name, subtitle: `${t.name}・${floorName(o.f)}`, stats, level: o.cars ? null : this.evalLevel(o), actions, reasons, reviews };
   }
   act(o, id) {
     if (id === 'remove') { this._remove(o); this.emit('sound', { name: 'bulldoze' }); return { ok: true }; }

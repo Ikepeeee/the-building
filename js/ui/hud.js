@@ -2,6 +2,9 @@
 import { WEEK, fmtMoney } from '../sim/constants.js';
 import { UI_SPEEDS } from './speeds.js';
 
+export const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+export const isStandalone = () => navigator.standalone === true || matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches;
+
 
 export class Hud {
   constructor(app) {
@@ -27,7 +30,9 @@ export class Hud {
     this.el.night = document.getElementById('night-badge');
     const fs = document.getElementById('btn-fs');
     const canFs = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
-    fs.hidden = !canFs;
+    // iPhone の Safari は全画面 API が無いので、ボタンで「ホーム画面に追加」を案内する。ホーム画面から起動中なら不要
+    fs.hidden = (!canFs && !isIOS()) || isStandalone();
+    if (!canFs) fs.classList.add('fs-guide');
     fs.addEventListener('click', () => app.toggleFullscreen());
   }
 

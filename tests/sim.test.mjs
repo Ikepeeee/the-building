@@ -79,10 +79,10 @@ test('建設: only 制約・★ロック・資金', () => {
   assert.match(s.check('condo', { f: -1, x: 0 }).reason, /地上/);
   assert.match(s.check('hotelSingle', { f: 1, x: 0 }).reason, /★2/);
   s.star = 5;
-  assert.match(s.check('recycling', { f: 0, x: 0 }).reason, /地下/);
+  assert.match(s.check('garbage', { f: 0, x: 0 }).reason, /地下/);
   assert.match(s.check('metro', { f: -2, x: 0 }).reason, /地下/, '3フロア分すべて地下');
   mustBuild(s, 'floor', { f: -1, x: 0, x2: 60 });
-  assert.ok(s.check('recycling', { f: -2, x: 0 }).ok, 'h=2 の地下施設は上の段で支え判定');
+  assert.ok(s.check('garbage', { f: -2, x: 0 }).ok, 'h=2 の地下施設は上の段で支え判定');
   assert.match(s.check('cathedral', { f: 3, x: 0 }).reason, /100F/);
   s.money = 1000;
   assert.match(s.check('office', { f: 1, x: 0 }).reason, /資金/);
@@ -143,10 +143,14 @@ test('建設: エレベーター（スパン・急行の停止階・移動手段
   assert.deepEqual(x.stops, [0, 14, 29]);
   // 延長とカゴ
   assert.equal(s.act(e, 'extendUp').ok, false, '30フロア制限');
-  assert.match(s.act(x, 'extendUp').reason, /フロアがありません/, '空中には延長できない');
-  mustBuild(s, 'floor', { f: 41, x: 0, x2: 40 });
+  // 延長先の階にフロアが無くても、支えがあればシャフトの幅だけ自動で作る
+  const m41 = s.money;
+  assert.equal(s.grid[41][30], 0);
   assert.ok(s.act(x, 'extendUp').ok);
   assert.equal(x.hi, 41);
+  assert.equal(s.grid[41][30], -1, 'フロアを作った');
+  assert.equal(s.grid[41][29], 0, 'シャフトの幅だけ');
+  assert.equal(m41 - s.money, SIM.EXTEND_COST.express + TYPES.express.w * TYPES.floor.costPerTile);
   assert.equal(s.tgrid[42][30], x.id, '機械室も移動');
   assert.equal(s.tgrid[41][30], x.id);
   assert.match(s.check('elevator', { f: 30, f2: 45, x: 60 }).reason, /フロアがありません/, '設置も同じルール');
@@ -355,15 +359,18 @@ test('ホテル: 予約→チェックイン→チェックアウト（宿泊料
   assert.ok(booked.some((o) => o.inCount > 0), 'チェックイン済み');
   assert.ok(s.pop > 0, '宿泊客は人口に数える');
   // チェックアウト後は要清掃になる（清掃が速いと11時には終わっているので途中で確かめる）
-  let sawDirty = false;
-  while (s.time < DAY + 11 * 60) { s.step(1); if (rooms.some((o) => o.dirty || o.cleaner)) sawDirty = true; }
+  let sawDirty = false, sawMaid = false;
+  while (s.time < DAY + 11 * 60) {
+    s.step(0.25);
+    if (rooms.some((o) => o.dirty || o.cleaner)) sawDirty = true;
+    if ([...s.active].some((p) => p.kind === 'maid')) sawMaid = true;
+  }
   assert.ok(rooms.every((o) => !o.occupied), '全室チェックアウト');
   assert.ok(s.money > m0, '宿泊料');
   assert.ok(s.dayLog.hotel > 0);
   assert.ok(!ev.message.some((m) => m.kind === 'money'), 'お金の通知は0時のまとめだけ');
   assert.ok(sawDirty, '要清掃');
   // メイドが実際に移動して清掃する
-  let sawMaid = false;
   for (let i = 0; i < 60 * 8; i++) { s.step(1); if ([...s.active].some((p) => p.kind === 'maid')) sawMaid = true; }
   assert.ok(sawMaid, 'メイドが移動する');
   assert.equal(rooms.filter((o) => o.dirty).length, 0, '清掃完了');
@@ -652,7 +659,7 @@ test('★: starProgress と条件', () => {
   assert.deepEqual(sp.reqs.map((r) => r.done), [true, false]);
   assert.equal(sp.reqs[1].label, '警備室');
   s.star = 3;
-  assert.deepEqual(s.starProgress().reqs.map((r) => r.label).slice(1), ['医療センター', 'リサイクルセンター', 'VIPの高評価']);
+  assert.deepEqual(s.starProgress().reqs.map((r) => r.label).slice(1), ['医療センター', 'ごみ・リサイクルセンター（ごみが溢れていない）', 'VIPの高評価']);
   s.star = 5;
   assert.equal(s.starProgress().next, 'TOWER');
 });
@@ -667,8 +674,8 @@ test('パネル: describe / act', () => {
   for (const id of ['addCar', 'removeCar', 'extendUp', 'extendDown', 'remove']) assert.ok(d.actions.find((a) => a.id === id), id);
   assert.equal(d.actions.find((a) => a.id === 'removeCar').enabled, false);
   assert.ok(d.actions.find((a) => a.id === 'remove').danger);
-  assert.equal(d.actions.find((a) => a.id === 'extendDown').enabled, false, 'B1F にフロアがない');
-  assert.equal(d.actions.find((a) => a.id === 'extendUp').enabled, false, '7F にフロアがない');
+  assert.equal(d.actions.find((a) => a.id === 'extendDown').enabled, true, 'B1F のフロアも一緒に作れる');
+  assert.equal(d.actions.find((a) => a.id === 'extendUp').enabled, true, '7F のフロアも一緒に作れる');
   assert.ok(d.stats.some(([k]) => k === '平均待ち時間'));
   mustBuild(s, 'office', { f: 2, x: 40 });
   const o = s.objAt(2, 40);
@@ -681,7 +688,7 @@ test('パネル: describe / act', () => {
   assert.equal(s.act(o, 'remove').ok, false);
   // 人も describe できる
   const p = s.newPerson('visitor', null);
-  assert.equal(s.describe(p).title, '来客');
+  assert.equal(s.describe(p).title, p.name); assert.match(s.describe(p).subtitle, /歳/);
   for (const t of Object.keys(TYPES)) {
     if (t === 'floor') continue;
     const fake = s.makeObj(t, 0, 0, TYPES[t].w || 4, TYPES[t].h || 1);
@@ -892,10 +899,12 @@ test('到達不能フラグ: unreachable と describe の警告', () => {
   mustBuild(s, 'lobby', { f: 0, x: 0, x2: 40 });
   mustBuild(s, 'floor', { f: 1, x: 0, x2: 40 });
   mustBuild(s, 'office', { f: 1, x: 0 });
-  mustBuild(s, 'office', { f: 0, x: 45 });
+  mustBuild(s, 'office', { f: 0, x: 41 });
+  mustBuild(s, 'office', { f: 0, x: 60 });
   const o = s.objAt(1, 0);
   assert.equal(o.unreachable, true);
-  assert.equal(s.objAt(0, 45).unreachable, false);
+  assert.equal(s.objAt(0, 41).unreachable, false, 'ロビーと続いている');
+  assert.equal(s.objAt(0, 60).unreachable, true, 'フロアの切れ目の向こうには行けない');
   const d = s.describe(o);
   assert.equal(d.warning, 'ロビーから行けません');
   assert.ok(d.stats.some(([, v]) => v === 'ロビーから行けません'));
@@ -981,7 +990,8 @@ test('v2 §1: 横幅150の古いセーブ（移動手段が grid に入ってい
       { id: 1, type: 'lobby', f: 0, x: 0, w: 100, h: 1 },
       { id: 2, type: 'elevator', f: 0, x: 50, w: 4, h: 6, lo: 0, hi: 5, cars: [0, 3] },
       { id: 3, type: 'office', f: 1, x: 0, w: 9, h: 1, occupied: true, eval: 5 },
-      { id: 4, type: 'office', f: 1, x: 9, w: 9, h: 1, occupied: true },   // 新しい幅10だと id3 と重なる → 読み飛ばす
+      { id: 4, type: 'office', f: 1, x: 9, w: 9, h: 1, occupied: true },   // 新しい幅10だと id3 と重なる → 1マス右にずらす
+      { id: 8, type: 'office', f: 2, x: 0, w: 9, h: 1 }, { id: 9, type: 'office', f: 2, x: 9, w: 9, h: 1 }, { id: 10, type: 'office', f: 2, x: 9 + 9, w: 9, h: 1 }, // 3つ目は入らない
       { id: 5, type: 'office', f: 2, x: 20, w: 9, h: 1, occupied: false },
       { id: 6, type: 'stairs', f: 2, x: 80, w: 8, h: 1 },
       { id: 7, type: 'condo', f: 3, x: 0, w: 16, h: 1, occupied: true },
@@ -997,10 +1007,10 @@ test('v2 §1: 横幅150の古いセーブ（移動手段が grid に入ってい
   assert.equal(e.type, 'elevator'); assert.equal(e.cars.length, 2);
   assert.equal(s.tgrid[6][50], e.id, '機械室');
   assert.equal(s.objAt(1, 0).w, TYPES.office.w, '新しい幅で置き直す');
-  assert.equal(s.objs.has(4), false, '入らない施設は読み飛ばす');
+  assert.equal(s.objs.get(4).x, 10, '幅が変わってもずらして残す（撤去されない）');
   assert.equal(s.objAt(1, 9), s.objAt(1, 0));
-  assert.equal(s.objAt(1, 12), null, '旧 id4 の場所は空きフロア');
-  assert.equal(s.grid[1][12], -1);
+  assert.equal(s.objAt(1, 12).id, 4);
+  assert.ok(s.objs.has(8) && s.objs.has(9));
   assert.equal(s.transportAt(2, 82).type, 'stairs');
   assert.ok(s.objAt(1, 0).brand, '古いセーブにも社名を付ける');
   s.step(DAY);
@@ -1038,10 +1048,17 @@ test('v2 §4: resizeElevator（check/build・ghost・費用・縮めると乗客
   let r = s.check('resizeElevator', { id: e.id, lo: 0, hi: 15 });
   assert.ok(r.ok); assert.deepEqual(r.ghost, { x: 60, w: 4, lo: 0, hi: 15 }); assert.equal(r.cost, 0);
   r = s.check('resizeElevator', { id: e.id, lo: 0, hi: 25 });
-  assert.match(r.reason, /フロアがありません/);
+  assert.ok(r.ok, 'フロアが無い階へも、下から順に作れば支えがある');
+  assert.equal(r.cost, 5 * SIM.EXTEND_COST.elevator + 5 * 4 * TYPES.floor.costPerTile);
   for (let f = 21; f <= 25; f++) mustBuild(s, 'floor', { f, x: 40, x2: 100 });
   r = s.check('resizeElevator', { id: e.id, lo: 0, hi: 25 });
-  assert.ok(r.ok); assert.equal(r.cost, 5 * SIM.EXTEND_COST.elevator);
+  assert.ok(r.ok); assert.equal(r.cost, 5 * SIM.EXTEND_COST.elevator, 'フロアがあればフロア代はかからない');
+  // 支えの無い階へは伸ばせない（地下は上から吊るす。通常は起きないので grid を直接作って確かめる）
+  for (const f of [-2, -3]) s.grid[f].fill(-1, 200, 221);
+  s.revision++;
+  mustBuild(s, 'elevator', { f: -3, f2: -2, x: 210 });
+  const be = s.transportAt(-2, 211);
+  assert.match(s.check('resizeElevator', { id: be.id, lo: -3, hi: -1 }).reason, /支えもありません/);
   // 乗客がいるまま縮める
   const ps = [];
   for (let i = 0; i < 10; i++) { const p = s.newPerson('visitor', null); s.spawnAt(p, s.entrances[0]); s.startTrip(p, 18, 50, (pp) => s.leave(pp)); ps.push(p); }
@@ -1074,7 +1091,7 @@ test('v2 §4: カゴの加速・減速と、ちょうど階に止まること（
     const vs = [];
     let t = 0;
     while (!done && t < 60) {
-      s.step(0.25); t += 0.25;
+      s.step(0.01); t += 0.01;
       const c = e.cars[0];
       vs.push(c.v);
       if (c.state === 'doors') assert.equal(c.pos, Math.round(c.pos), 'ドアが開くのは階ちょうど');
@@ -1095,7 +1112,28 @@ test('v2 §4: カゴの加速・減速と、ちょうど階に止まること（
   assert.ok(ride(m).t < a.t, '高速モーターで早く着く');
   // ドア時間
   assert.ok(m.s.setElevatorConfig(m.e, { door: 'long' }).ok);
-  assert.equal(m.e.doorTime, 0.6);
+  assert.equal(m.e.doorTime, 0.2);
+  // 実在の速さ（1フロア=4m）: 通常 105m/分、急行 600m/分、高速モーターの急行 1000m/分
+  assert.equal(a.vmax, 105 / 4);
+  assert.equal(b.vmax, 600 / 4);
+  // 1倍速（1フレーム 0.1分）で滑らか、8倍速（1フレーム 0.8分）でも行き過ぎずに階ちょうどで止まる
+  for (const frame of [0.1, 0.8]) {
+    const x = make('express', { speed: 2 });
+    assert.equal(x.e.vmax, 1000 / 4);
+    const p = x.s.newPerson('visitor', null);
+    p.f = 0; p.x = x.e.x - 0.5; p.state = 'walk'; x.s.active.add(p);
+    let arrived = null;
+    x.s.startTrip(p, 29, x.e.x - 1, (pp) => { arrived = pp.f; x.s.leave(pp); });
+    let prev = x.e.cars[0].pos;
+    for (let t = 0; t < 30 && arrived === null; t += frame) {
+      x.s.step(frame);
+      const c = x.e.cars[0];
+      assert.ok(Math.abs(c.pos - prev) <= x.e.vmax * frame + 1e-6, '1フレームの移動は最高速以内');
+      assert.ok(c.pos >= x.e.sLo - 1e-9 && c.pos <= x.e.sHi + 1e-9, '行き過ぎない');
+      prev = c.pos;
+    }
+    assert.equal(arrived, 29);
+  }
   assert.equal(m.s.setElevatorConfig(m.e, { door: 'slow' }).ok, false);
 });
 
@@ -1357,7 +1395,7 @@ test('§13: ごみ集積所（地下・ビル全体で共有・収集車 4:30〜
   assert.match(s.check('garbage', { f: 3, x: 64 }).reason, /地下/);
   for (const f of [-1, -2]) mustBuild(s, 'floor', { f, x: 40, x2: 120 });
   mustBuild(s, 'garbage', { f: -2, x: 40 });
-  mustBuild(s, 'garbage', { f: -2, x: 56 });
+  mustBuild(s, 'garbage', { f: -2, x: 64 });
   const [g1, g2] = s.byType.garbage;
   assert.equal(g1.h, 2);
   assert.equal(s.garbageCap, 2 * TYPES.garbage.capacity);
@@ -1380,12 +1418,6 @@ test('§13: ごみ集積所（地下・ビル全体で共有・収集車 4:30〜
   assert.ok(Math.abs((m - s.money) - bags * SIM.GARBAGE.fee) <= SIM.GARBAGE.fee * 2, '袋に比例した料金');
   s.step(15);
   assert.equal(g1.truck, null, '5:30 以降は null');
-  // リサイクルセンターがあると安い
-  mustBuild(s, 'recycling', { f: -2, x: 72 });
-  stepTo(s, 2, 4); s.step(25);
-  const b2 = Math.round(s.garbageBags), m2 = s.money;
-  stepTo(s, 2, 5); s.step(25);
-  assert.ok(Math.abs((m2 - s.money) - b2 * SIM.GARBAGE.feeRecycle) <= SIM.GARBAGE.feeRecycle * 2);
   // 満杯
   s.garbageBags = s.garbageCap;
   s.hourlyGarbage();
@@ -1535,6 +1567,181 @@ test('歩行は事象駆動: drawPos は毎フレーム正しい位置を返す'
   assert.ok(p.stress > 0, `長く歩くとストレス ${p.stress}`);
 });
 
+// ====================================================================
+// §14
+// ====================================================================
+test('§14 徒歩: 40マス/分（80m/分）で、横幅480を12分で歩く', () => {
+  assert.equal(SIM.WALK, 40);
+  const s = new Tower({ seed: 120 });
+  mustBuild(s, 'lobby', { f: 0, x: 0, x2: W - 1 });
+  const p = s.newPerson('visitor', null);
+  p.f = 0; p.x = 0.5; p.state = 'walk'; s.active.add(p);
+  let t = null;
+  s.startTrip(p, 0, W - 0.5, () => { t = s.time; s.leave(p); });
+  const t0 = s.time;
+  s.step(20);
+  assert.ok(t !== null && Math.abs(t - t0 - (W - 1) / 40) <= 0.25, `${t - t0}分`);
+});
+
+test('§14 フロアの区画: 切れ目は歩けない・移動手段がつなぐ区画どうしだけ行ける', () => {
+  const s = new Tower({ seed: 121 });
+  s.money = 1e9;
+  mustBuild(s, 'lobby', { f: 0, x: 0, x2: 120 });
+  mustBuild(s, 'floor', { f: 1, x: 0, x2: 40 });
+  mustBuild(s, 'floor', { f: 1, x: 60, x2: 120 }); // 41〜59 は切れ目
+  mustBuild(s, 'stairs', { f: 0, x: 10 });
+  mustBuild(s, 'office', { f: 1, x: 80 });
+  const right = s.objAt(1, 80);
+  assert.notEqual(s.nodeOf(1, 20), s.nodeOf(1, 80), '別の区画');
+  assert.equal(s.route(1, 1, 20, 85), null, '同じ階でも切れ目の向こうへは行けない');
+  assert.equal(right.unreachable, true);
+  // 右の区画にも階段を付けると、1F を経由して行ける
+  mustBuild(s, 'stairs', { f: 0, x: 100 });
+  assert.equal(right.unreachable, false);
+  const legs = s.route(1, 1, 20, 85);
+  assert.deepEqual(legs.map((l) => [l.kind, l.from, l.to]), [['stairs', 1, 0], ['stairs', 0, 1]]);
+  // 歩いている人は区画の外に出ない
+  const p = s.newPerson('visitor', null);
+  p.f = 1; p.x = 20; p.state = 'walk'; s.active.add(p);
+  let done = false;
+  assert.ok(s.startTrip(p, 1, 85, () => { done = true; s.leave(p); }));
+  for (let i = 0; i < 400 && !done; i++) {
+    s.step(0.25);
+    if (!done && p.state === 'walk') {
+      const d = s.drawPos(p);
+      if (Math.abs(d.f - Math.round(d.f)) < 1e-9) assert.ok(s.nodeOf(Math.round(d.f), d.x) >= 0, `宙を歩かない x=${d.x.toFixed(2)} f=${d.f}`);
+    }
+  }
+  assert.ok(done);
+  // フロアをつなぐと直接行ける
+  mustBuild(s, 'floor', { f: 1, x: 41, x2: 59 });
+  assert.deepEqual(s.route(1, 1, 20, 85), []);
+});
+
+test('§14 退去で施設が消えない（長期・大量の退去・買い戻し・チェックアウト）', () => {
+  const s = new Tower({ seed: 122 });
+  s.money = 1e9; s.star = 2;
+  mustBuild(s, 'lobby', { f: 0, x: 0, x2: 149 });
+  for (let f = 1; f <= 25; f++) mustBuild(s, 'floor', { f, x: 0, x2: 149 });
+  mustBuild(s, 'elevator', { f: 0, f2: 25, x: 70 }); // カゴ1台: 評価が悪く、退去が続く
+  for (let f = 1; f <= 25; f++) {
+    for (let x = 0; x + OW <= 70; x += OW) s.build(f % 3 === 0 ? 'hotelSingle' : 'office', { f, x });
+    for (let x = 74; x + 16 <= 150; x += 16) s.build('condo', { f, x });
+  }
+  for (const o of [...s.byType.office, ...s.byType.condo]) s.moveIn(o);
+  const ids = new Set(s.objs.keys());
+  const cells = (o) => { let n = 0; for (let f = o.f; f < o.f + o.h; f++) for (let x = o.x; x < o.x + o.w; x++) if (s.grid[f][x] === o.id) n++; return n; };
+  let outs = 0;
+  s.on('message', (m) => { if (/退去/.test(m.text)) outs++; });
+  stepTo(s, 21, 0);
+  assert.ok(outs > 0, '退去が起きている');
+  assert.deepEqual(new Set(s.objs.keys()), ids, '施設の数と id は変わらない');
+  for (const id of ids) { const o = s.objs.get(id); assert.ok(!o.dead && !o.destroyed); if (!o.cars) assert.equal(cells(o), o.w * o.h, `${o.type} のマスが残る`); }
+});
+
+test('§14 人のプロフィール・personAt・describePerson', () => {
+  const s = new Tower({ seed: 123 });
+  smallTower(s, 5);
+  mustBuild(s, 'office', { f: 3, x: 40 });
+  const o = s.objAt(3, 40);
+  s.moveIn(o);
+  const w = o.members[0];
+  assert.ok(w.name && w.age >= 22 && w.age <= 62);
+  assert.ok(w.job.includes(o.brand), '勤め先の社名');
+  const n0 = w.name;
+  assert.equal(s.describePerson(w).title, n0);
+  assert.equal(w.name, n0, '同じ人は同じ名前');
+  // personAt: 歩いている人
+  const p = s.newPerson('visitor', null);
+  s.spawnAt(p, s.entrances[0], 70);
+  s.startTrip(p, 4, 80, () => s.leave(p));
+  const d = s.drawPos(p);
+  assert.equal(s.personAt(d.f, d.x + 0.5), p);
+  assert.equal(s.personAt(d.f + 3, d.x), null);
+  const info = s.describePerson(p);
+  for (const k of ['title', 'subtitle', 'stats', 'mood']) assert.ok(k in info, k);
+  assert.ok(info.stats.some(([k]) => k === '今日の予定'));
+  assert.ok(info.stats.some(([k, v]) => k === '行き先' && /5F/.test(v)));
+  assert.ok(['good', 'fair', 'bad'].includes(info.mood));
+  // マンションの家族は同じ名字
+  mustBuild(s, 'condo', { f: 4, x: 40 });
+  const c = s.objAt(4, 40); s.moveIn(c);
+  const fam = c.members.map((m) => m.name.split(' ')[0]);
+  assert.equal(new Set(fam).size, 1);
+  assert.equal(fam[0] + '家', c.brand);
+});
+
+test('§14 ホテルのレビュー（チェックアウトごと・最新20件・保存・describe）', () => {
+  const s = hotelTower(124, true);
+  stepTo(s, 6, 12);
+  const rooms = s.hotels.filter((o) => (o.reviews || []).length);
+  assert.ok(rooms.length > 5, 'レビューがつく');
+  const o = rooms[0];
+  for (const r of o.reviews) { assert.ok(r.stars >= 1 && r.stars <= 5); assert.ok(r.text && r.name); assert.ok(r.day >= 1); }
+  const d = s.describe(o);
+  assert.ok(d.stats.some(([k, v]) => k === 'レビュー' && /★\d\.\d/.test(v)));
+  assert.deepEqual(d.reviews[0], o.reviews[o.reviews.length - 1], '新しい順');
+  // 原因に合わせた文面: ゴキブリ
+  o.infested = true; o.stayStress = 0; o.stayWait = 0; o.stayName = 'テスト 太郎';
+  s.addReview(o);
+  const last = o.reviews[o.reviews.length - 1];
+  assert.ok(last.stars <= 3); assert.match(last.text, /ゴキブリ|虫/);
+  for (let i = 0; i < 30; i++) { o.stayName = 'x'; s.addReview(o); }
+  assert.equal(o.reviews.length, 20, '最新20件まで');
+  const r = new Tower(); r.restore(JSON.parse(JSON.stringify(s.serialize())));
+  assert.deepEqual(r.objs.get(o.id).reviews, o.reviews, '保存される');
+});
+
+test('§14 blueprintOf: 選んだ施設と、支えに必要な最小限のフロア', () => {
+  const s = new Tower({ seed: 125 });
+  s.money = 1e9;
+  mustBuild(s, 'floor', { f: 0, x: 0, x2: 300 });
+  for (let f = 1; f <= 4; f++) mustBuild(s, 'floor', { f, x: 0, x2: 60 });
+  mustBuild(s, 'office', { f: 1, x: 0 }); mustBuild(s, 'office', { f: 1, x: 20 });
+  mustBuild(s, 'condo', { f: 3, x: 0 });
+  mustBuild(s, 'stairs', { f: 1, x: 40 });
+  const a = s.objAt(1, 0), c = s.objAt(3, 0), st = s.transportAt(1, 40);
+  const bp = s.blueprintOf([a.id, c.id, st.id]);
+  const tools = bp.ops.map((o) => o.tool);
+  assert.ok(tools.includes('office') && tools.includes('condo') && tools.includes('stairs'));
+  assert.equal(tools.filter((t) => t === 'office').length, 1, '選んでいない施設は含めない');
+  assert.equal(bp.h, 3); // 1F〜3F（間の2Fは支えとして入る）
+  const floor2 = bp.ops.filter((o) => o.tool === 'floor' && o.p.f === 1);
+  assert.ok(floor2.length, '間の階のフロア');
+  assert.ok(floor2.every((o) => o.p.x2 - o.p.x + 1 <= 16 + 8), '最小限の幅');
+  const ok = s.buildBatch(bp.ops, { f: 1, x: 200 });
+  assert.ok(ok.ok, ok.reason);
+  assert.equal(s.objAt(1, 200).type, 'office');
+  assert.equal(s.objAt(3, 200).type, 'condo');
+  assert.equal(s.blueprintOf([]).ops.length, 0);
+  // origin: 手順の (0,0) の絶対位置。同じ場所に貼ると元と重なる＝元の x にそろう
+  assert.deepEqual(bp.origin, { f: 1, x: 0 });
+  const bp2 = s.blueprintOf([c.id]);
+  assert.deepEqual(bp2.origin, { f: 3, x: 0 }, '1つだけなら、その施設が左下');
+  assert.equal(bp2.ops.find((o) => o.tool === 'condo').p.f, 0);
+  const bp3 = s.blueprintOf([s.objAt(1, 20).id, c.id]);
+  assert.deepEqual(bp3.origin, { f: 1, x: 0 }, '支えのフロアが左・下に伸びた分も含む');
+  assert.deepEqual(s.blueprint({ f1: 1, x1: 5, f2: 3, x2: 30 }).origin, { f: 1, x: 5 });
+});
+
+test('§14 ごみ・リサイクルセンター: 旧 recycling と旧 w16 の garbage を読み込む・★4 の条件', () => {
+  const rows = { 0: '1'.repeat(150), '-1': '1'.repeat(150), '-2': '1'.repeat(150) };
+  const d = { v: 3, seed: 1, time: 700, money: 1e6, star: 3, rows, nextId: 10,
+    objs: [{ id: 1, type: 'lobby', f: 0, x: 0, w: 60, h: 1 }, { id: 2, type: 'recycling', f: -2, x: 0, w: 24, h: 2 }, { id: 3, type: 'garbage', f: -2, x: 40, w: 16, h: 2, bags: 5 }] };
+  const s = new Tower(); s.restore(d);
+  const g = s.byType.garbage;
+  assert.equal(g.length, 2);
+  assert.ok(g.some((o) => o.id === 2 && o.x === 0 && o.w === TYPES.garbage.w), 'recycling → 同じ場所の garbage');
+  assert.ok(g.some((o) => o.id === 3 && o.w === TYPES.garbage.w), '旧 garbage を新しい幅で');
+  assert.equal(TYPES.recycling, undefined);
+  assert.equal(s.check('recycling', { f: -2, x: 100 }).ok, false);
+  s.star = 3;
+  const req = () => s.starReqs(4).find((r) => /ごみ/.test(r.label));
+  assert.equal(req().done, true);
+  s.garbageBags = s.garbageCap;
+  assert.equal(req().done, false, '溢れていると満たさない');
+});
+
 test('性能: 横幅480・30フロア・人口6000超の横長ビルで 1 ゲーム日', () => {
   const s = new Tower({ seed: 113 });
   s.money = 1e12; s.star = 3;
@@ -1552,7 +1759,7 @@ test('性能: 横幅480・30フロア・人口6000超の横長ビルで 1 ゲー
     for (let x = 0; x + OW <= W; x += OW) s.build(f % 6 === 3 ? 'condo' : 'office', { f, x });
   }
   for (const f of [-1, -2]) mustBuild(s, 'floor', { f, x: 0, x2: W - 1 });
-  for (let x = 0; x + 16 <= 160; x += 16) mustBuild(s, 'garbage', { f: -2, x });
+  for (let x = 0; x + TYPES.garbage.w <= 168; x += TYPES.garbage.w) mustBuild(s, 'garbage', { f: -2, x });
   s.star = 2;
   for (const o of [...s.byType.office, ...s.byType.condo]) s.moveIn(o);
   s.star = 3;

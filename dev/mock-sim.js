@@ -134,9 +134,9 @@ export class MockTower {
     this.elevators = [eA, eX, eB, eC, eD];
 
     // 地下
-    this.add('recycling', -5, 14);
+    this.add('garbage', -5, 14, { fill: 0.5, bags: 300 });
     this.floor(-5, 10, 63); this.floor(-4, 10, 63);
-    this.add('recycling', -5, 80); this.floor(-5, 78, 120); this.floor(-4, 78, 120);
+    this.add('garbage', -5, 80, { fill: 0.2, bags: 120 }); this.floor(-5, 78, 120); this.floor(-4, 78, 120);
     this.add('metro', -3, 18);
     for (const f of [-3, -2, -1]) this.floor(f, 10, 63);
     this.row(-1, R0, R1, ['shop', 'fastfood', 'stairs']);
@@ -247,7 +247,7 @@ export class MockTower {
     const gs = [[0, null], [0.35, { phase: 'in', t: 0.55 }], [0.7, { phase: 'load', t: 0.3 }], [1, { phase: 'out', t: 0.45 }], [1.4, null], [0.2, { phase: 'load', t: 0.8 }]];
     for (let i = 0; i < gs.length; i++) {
       const [fill, truck] = gs[i];
-      this.add('garbage', -2, S0 + i * 16, { fill, bags: Math.round(fill * 80), truck: tk ? { phase: tk, t: 0.5 } : truck });
+      this.add('garbage', -2, S0 + i * 24, { fill, bags: Math.round(fill * 80), truck: tk ? { phase: tk, t: 0.5 } : truck });
     }
     this.floor(-1, S0, S1 - 1); this.floor(-2, S0, S1 - 1);
     for (let i = 0; i < 8; i++) this.add('parking', -3, S0 + i * 24, { used: [0, 3, 6, 9, 12, 12, 1, 7][i] });

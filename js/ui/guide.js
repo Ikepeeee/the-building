@@ -12,7 +12,7 @@ const STEPS = [
   { label: 'エレベーターを縦にドラッグして階をつなぐ', done: (s) => has(s, 'elevator', 'express', 'stairs', 'escalator') },
   { label: 'オフィスかマンションを建てる', done: (s) => has(s, 'office', 'condo') },
   { label: '入居を待つ（倍速ボタンで早送り。建てた直後は工事中）', done: (s) => (s.pop | 0) > 0 },
-  { label: '地下にごみ集積所を建てる（サービス。ビル全体のごみを集める）', done: (s) => has(s, 'garbage') },
+  { label: '地下にごみ・リサイクルセンターを建てる（サービス。ビル全体のごみを集めて分別）', done: (s) => has(s, 'garbage') },
   { label: '混んできたらエレベーターを選んでカゴを増やす', done: (s) => { for (const o of s.objs.values()) if (o.cars && o.cars.length >= 2) return true; return false; } },
 ];
 

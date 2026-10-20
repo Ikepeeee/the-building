@@ -23,7 +23,7 @@ export const BuildMixin = {
     return [lo, lo];
   },
   // 置けないなら理由を返す。self はそのエレベーター自身（伸縮時）
-  checkTransportCells(type, x, w, lo, hi, self = 0) {
+  checkTransportCells(type, x, w, lo, hi, self = 0, freshCells = null) {
     if (x < 0 || x + w > W) return '建設範囲の外です';
     const [r0, r1] = this.transportRows(type, lo, hi);
     for (let f = r0; f <= r1; f++) {
@@ -32,8 +32,9 @@ export const BuildMixin = {
         if (t !== 0 && t !== self) return '他の移動手段と重なっています';
       }
     }
+    const fresh = freshCells ? new Set(freshCells.map(([f, xx]) => f * 1000 + xx)) : null;
     for (let f = lo; f <= hi; f++) {
-      for (let xi = x; xi < x + w; xi++) if (this.cell(f, xi) === 0) return `${floorName(f)}にフロアがありません`;
+      for (let xi = x; xi < x + w; xi++) if (this.cell(f, xi) === 0 && !(fresh && fresh.has(f * 1000 + xi))) return `${floorName(f)}にフロアがありません`;
     }
     return null;
   },
@@ -394,7 +395,60 @@ export const BuildMixin = {
         ops.push({ tool: o.type, p: { f: o.lo - fLo, f2: o.hi - fLo, x: o.x - xLo, cars: o.cars.length, config: { ...o.config, skip: o.config.skip.map((s) => s - fLo) } } });
       } else if (o.f >= fLo && o.f + 1 <= fHi) ops.push({ tool: o.type, p: { f: o.f - fLo, x: o.x - xLo } });
     }
-    return { w: xHi - xLo + 1, h: fHi - fLo + 1, ops };
+    return { w: xHi - xLo + 1, h: fHi - fLo + 1, origin: { f: fLo, x: xLo }, ops };
+  },
+
+  // 選んだ施設（と移動手段）だけを、支えるのに必要な最小限のフロアと一緒に写す。blueprint と同じ形
+  blueprintOf(ids) {
+    const list = [...(ids || [])].map((id) => this.objs.get(typeof id === 'object' && id ? id.id : id)).filter((o) => o && !o.dead && !o.destroyed);
+    if (!list.length) return { w: 0, h: 0, origin: null, ops: [] };
+    const need = new Map(); // f -> Set<x>
+    const mark = (f, x) => { if (f < MIN_F || f > MAX_F || x < 0 || x >= W) return; if (!need.has(f)) need.set(f, new Set()); need.get(f).add(x); };
+    for (const o of list) {
+      const r0 = ELEV.has(o.type) ? o.lo : o.f, r1 = ELEV.has(o.type) ? o.hi : TRANSPORT.has(o.type) ? o.f + 1 : o.f + o.h - 1;
+      for (let f = r0; f <= r1; f++) for (let x = o.x; x < o.x + o.w; x++) mark(f, x);
+    }
+    // 支え: 地上は写す範囲のいちばん下の段から、その列の印までの元の構造を写す（地下は上下逆）
+    let bLo = Infinity, bHi = -Infinity;
+    for (const f of need.keys()) { bLo = Math.min(bLo, f); bHi = Math.max(bHi, f); }
+    const cols = new Map();
+    for (const [f, xs] of need) for (const x of xs) { if (!cols.has(x)) cols.set(x, []); cols.get(x).push(f); }
+    for (const [x, fs] of cols) {
+      const top = Math.max(...fs), bot = Math.min(...fs);
+      if (top >= 0) for (let f = Math.max(bLo, 0); f < top; f++) if (this.cell(f, x) !== 0) mark(f, x);
+      if (bot < 0) for (let f = bot + 1; f <= Math.min(bHi, -1); f++) if (this.cell(f, x) !== 0) mark(f, x);
+    }
+    let fLo = Infinity, fHi = -Infinity, xLo = Infinity, xHi = -Infinity;
+    for (const [f, xs] of need) for (const x of xs) { fLo = Math.min(fLo, f); fHi = Math.max(fHi, f); xLo = Math.min(xLo, x); xHi = Math.max(xHi, x); }
+    const order = [];
+    for (let f = Math.max(0, fLo); f <= fHi; f++) order.push(f);
+    for (let f = Math.min(-1, fHi); f >= fLo; f--) order.push(f);
+    const ops = [];
+    const facs = list.filter((o) => !TRANSPORT.has(o.type));
+    for (const f of order) {
+      const xs = need.get(f);
+      if (xs) {
+        const sorted = [...xs].sort((a, b) => a - b);
+        for (let i = 0; i < sorted.length;) {
+          let j = i;
+          while (j + 1 < sorted.length && sorted[j + 1] === sorted[j] + 1) j++;
+          ops.push({ tool: 'floor', p: { f: f - fLo, x: sorted[i] - xLo, x2: sorted[j] - xLo } });
+          i = j + 1;
+        }
+      }
+      for (const o of facs) {
+        if (o.f !== f) continue;
+        if (o.type === 'lobby') ops.push({ tool: 'lobby', p: { f: f - fLo, x: o.x - xLo, x2: o.x + o.w - 1 - xLo } });
+        else ops.push({ tool: o.type, p: { f: f - fLo, x: o.x - xLo } });
+      }
+    }
+    for (const o of list) {
+      if (!TRANSPORT.has(o.type)) continue;
+      if (ELEV.has(o.type)) ops.push({ tool: o.type, p: { f: o.lo - fLo, f2: o.hi - fLo, x: o.x - xLo, cars: o.cars.length, config: { ...o.config, skip: o.config.skip.map((v) => v - fLo) } } });
+      else ops.push({ tool: o.type, p: { f: o.f - fLo, x: o.x - xLo } });
+    }
+    // origin: 手順の座標の (0,0) が元のビルのどこか（貼り付けのプレビューを元の x にそろえるため）
+    return { w: xHi - xLo + 1, h: fHi - fLo + 1, origin: { f: fLo, x: xLo }, ops };
   },
 
   checkBatch(ops, origin) { return this._runBatch(ops, origin, false); },

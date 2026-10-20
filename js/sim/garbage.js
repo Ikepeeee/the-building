@@ -31,6 +31,9 @@ export const GarbageMixin = {
     }
   },
 
+  // ★4 の条件: センターがあり、ごみが溢れていない
+  garbageOk() { return (this.byType.garbage || []).length > 0 && this.garbageProblem() !== 'full'; },
+
   garbageProblem() {
     if (!(this.byType.garbage || []).length) return 'none';
     return this.garbageBags >= this.garbageCap - 1e-6 ? 'full' : null;
@@ -94,7 +97,7 @@ export const GarbageMixin = {
       this.spreadGarbage();
       this.updateGarbageFlags();
       if (bags) {
-        const fee = this.byType.recycling.length ? SIM.GARBAGE.feeRecycle : SIM.GARBAGE.fee;
+        const fee = SIM.GARBAGE.fee;
         const v = bags * fee;
         this.spend(v);
         this.dayLog.garbage = (this.dayLog.garbage || 0) + v;

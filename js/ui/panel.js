@@ -22,13 +22,17 @@ export class Panel {
     this.shape = '';
     this.dom = null;
     this.actions = new Map(); // id -> 最新の action
+    this.person = null;       // 人のプロフィールを表示中
+    this.reviewsAll = false;
     this.el.addEventListener('pointerdown', () => app.userGesture());
   }
 
-  get open() { return this.id !== null; }
+  get open() { return this.id !== null || this.person !== null; }
 
   show(id) {
-    if (this.id !== id) this.shape = '';
+    if (this.id !== id) { this.shape = ''; this.reviewsAll = false; }
+    this.person = null;
+    this.app.selectedPerson = null;
     this.id = id;
     this.sig = '';
     this.el.hidden = false;
@@ -36,9 +40,24 @@ export class Panel {
     this.app.onPanelChange?.();
   }
 
-  close() {
-    if (this.id === null) return;
+  /** 人のプロフィールを表示する */
+  showPerson(p) {
     this.id = null;
+    this.app.selectedId = null;
+    this.person = p;
+    this.shape = '';
+    this.sig = '';
+    this.el.hidden = false;
+    this.refresh();
+    this.app.onPanelChange?.();
+  }
+
+  close() {
+    if (this.id === null && this.person === null) return;
+    this.id = null;
+    this.person = null;
+    this.app.selectedPerson = null;
+    this.app.follow = false;
     this.el.hidden = true;
     this.el.textContent = '';
     this.dom = null;
@@ -52,7 +71,24 @@ export class Panel {
     return this.id === null || !sim || !sim.objs ? null : sim.objs.get(this.id) || null;
   }
 
+  refreshPerson() {
+    const sim = this.app.sim;
+    const p = this.person;
+    let d = null;
+    try { d = typeof sim.describePerson === 'function' ? sim.describePerson(p) : null; } catch (e) { console.error(e); }
+    if (!d) { this.close(); return; }
+    const sig = JSON.stringify(d) + this.app.follow;
+    if (sig === this.sig) return;
+    this.sig = sig;
+    if (this.shape !== 'person' || !this.dom) { this.shape = 'person'; this.build(d, [], false, true); }
+    this.cons = null;
+    this.update({ ...d, level: d.mood || d.level }, [], false, true);
+    setText(this.dom.follow, this.app.follow ? '⏹ 追いかけるのをやめる' : '📍 追いかける');
+    this.dom.follow.classList.toggle('btn-primary', !this.app.follow);
+  }
+
   refresh() {
+    if (this.person) { this.refreshPerson(); return; }
     if (this.id === null) return;
     const o = this.obj();
     if (!o) { this.close(); return; }
@@ -82,7 +118,7 @@ export class Panel {
   }
 
   /** 骨組みを作る（タイトルかアクションの組み合わせが変わったときだけ） */
-  build(d, actions, isElev) {
+  build(d, actions, isElev, isPerson) {
     const el = this.el;
     el.textContent = '';
     const bar = mk('div', 'titlebar');
@@ -118,7 +154,22 @@ export class Panel {
     const whyH = mk('div', 'p-reasons-h', '評価の内訳');
     const whyList = mk('ul');
     why.append(whyH, whyList);
-    body.append(sub, cons, warn, level, why, stats, box);
+    // ホテルのレビュー
+    const rev = mk('div', 'p-reviews');
+    const revH = mk('div', 'p-reviews-h');
+    const revList = mk('ul');
+    const revMore = mk('button', 'btn btn-small p-reviews-more');
+    revMore.addEventListener('click', () => { this.reviewsAll = !this.reviewsAll; this.dom.revSig = ''; this.sig = ''; this.refresh(); });
+    rev.append(revH, revList, revMore);
+    body.append(sub, cons, warn, level, why, rev, stats, box);
+    let follow = null;
+    if (isPerson) {
+      const ex = mk('div', 'p-elev');
+      follow = mk('button', 'btn btn-primary', '📍 追いかける');
+      follow.addEventListener('click', () => { this.app.setFollow(!this.app.follow); this.sig = ''; this.refresh(); });
+      ex.append(follow);
+      body.insertBefore(ex, stats);
+    }
     if (isElev) {
       const ex = mk('div', 'p-elev');
       const cfg = mk('button', 'btn btn-primary', '⚙ 運転設定・停止階・カゴ');
@@ -129,11 +180,11 @@ export class Panel {
       body.insertBefore(ex, stats);
     }
     el.append(bar, body);
-    this.dom = { title, sub, warn, cons, consT, consFill, level, stats, box, btns, rows: [], why, whyList, whySig: '' };
+    this.dom = { title, sub, warn, cons, consT, consFill, level, stats, box, btns, rows: [], why, whyList, whySig: '', rev, revH, revList, revMore, revSig: '', follow };
   }
 
   /** 中身をその場で書き換える */
-  update(d, actions, unreachable) {
+  update(d, actions, unreachable, isPerson) {
     const dom = this.dom;
     setText(dom.title, d.title);
     setText(dom.sub, d.subtitle);
@@ -148,7 +199,7 @@ export class Panel {
     if (d.level && LEVEL[d.level]) {
       dom.level.hidden = false;
       dom.level.className = `p-level ${d.level}`;
-      setText(dom.level, `${LEVEL[d.level][1]} 評価: ${LEVEL[d.level][0]}`);
+      setText(dom.level, `${LEVEL[d.level][1]} ${isPerson ? '気分' : '評価'}: ${LEVEL[d.level][0]}`);
     } else dom.level.hidden = true;
     const reasons = Array.isArray(d.reasons) ? d.reasons.filter((r) => r && r.label) : [];
     const rsig = JSON.stringify(reasons);
@@ -162,6 +213,7 @@ export class Panel {
       }
     }
     dom.why.hidden = !reasons.length;
+    this.updateReviews(Array.isArray(d.reviews) ? d.reviews.filter(Boolean) : []);
     const stats = Array.isArray(d.stats) ? d.stats.filter(Boolean) : [];
     while (dom.rows.length < stats.length) {
       const tr = mk('tr');
@@ -187,6 +239,31 @@ export class Panel {
       if (r.b.disabled !== dis) r.b.disabled = dis;
     }
     dom.box.hidden = !actions.length;
+  }
+
+  /** レビュー: 平均の★と最新3件（「すべて見る」で全件） */
+  updateReviews(list) {
+    const dom = this.dom;
+    const sig = JSON.stringify(list) + this.reviewsAll;
+    if (sig === dom.revSig) return;
+    dom.revSig = sig;
+    dom.rev.hidden = !list.length;
+    if (!list.length) return;
+    const stars = (n) => '★'.repeat(Math.max(0, Math.min(5, Math.round(n)))) + '☆'.repeat(5 - Math.max(0, Math.min(5, Math.round(n))));
+    const avg = list.reduce((a, r) => a + (+r.stars || 0), 0) / list.length;
+    dom.revH.textContent = '';
+    dom.revH.append(mk('span', 'r-title', 'レビュー'), mk('span', 'r-stars', stars(avg)), mk('span', 'r-avg', `${avg.toFixed(1)}（${list.length}件）`));
+    // 新しい順に
+    const sorted = [...list].sort((a, b) => (b.day ?? 0) - (a.day ?? 0));
+    const shown = this.reviewsAll ? sorted : sorted.slice(0, 3);
+    dom.revList.textContent = '';
+    for (const r of shown) {
+      const li = mk('li');
+      li.append(mk('span', 'r-stars', stars(r.stars || 0)), mk('span', 'r-text', `「${r.text || ''}」`), mk('span', 'r-who', [r.name, r.day != null ? `${r.day + 1}日目` : ''].filter(Boolean).join('・')));
+      dom.revList.append(li);
+    }
+    dom.revMore.hidden = list.length <= 3;
+    dom.revMore.textContent = this.reviewsAll ? '最新3件だけ表示' : `すべて見る（${list.length}件）`;
   }
 
   async doAction(actionId) {

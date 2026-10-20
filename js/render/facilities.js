@@ -475,38 +475,6 @@ DRAW.medical = (p, v) => {
   if (v.n > 5) standFig(p, 34, fy - 1, FIG, 0, 1);
 };
 
-DRAW.recycling = (p, v) => {
-  const W = p.w, fy = p.h - 3;
-  shell(p, '#6c6a5a', '#4a483e', {});
-  for (let x = 25; x < W; x += 25) p.r(x, 1, 1, fy - 1, '#5c5a4c');
-  p.r(1, 3, W - 2, 3, '#8a8070'); p.r(1, 6, W - 2, 1, '#5a5448');
-  for (let x = 10; x < W; x += 30) { p.r(x, 2, 2, 5, '#a09888'); p.r(x + 12, 9, 10, 1, '#f0f8d0'); p.r(x + 12, 8, 10, 1, '#555'); }
-  // 圧縮機
-  p.box(8, 18, 44, fy - 18, '#d8b020');
-  for (let x = 9; x < 51; x += 4) { p.r(x, 19, 2, 3, INK); }
-  p.box(16, 25, 14, 9, '#3a3a3a'); p.r(17, 26, 12, 7, '#5a6a6a');
-  p.box(36, 26, 10, 14, '#b89010'); p.r(39, 30, 4, 1, INK);
-  p.r(20, 10, 4, 8, '#7a7468'); p.r(14, 8, 16, 3, '#7a7468');
-  // コンベア
-  const bin0 = W - 56;
-  p.box(56, 32, bin0 - 60, 4, '#3a3a3a');
-  for (let x = 58; x < bin0 - 6; x += 4) p.p(x, 33, '#9a9a9a');
-  for (const x of [60, 96, bin0 - 10]) p.r(x, 36, 2, fy - 36, '#4a4a4a');
-  const items = ['#4a90d0', '#40a040', '#e0c040', '#c0c0c0', '#a05a30'];
-  for (let i = 0; i < 9; i++) p.r(62 + i * 8, 29 + (i % 2), 4, 3 - (i % 2), items[i % items.length]);
-  // 分別箱
-  const bc = ['#3a7ad0', '#3aa050', '#e0b020'];
-  for (let i = 0; i < 3; i++) {
-    const x = bin0 + i * 18;
-    p.box(x, 28, 16, fy - 28, bc[i]); p.r(x - 1, 27, 18, 2, shade(bc[i], -0.3));
-    p.r(x + 6, 33, 4, 1, '#ffffff'); p.r(x + 5, 34, 1, 3, '#ffffff'); p.r(x + 10, 34, 1, 3, '#ffffff'); p.r(x + 6, 37, 4, 1, '#ffffff');
-  }
-  // 積まれたベール
-  p.box(60, 12, 14, 9, '#8a7a5a'); p.box(76, 12, 14, 9, '#5a7a9a'); p.box(68, 3 + 6, 0, 0, '#000');
-  p.r(60, 21, 30, 1, '#2a2a22');
-  const pos = [54, 100, 120, bin0 - 6];
-  for (let i = 0; i < Math.min(v.n, 4); i++) hatFig(p, pos[i], fy - 1, '#f0d020', i % 2);
-};
 
 DRAW.metro = (p, v) => {
   const W = p.w;
@@ -896,6 +864,42 @@ function bag(p, bx, by, c) {
   p.r(bx + 3, by - 6, 1, 2, '#000'); p.p(bx + 2, by - 6, '#000'); p.p(bx + 4, by - 6, '#000');
 }
 export const GARBAGE_BAGS = 13;
+// 分別ライン: 上段にコンベアと選別作業員、下段に色分けしたリサイクル箱と圧縮機
+function sortingLine(p, x0, x1, fy, v) {
+  const w = x1 - x0;
+  p.r(x0 - 2, 1, 2, fy - 1, '#6a6a62');
+  p.sign('RECYCLE', x0 + 18, 1, '#ffffff', '#2f6ab0');
+  // 中二階の床とコンベア
+  p.r(x0, 22, w, 2, '#5a5a52');
+  p.box(x0 + 2, 17, w - 22, 4, '#2e2e30'); for (let x = x0 + 4; x < x0 + w - 22; x += 4) p.p(x, 18, '#8a8a8a');
+  const it = ['#4a90d0', '#40a040', '#e0c040', '#c0c0c0', '#a05a30', '#e05050'];
+  for (let i = 0, x = x0 + 5; x < x0 + w - 26; x += 7, i++) p.r(x, 15 + (i & 1), 3 + (i % 2), 2 - (i & 1) + 1, it[i % it.length]);
+  for (const lx of [x0 + 6, x0 + w - 26]) p.r(lx, 21, 1, 1, '#3a3a3a');
+  // 投入ホッパー（右上）
+  p.r(x0 + w - 20, 10, 16, 1, '#000'); p.line(x0 + w - 20, 10, x0 + w - 16, 18, '#000'); p.line(x0 + w - 4, 10, x0 + w - 8, 18, '#000');
+  p.r(x0 + w - 18, 11, 12, 3, '#7a7a72'); p.r(x0 + w - 16, 14, 8, 3, '#6a6a62');
+  // 選別の作業員（中二階）
+  for (const wx of [x0 + 12, x0 + 26]) {
+    p.r(wx, 10, 3, 1, '#f0d020'); p.r(wx + 1, 11, 2, 2, '#1a1a1a'); p.r(wx, 13, 3, 4, '#3a8a4a'); p.r(wx + 1, 14, 1, 1, '#e8e8a0');
+  }
+  // 色分けの箱（缶・びん・ペット・紙）
+  const bins = [['#3a6ad0', 'CAN'], ['#3aa050', 'BIN'], ['#e0b020', 'PET'], ['#c04040', 'PAP']];
+  const bw = 11;
+  for (let i = 0; i < 4; i++) {
+    const bx = x0 + 2 + i * (bw + 2);
+    p.box(bx, fy - 12, bw, 12, bins[i][0]); p.r(bx - 1, fy - 13, bw + 2, 2, shade(bins[i][0], -0.35));
+    p.r(bx + 3, fy - 8, 5, 1, '#ffffff'); p.r(bx + 2, fy - 7, 1, 3, '#ffffff'); p.r(bx + 8, fy - 7, 1, 3, '#ffffff'); p.r(bx + 3, fy - 4, 5, 1, '#ffffff');
+  }
+  // 圧縮機とベール
+  const cx = x0 + 4 * (bw + 2) + 4;
+  if (cx + 14 < x1) {
+    p.box(cx, fy - 18, x1 - cx, 18, '#d8b020');
+    for (let x = cx + 1; x < x1 - 1; x += 4) p.r(x, fy - 17, 2, 3, '#202020');
+    p.box(cx + 3, fy - 11, Math.min(10, x1 - cx - 6), 7, '#3a3a3a');
+  }
+  p.box(x0 + 4, 26, 12, 8, '#8a7a5a'); p.box(x0 + 18, 26, 12, 8, '#5a7a9a'); p.r(x0 + 4, 30, 26, 1, '#3a3a32');
+}
+
 DRAW.garbage = (p, v) => {
   const W = p.w, H = p.h, fy = H - 3;
   shell(p, '#8a8a80', '#5a5a52', {});
@@ -913,11 +917,12 @@ DRAW.garbage = (p, v) => {
   p.r(10, 6, 2, fy - 6, '#f0d020'); for (let y = 8; y < fy; y += 6) p.r(10, y, 2, 3, '#202020');
   p.sign('GOMI', 40, 9, '#ffffff', '#3a7a3a');
   // ごみ置き場（右）: フェンスとコンテナ
-  const gx = 72;
-  p.r(gx, 22, W - gx - 1, 1, '#6a6a60'); // 中二階
-  p.r(gx, 23, W - gx - 1, 1, '#4a4a42');
-  for (let x = gx; x < W - 1; x += 6) { p.r(x, 24, 1, fy - 24, '#9a9a90'); }
-  p.r(gx, 24, W - gx - 1, 1, '#9a9a90');
+  const gx = 72, gx1 = W >= 180 ? 130 : W - 1;   // ごみ置き場の範囲（その右は分別ライン）
+  p.r(gx, 22, gx1 - gx, 1, '#6a6a60'); // 中二階
+  p.r(gx, 23, gx1 - gx, 1, '#4a4a42');
+  for (let x = gx; x < gx1; x += 6) { p.r(x, 24, 1, fy - 24, '#9a9a90'); }
+  p.r(gx, 24, gx1 - gx, 1, '#9a9a90');
+  if (gx1 < W - 1) sortingLine(p, gx1 + 2, W - 2, fy, v);
   for (const cx of [gx + 30, gx + 42]) { p.box(cx, fy - 9, 11, 9, '#2f7a46'); p.r(cx - 1, fy - 10, 13, 1, '#1f5a32'); }
   p.box(gx + 4, 14, 8, 8, '#3a6ad0'); p.box(gx + 14, 14, 8, 8, '#e0b020'); p.box(gx + 24, 14, 8, 8, '#3aa050');
   // 袋の山（下の段から、あふれると中二階・通路にも）

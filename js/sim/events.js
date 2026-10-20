@@ -146,12 +146,11 @@ export const EventsMixin = {
   assignSearch(g) {
     const b = this.bomb;
     if (!b || b.found) return false;
-    const r = this.routeFrom(g.f);
     let best = null, bd = Infinity;
     const base = g.home ? g.home.f : g.f;
     for (const f of b.floors) {
       if (b.searched.has(f) || b.assigned.has(f) || Math.abs(f - base) > SIM.GUARD_RANGE) continue;
-      const d = f === g.f ? 0 : r.dist[FI(f)];
+      const d = this.dist(g.f, f, g.x);
       if (d < bd) { bd = d; best = f; }
     }
     if (best === null) return false;
@@ -188,12 +187,11 @@ export const EventsMixin = {
   assignFire(g) {
     const F = this.fire;
     if (!F || !F.burning.size) return false;
-    const r = this.routeFrom(g.f);
     let best = null, bc = Infinity;
     const base = g.home ? g.home.f : g.f;
     for (const o of F.burning) {
       if (Math.abs(o.f - base) > SIM.GUARD_RANGE) continue;
-      const d = o.f === g.f ? 0 : r.dist[FI(o.f)];
+      const d = this.dist(g.f, o.f, g.x, o.x + o.w / 2);
       if (d === Infinity) continue;
       const c = d + (o.fighters || 0) * 20;
       if (c < bc) { bc = c; best = o; }
@@ -530,7 +528,7 @@ export const EventsMixin = {
     if (this.vip) return false;
     if (!force) {
       if (this.star !== 3 || this.flags.vipOk || this.day < this.flags.vipNext) return false;
-      if (this.pop < STAR_POP[4] || !this.byType.medical.length || !this.byType.recycling.length) return false;
+      if (this.pop < STAR_POP[4] || !this.byType.medical.length || !this.garbageOk()) return false;
     }
     if (!this.byType.hotelSuite.length) return false;
     const arrive = force ? this.time + 30 : (this.day + 1) * DAY + 17 * 60 + this.rand(60);
@@ -547,11 +545,11 @@ export const EventsMixin = {
   vipArrive() {
     const v = this.vip;
     if (!v || v.stage !== 'announced') return;
-    const suites = this.byType.hotelSuite.filter((o) => !o.occupied && !o.burning && this.entranceDist(o.f) < Infinity);
+    const suites = this.byType.hotelSuite.filter((o) => !o.occupied && !o.burning && this.entranceDist(o.f, o.x + o.w / 2) < Infinity);
     if (!suites.length) { this.vipFail('空いているスイートルームがありませんでした'); return; }
     suites.sort((a, b) => (a.dirty + a.infested * 2) - (b.dirty + b.infested * 2) || this.evalScore(a) - this.evalScore(b));
     const suite = suites[0];
-    const ent = this.pickEntranceTo(suite.f);
+    const ent = this.pickEntranceTo(suite.f, suite.x + suite.w / 2);
     const p = this.newPerson('vip', suite);
     suite.occupied = true; suite.vipHold = true; suite.checkedIn = 0; suite.members = [p];
     Object.assign(v, { stage: 'stay', suite, p, dirty: !!suite.dirty, infested: !!suite.infested });
@@ -618,7 +616,7 @@ export const EventsMixin = {
     const cath = this.byType.cathedral[0];
     if (!cath) return false;
     const ent = this.lobbyEntrance();
-    if (!ent || this.dist(ent.f, cath.f) === Infinity) {
+    if (!ent || this.dist(ent.f, cath.f, ent.x0, cath.x + cath.w / 2) === Infinity) {
       if (!force) {
         this.flags.weddingNext = this.day + 1;
         this.msg('ロビーから大聖堂までの経路がないため、結婚式は延期されました', 'bad', cath.f, cath.x + cath.w / 2);
