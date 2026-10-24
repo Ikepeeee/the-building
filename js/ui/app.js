@@ -19,6 +19,8 @@ import { Perf } from './perf.js';
 import { TRANSPORT_TYPES } from '../sim/constants.js';
 
 const TRANSPORT_SET = new Set(TRANSPORT_TYPES);
+// ツールのヒントで、施設の説明の代わりに出す文
+const HINT_DESC = { bridge: '下に支えがなくても架けられる橋。片方の端は建物につなぐ' };
 
 const MAX_FRAME_SEC = 0.1; // 1フレームで進める実時間の上限（スパイク対策）
 const isTouchDevice = () => matchMedia('(hover: none) and (pointer: coarse)').matches;
@@ -359,10 +361,11 @@ export class App {
     } else if (key === 'bulldoze') s = touch ? '撤去: 横になぞって範囲を選び ✓ で確定（返金なし）' : '撤去: 横にドラッグした範囲を撤去（施設があれば確認します。返金なし）';
     else {
       const t = TYPES[key];
-      const how = t.drag === 'h' ? (touch ? '横になぞって設置' : '横にドラッグして設置')
+      const how = t.drag === 'h' ? (touch ? (key === 'bridge' ? '横になぞって仮置き → ✓ で確定' : '横になぞって設置') : '横にドラッグして設置')
         : t.drag === 'v' ? (touch ? '縦になぞって範囲を決める' : '縦にドラッグして範囲を決める')
           : touch ? '指を置いて滑らせると位置合わせ（指の少し上に出ます）→ ✓ で確定' : 'クリックで設置（カーソルが中心。隣の施設にぴったり寄せます／Shift で寄せない）';
-      s = touch ? `${t.name}: ${how}。${t.desc || ''}` : `${t.name}: ${t.desc || ''}｜${how}`;
+      const desc = HINT_DESC[key] || t.desc || '';
+      s = touch ? `${t.name}: ${how}。${desc}` : `${t.name}: ${desc}｜${how}`;
     }
     this.toolbar.setHint(s);
   }
@@ -511,7 +514,8 @@ export class App {
     if (d.touch) {
       const same = d.start.f === d.cur.f && d.start.x === d.cur.x;
       if (same && this.pending && this.inGhost(this.pending.ghost, d.cur)) { this.confirmPending(); return; }
-      if (d.tool === 'bulldoze') { this.setPending(d.tool, p); return; }
+      // 撤去と連絡通路（高い・宙に架ける）は、スマホでは仮置き → ✓ で確定（◀▶▲▼で微調整できる）
+      if (d.tool === 'bulldoze' || d.tool === 'bridge') { this.setPending(d.tool, p, { x: p.x, f: p.f }); return; }
     }
     if (d.tool === 'bulldoze' && !d.touch) { this.confirmBulldoze(p); return; }
     this.doBuild(d.tool, p);
@@ -822,6 +826,12 @@ export class App {
       }
       cell = this.clampCell({ x: cell.x + dx, f: cell.f + df });
       this.setCopyPending(cell, true);
+    } else if (TYPES[pd.tool] && TYPES[pd.tool].drag === 'h') {
+      // 横ドラッグの仮置き（連絡通路など）: 両端ごと動かす
+      const a = Math.min(pd.p.x, pd.p.x2 ?? pd.p.x), b = Math.max(pd.p.x, pd.p.x2 ?? pd.p.x);
+      const ddx = Math.max(-a, Math.min(W - 1 - b, dx));
+      const p = { ...pd.p, x: pd.p.x + ddx, x2: (pd.p.x2 ?? pd.p.x) + ddx, f: Math.max(MIN_F, Math.min(MAX_F, pd.p.f + df)) };
+      this.setPending(pd.tool, p, { x: p.x, f: p.f }, true);
     } else if (pd.tool !== 'bulldoze') {
       const t = TYPES[pd.tool];
       const p = { ...pd.p, x: Math.max(0, Math.min(W - (t.w || 1), pd.p.x + dx)), f: Math.max(MIN_F, Math.min(MAX_F - (t.h || 1) + 1, pd.p.f + df)) };

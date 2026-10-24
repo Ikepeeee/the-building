@@ -1043,3 +1043,24 @@ export function craneSprite() {
   p.r(51, 0, 2, 3, k); p.line(51, 0, 4, 3, '#3a3a3a'); p.line(52, 0, 62, 3, '#3a3a3a');
   return p.c;
 }
+
+// ---- 連絡通路のタイル（8x24）。kind: 0 中、1 左端、2 右端。par で斜材の向きを交互に ----
+export function bridgeTile(kind, par, night) {
+  const p = new Painter(TILE_W, FLOOR_H);
+  const steel = '#5a626c', dk = '#2a2e34', hi = '#9aa4ae';
+  // 上部トラス（上弦・下弦・斜材）
+  p.r(0, 0, 8, 1, dk); p.r(0, 1, 8, 1, hi); p.r(0, 5, 8, 1, steel); p.r(0, 6, 8, 1, dk);
+  p.line(par ? 0 : 7, 5, par ? 7 : 0, 1, steel);
+  // ガラス（後ろの空が透けるよう半透明）
+  p.g.save(); p.g.globalAlpha = night ? 0.8 : 0.4; p.g.fillStyle = night ? '#ffe2a0' : '#bfe4f4'; p.g.fillRect(0, 7, 8, 13); p.g.restore(); p._fs = null;
+  p.g.save(); p.g.globalAlpha = night ? 0.25 : 0.55; p.g.fillStyle = '#ffffff'; p.g.fillRect(2 + par, 8, 1, 4); p.g.restore(); p._fs = null;
+  if (night && par) { p.r(3, 7, 2, 1, '#fff2b0'); }
+  p.r(0, 14, 8, 1, steel);            // 手すり
+  if (par === 0) p.r(0, 7, 1, 13, steel); // 方立て
+  // 床（デッキ）と下面
+  p.r(0, 20, 8, 1, '#c8ccd2'); p.r(0, 21, 8, 1, '#8a9098'); p.r(0, 22, 8, 1, steel); p.r(0, 23, 8, 1, dk);
+  if (par) p.p(4, 22, hi);
+  if (kind === 1) { p.r(0, 0, 2, 24, dk); p.r(1, 1, 1, 22, steel); }
+  if (kind === 2) { p.r(6, 0, 2, 24, dk); p.r(6, 1, 1, 22, steel); }
+  return p.c;
+}

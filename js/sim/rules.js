@@ -16,7 +16,7 @@ export const TRANSIENT = new Set(['visitor', 'vip', 'bride', 'groom', 'weddingGu
 export const STAFF_KIND = { security: 'guard', housekeeping: 'maid' };
 
 // 燃える施設（移動手段とロビー以外）
-export const burnable = (t) => !TRANSPORT.has(t) && t !== 'lobby';
+export const burnable = (t) => !TRANSPORT.has(t) && t !== 'lobby' && t !== 'bridge';
 
 export const isStopFloor = (type, f) => type !== 'express' || f < 0 || LOBBY_SET.has(f);
 

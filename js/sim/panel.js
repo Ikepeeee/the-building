@@ -152,6 +152,9 @@ export const PanelMixin = {
       stats.push(['ビル全体', `使用 ${this.parkingUsed} / ${this.parkingSpaces}台`]);
       if (this.parkingShort > 0) { stats.push(['不足', `${this.parkingShort}台`]); d0warn = `駐車場が${this.parkingShort}台足りません`; }
       stats.push(['維持費', `${fmtMoney(SIM.MAINT.parking)}/日`]);
+    } else if (o.type === 'bridge') {
+      stats.push(['長さ', `${o.w}マス（${o.w * 2}m）`]);
+      stats.push(['役割', '歩いて渡れる通路（上の階は支えない）']);
     } else if (o.type === 'lobby') {
       stats.push(['幅', `${o.w}マス`]);
       if (o.f === 0) stats.push(['役割', '出入口']);

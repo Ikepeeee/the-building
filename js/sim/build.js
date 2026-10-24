@@ -12,8 +12,10 @@ export const BuildMixin = {
   tcell(f, x) { const row = this.tgrid[f]; return row && x >= 0 && x < W ? row[x] : 0; },
   supported(f, x) {
     if (f === 0) return true;
-    return f > 0 ? this.cell(f - 1, x) !== 0 : this.cell(f + 1, x) !== 0;
+    const c = f > 0 ? this.cell(f - 1, x) : this.cell(f + 1, x);
+    return c !== 0 && !this.isBridgeCell(c); // 連絡通路は上の階を支えない
   },
+  isBridgeCell(c) { if (c <= 0) return false; const o = this.objs.get(c); return !!o && o.type === 'bridge'; },
   objAt(f, x) { const c = this.cell(f, Math.floor(x)); return c > 0 ? this.objs.get(c) || null : null; },
   transportAt(f, x) { const c = this.tcell(f, Math.floor(x)); return c > 0 ? this.objs.get(c) || null : null; },
 
@@ -34,7 +36,11 @@ export const BuildMixin = {
     }
     const fresh = freshCells ? new Set(freshCells.map(([f, xx]) => f * 1000 + xx)) : null;
     for (let f = lo; f <= hi; f++) {
-      for (let xi = x; xi < x + w; xi++) if (this.cell(f, xi) === 0 && !(fresh && fresh.has(f * 1000 + xi))) return `${floorName(f)}にフロアがありません`;
+      for (let xi = x; xi < x + w; xi++) {
+        const c = this.cell(f, xi);
+        if (c === 0 && !(fresh && fresh.has(f * 1000 + xi))) return `${floorName(f)}にフロアがありません`;
+        if (this.isBridgeCell(c)) return '連絡通路には移動手段を置けません';
+      }
     }
     return null;
   },
@@ -96,6 +102,17 @@ export const BuildMixin = {
     const ghost = { x: x1, w, f, h: 1 };
     const fail = (reason) => ({ ok: false, reason, cost: 0, ghost });
     if (f < MIN_F || f > MAX_F || w < 1) return fail('建設範囲の外です');
+    if (tool === 'bridge') {
+      // 支えは要らないが、少なくとも片方の端が同じ階の構造に接していること
+      if (f < 1) return fail('連絡通路は2F以上に架けます');
+      for (let x = x1; x <= x2; x++) {
+        if (this.cell(f, x) !== 0) return fail('すでに構造があるところには架けられません');
+        if (this.tcell(f, x) !== 0) return fail('移動手段と重なっています');
+      }
+      if (this.cell(f, x1 - 1) === 0 && this.cell(f, x2 + 1) === 0) return fail('どちらの端も建物に接していません');
+      const cost = T.costPerTile * w;
+      return { ok: true, reason: '', cost, ghost, apply: () => this._place('bridge', f, x1, w, 1) };
+    }
     if (tool === 'lobby') {
       if (!LOBBY_SET.has(f)) return fail('ロビーは1Fと15F・30F…90Fにのみ置けます');
       if (w < (T.minW || 1)) return fail(`ロビーは幅${T.minW}マス以上必要です`);
@@ -143,7 +160,7 @@ export const BuildMixin = {
     for (let r = 0; r < h; r++) {
       for (let xi = x; xi < x + w; xi++) {
         const c = this.cell(f + r, xi);
-        if (c > 0) return fail('他の施設と重なっています');
+        if (c > 0) return fail(this.isBridgeCell(c) ? '連絡通路の上には施設を置けません' : '他の施設と重なっています');
         if (c === 0) fresh++;
       }
     }
@@ -165,7 +182,10 @@ export const BuildMixin = {
     if (f + 1 > MAX_F) return fail('上の階がありません');
     const r = this.checkTransportCells(tool, x, w, f, f);
     if (r) return fail(r);
-    for (let xi = x; xi < x + w; xi++) if (this.cell(f + 1, xi) === 0) return fail('上の階にもフロアが必要です');
+    for (let xi = x; xi < x + w; xi++) {
+      if (this.cell(f + 1, xi) === 0) return fail('上の階にもフロアが必要です');
+      if (this.isBridgeCell(this.cell(f + 1, xi))) return fail('連絡通路には移動手段を置けません');
+    }
     return { ok: true, reason: '', cost: T.cost, ghost, apply: () => this._placeTransport(tool, x, f, f) };
   },
 
@@ -319,7 +339,10 @@ export const BuildMixin = {
     if (!o || o.dead) return;
     o.dead = true;
     if (TRANSPORT.has(o.type)) this.clearTransportCells(o);
-    else for (let f = o.f; f < o.f + o.h; f++) for (let xi = o.x; xi < o.x + o.w; xi++) if (this.grid[f][xi] === o.id) this.grid[f][xi] = -1;
+    else {
+      const to = o.type === 'bridge' ? 0 : -1; // 連絡通路を撤去すると何も残らない
+      for (let f = o.f; f < o.f + o.h; f++) for (let xi = o.x; xi < o.x + o.w; xi++) if (this.grid[f][xi] === o.id) this.grid[f][xi] = to;
+    }
     for (const p of o.members.slice()) this.purge(p, false);
     o.members = [];
     o.occupied = false;
@@ -376,19 +399,22 @@ export const BuildMixin = {
     const facs = [...this.objs.values()].filter((o) => !TRANSPORT.has(o.type) && !o.destroyed && inX(o) && o.f >= fLo && o.f + o.h - 1 <= fHi);
     for (const f of order) {
       const row = this.grid[f];
+      const solid = (x) => row[x] !== 0 && !this.isBridgeCell(row[x]);
       for (let x = xLo; x <= xHi;) {
-        if (row[x] === 0) { x++; continue; }
+        if (!solid(x)) { x++; continue; }
         let e = x;
-        while (e + 1 <= xHi && row[e + 1] !== 0) e++;
+        while (e + 1 <= xHi && solid(e + 1)) e++;
         ops.push({ tool: 'floor', p: { f: f - fLo, x: x - xLo, x2: e - xLo } });
         x = e + 1;
       }
       for (const o of facs) {
-        if (o.f !== f) continue;
+        if (o.f !== f || o.type === 'bridge') continue;
         if (o.type === 'lobby') ops.push({ tool: 'lobby', p: { f: f - fLo, x: o.x - xLo, x2: o.x + o.w - 1 - xLo } });
         else ops.push({ tool: o.type, p: { f: f - fLo, x: o.x - xLo } });
       }
     }
+    // 連絡通路は両側の棟ができてから（端が接している必要がある）
+    for (const o of facs) if (o.type === 'bridge') ops.push({ tool: 'bridge', p: { f: o.f - fLo, x: o.x - xLo, x2: o.x + o.w - 1 - xLo } });
     for (const o of this.objs.values()) {
       if (!TRANSPORT.has(o.type) || !inX(o)) continue;
       if (ELEV.has(o.type)) {
@@ -426,6 +452,8 @@ export const BuildMixin = {
     for (let f = Math.min(-1, fHi); f >= fLo; f--) order.push(f);
     const ops = [];
     const facs = list.filter((o) => !TRANSPORT.has(o.type));
+    // 連絡通路の下にはフロアを作らない（橋そのものを架ける）
+    for (const o of facs) if (o.type === 'bridge' && need.has(o.f)) for (let x = o.x; x < o.x + o.w; x++) need.get(o.f).delete(x);
     for (const f of order) {
       const xs = need.get(f);
       if (xs) {
@@ -438,11 +466,12 @@ export const BuildMixin = {
         }
       }
       for (const o of facs) {
-        if (o.f !== f) continue;
+        if (o.f !== f || o.type === 'bridge') continue;
         if (o.type === 'lobby') ops.push({ tool: 'lobby', p: { f: f - fLo, x: o.x - xLo, x2: o.x + o.w - 1 - xLo } });
         else ops.push({ tool: o.type, p: { f: f - fLo, x: o.x - xLo } });
       }
     }
+    for (const o of facs) if (o.type === 'bridge') ops.push({ tool: 'bridge', p: { f: o.f - fLo, x: o.x - xLo, x2: o.x + o.w - 1 - xLo } });
     for (const o of list) {
       if (!TRANSPORT.has(o.type)) continue;
       if (ELEV.has(o.type)) ops.push({ tool: o.type, p: { f: o.lo - fLo, f2: o.hi - fLo, x: o.x - xLo, cars: o.cars.length, config: { ...o.config, skip: o.config.skip.map((v) => v - fLo) } } });

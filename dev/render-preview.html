@@ -80,6 +80,7 @@ if (q.get('ghost') === '1') {
   view.ghost = { x: 30, w: 9, f: 21, h: 1, ok: true, label: 'オフィス $40,000', type: 'office' };
 }
 if (q.get('ghost') === '2') view.ghost = { x: 100, w: 16, f: 6, h: 1, ok: false, label: 'ここには建てられません' };
+if (q.get('ghost') === '4') view.ghost = { x: 132, w: 18, f: 8, h: 1, ok: true, type: 'bridge', label: '連絡通路 $54,000' };
 if (q.get('ghost') === '3') view.ghost = { x: 50, w: 4, lo: 2, hi: 12, ok: true, label: 'エレベーター 2F〜13F' };
 if (q.get('ghosts') === '1') view.ghosts = [
   { x: 150, w: 9, f: 13, h: 1, ok: true, type: 'office', label: 'コピー 3件 $480,000' }, { x: 159, w: 16, f: 13, h: 1, ok: true, type: 'condo' },

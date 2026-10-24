@@ -242,6 +242,9 @@ export class MockTower {
     // §12: 工事中とごみ収集室
     const D = 100000;
     const cons = (o, pr) => { if (o) { o.constructStart = this.time - pr * D; o.constructUntil = this.time + (1 - pr) * D; o.inCount = 0; } return o; };
+    // §15: 連絡通路（本館と右の棟のあいだ）
+    this.add('bridge', 6, 132, { w: 18 }); this.add('bridge', 10, 132, { w: 18 });
+    for (const f of [6, 10]) { const p = this.person('worker', 20, { f, x: 136, _min: 126, _max: 156 }); p._v = 2; this.walkers.push(p); this.active.add(p); }
     // §13: 地下のごみ集積所（2フロア）と駐車場
     const tk = opt.truck;   // 'in' | 'load' | 'out' で全室に収集車
     const gs = [[0, null], [0.35, { phase: 'in', t: 0.55 }], [0.7, { phase: 'load', t: 0.3 }], [1, { phase: 'out', t: 0.45 }], [1.4, null], [0.2, { phase: 'load', t: 0.8 }]];
@@ -344,8 +347,9 @@ export class MockTower {
     for (const p of this.walkers) {
       if (p.state !== 'walk') continue;
       p.x += p._v * minutes;
-      if (p.x < this.walkMin) { p.x = this.walkMin; p._v = Math.abs(p._v); }
-      if (p.x > this.walkMax) { p.x = this.walkMax; p._v = -Math.abs(p._v); }
+      const mn = p._min ?? this.walkMin, mx = p._max ?? this.walkMax;
+      if (p.x < mn) { p.x = mn; p._v = Math.abs(p._v); }
+      if (p.x > mx) { p.x = mx; p._v = -Math.abs(p._v); }
     }
     for (const e of this.elevators) {
       for (const c of e.cars) {

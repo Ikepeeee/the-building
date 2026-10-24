@@ -1,7 +1,7 @@
 // The Building Renderer（Canvas 2D・ピクセルアート）
 // const r = new Renderer(canvas, sim); r.resize(w, h); r.render(view); r.setSim(sim);
 import { TILE_W, FLOOR_H, W, MIN_F, MAX_F, DAY, LOBBY_FLOORS, TYPES, floorName } from '../sim/constants.js';
-import { makeFacilitySprite, lobbyTile, floorTile, shaftSeg, carSprite, CAR_H, SPRITE_TOP, treeSprite, machineRoom, pitSprite, fireEscapeSprite, fireEscapeTop, ESC_W, frameTile, craneSprite, truckSprite } from './facilities.js';
+import { makeFacilitySprite, lobbyTile, floorTile, shaftSeg, carSprite, CAR_H, SPRITE_TOP, treeSprite, machineRoom, pitSprite, bridgeTile, fireEscapeSprite, fireEscapeTop, ESC_W, frameTile, craneSprite, truckSprite } from './facilities.js';
 import { heliSprite, planeSprite, bannerPlaneSprite, bannerSprite } from './vehicles.js';
 import { peopleAtlas, KIND_INDEX, PW, PH, stressIndex, STRESS_COLORS } from './people.js';
 import {
@@ -448,6 +448,7 @@ export class Renderer {
         if (mode === 'static' ? dyn : mode === 'dynamic' ? !dyn : false) continue;
         try {
           if (type === 'lobby') { this.drawLobby(o, f, num(o.x), tw); continue; }
+          if (type === 'bridge') { this.drawBridge(o, f, num(o.x), tw); continue; }
           if (type === 'floor') { this.floorRun(num(o.x), num(o.x) + tw, y); continue; }
         } catch (e) { this._warn(e); continue; }
         if (type === 'stairs' || type === 'escalator') trans.push(o, tw, th, x, y, top);
@@ -497,6 +498,20 @@ export class Renderer {
       if (qf.up && qf.up.length) this.rect(x + 1, -(f + 1) * FH + 5, 1, 2, '#ffd040');
       if (qf.down && qf.down.length) this.rect(x + w * TW - 2, -(f + 1) * FH + 5, 1, 2, '#ff8040');
     }
+  }
+
+  // 連絡通路の id（外壁・非常階段の判定では「建物ではない」扱いにする）
+  bridgeIds() {
+    const sim = this.sim, objs = sim && sim.objs;
+    const rev = typeof sim.revision === 'number' ? sim.revision : -1;
+    const size = objs && objs.size || 0;
+    const b = this._bridges;
+    this._bridgeFrame = (this._bridgeFrame || 0) + 1;
+    if (b && b.sim === sim && b.rev === rev && b.size === size && (rev >= 0 || this._bridgeFrame % 60)) return b.set;
+    const set = new Set();
+    if (objs) for (const o of objs.values()) if (o && o.type === 'bridge') set.add(o.id);
+    this._bridges = { sim, rev, size, set };
+    return set;
   }
 
   // ---------------- 静的レイヤーのチャンク ----------------
@@ -663,6 +678,20 @@ export class Renderer {
       this.imgPart(strip, (x & 3) * TW, 0, n * TW, FH, x * TW, wy, n * TW, FH);
       x += n;
     }
+  }
+
+  // 連絡通路: 鉄骨トラスとガラス張りの通路（下は空のまま）
+  drawBridge(o, f, x0, tw, ghost) {
+    const wy = -(f + 1) * FH;
+    const nightOn = this.night > 0.5 ? 1 : 0;
+    for (let i = 0; i < tw; i++) {
+      const x = x0 + i;
+      if (!ghost && (x < this.xA - 1 || x > this.xB + 1)) continue;
+      const kind = i === 0 ? 1 : i === tw - 1 ? 2 : 0;
+      const par = x & 1;
+      this.img(this.tile('br' + kind + par + nightOn, () => bridgeTile(kind, par, nightOn)), x * TW, wy, TW, FH);
+    }
+    if (!ghost && this.isBuilding(o)) this.drawConstruction(o, x0 * TW, wy, tw * TW, FH, f, 1, false);
   }
 
   drawLobby(o, f, x0, tw) {
@@ -1057,6 +1086,8 @@ export class Renderer {
     this._edgeFrame = (this._edgeFrame || 0) + 1;
     if (c && c.grid === grid && c.rev === rev && (rev >= 0 || this._edgeFrame % 60)) return c;
     const GAP = 6;
+    const br = this.bridgeIds();
+    const isB = (v) => v > 0 && br.has(v);
     const left = [], right = [];   // left[f] = 左側に階段を付けるマス x の配列
     for (let f = 0; f <= MAX_F; f++) {
       const row = grid[f];
@@ -1064,16 +1095,18 @@ export class Renderer {
       left.push(L); right.push(R);
       if (!row) continue;
       let x = 0;
+      const sol = (k) => row[k] !== 0 && !isB(row[k]);
       while (x < W) {
-        while (x < W && !row[x]) x++;
+        while (x < W && !sol(x)) x++;
         if (x >= W) break;
         const a = x;
-        while (x < W && row[x]) x++;
+        while (x < W && sol(x)) x++;
         const b = x - 1;
-        let gl = 0; for (let k = a - 1; k >= 0 && !row[k] && gl < GAP; k--) gl++;
-        let gr = 0; for (let k = b + 1; k < W && !row[k] && gr < GAP; k++) gr++;
-        if (gl >= GAP || gl === a) L.push(a);
-        if (gr >= GAP || b + gr === W - 1) R.push(b);
+        let gl = 0; for (let k = a - 1; k >= 0 && !sol(k) && gl < GAP; k--) gl++;
+        let gr = 0; for (let k = b + 1; k < W && !sol(k) && gr < GAP; k++) gr++;
+        // 連絡通路が取り付く側には付けない
+        if ((gl >= GAP || gl === a) && !(a > 0 && isB(row[a - 1]))) L.push(a);
+        if ((gr >= GAP || b + gr === W - 1) && !(b < W - 1 && isB(row[b + 1]))) R.push(b);
       }
     }
     this._edges = { grid, rev, left, right };
@@ -1114,6 +1147,9 @@ export class Renderer {
     const objs = this.sim && this.sim.objs && typeof this.sim.objs.get === 'function' ? this.sim.objs : null;
     const xa = Math.max(0, xA - 1), xb = Math.min(W - 1, xB + 1);
     const wallA = '#d4d0c4', wallB = '#8a8478', base = '#5e5850';
+    const br = this.bridgeIds();
+    const nb = br.size > 0;
+    const solid = (v) => v !== 0 && v !== undefined && !(nb && v > 0 && br.has(v));
     for (let f = fLo; f <= fHi; f++) {
       const row = grid[f];
       if (!row) continue;
@@ -1122,16 +1158,16 @@ export class Renderer {
       const wy = -(f + 1) * FH;
       const ug = f < 0;
       for (let x = xa; x <= xb; x++) {
-        if (!row[x]) continue;
+        if (!solid(row[x])) continue;
         const wx = x * TW;
-        const l = x === 0 || !row[x - 1], r = x === W - 1 || !row[x + 1];
+        const l = x === 0 || !solid(row[x - 1]), r = x === W - 1 || !solid(row[x + 1]);
         if (l) {
           this.rect(wx - 3, wy, 1, FH, '#000'); this.rect(wx - 2, wy, 2, FH, ug ? base : wallA); this.rect(wx - 1, wy, 1, FH, ug ? '#3e3a34' : wallB);
         }
         if (r) {
           this.rect(wx + TW + 2, wy, 1, FH, '#000'); this.rect(wx + TW, wy, 2, FH, ug ? base : wallA); this.rect(wx + TW, wy, 1, FH, ug ? '#3e3a34' : wallB);
         }
-        if (!ug && (f === MAX_F || !above || !above[x]) && !(objs && (objs.get(row[x]) || {}).type === 'cathedral')) {
+        if (!ug && (f === MAX_F || !above || !solid(above[x])) && !(objs && (objs.get(row[x]) || {}).type === 'cathedral')) {
           const ext0 = l ? 3 : 0, ext1 = r ? 3 : 0;
           this.rect(wx - ext0, wy - 4, TW + ext0 + ext1, 1, '#000');
           this.rect(wx - ext0, wy - 3, TW + ext0 + ext1, 2, '#bcb6a8');
@@ -1700,7 +1736,7 @@ export class Renderer {
     const COL = { good: '#3a8aff', fair: '#f0c820', bad: '#ff3030' };
     for (const o of this.visObjs || EMPTY) {
       const t = o.type;
-      if (t === 'lobby' || t === 'floor' || t === 'stairs' || t === 'escalator' || isElev(t)) continue;
+      if (t === 'lobby' || t === 'floor' || t === 'bridge' || t === 'stairs' || t === 'escalator' || isElev(t)) continue;
       const b = this.objBounds(o);
       let col, a = 0.28;
       if (o.destroyed) { col = '#1a1a1a'; a = 0.45; }
@@ -1828,7 +1864,12 @@ export class Renderer {
     }
     // 施設の見た目を薄く出す（UI が ghost.type を渡した場合）
     const type = g.type;
-    if (ok && type && TYPES[type] && !isElev(type) && type !== 'floor' && type !== 'lobby' && type !== 'bulldoze') {
+    if (type === 'bridge') {
+      ctx.globalAlpha = 0.7;
+      const gf = num(g.f), gx = num(g.x), gw = num(g.w, 1);
+      this.drawBridge({}, gf, gx, gw, true);
+      ctx.globalAlpha = 1;
+    } else if (ok && type && TYPES[type] && !isElev(type) && type !== 'floor' && type !== 'lobby' && type !== 'bulldoze') {
       const tw = num(g.w, TYPES[type].w || 1), th = num(g.h, TYPES[type].h || 1);
       const spr = this.sprite(type + '|' + tw + '|' + th + '|ghost', () => makeFacilitySprite(type, tw, th, { occ: 1, n: 0, open: 1, dirty: 0, alt: 0, frame: 0, week: 0, night: 0 }));
       ctx.globalAlpha = 0.55;

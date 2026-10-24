@@ -34,6 +34,7 @@ export const worldToCell = (wx, wy) => ({ x: Math.floor(wx / TILE_W), f: Math.fl
 // cap:   所属人数
 export const TYPES = {
   floor:       { name: 'フロア', cat: 'basic', drag: 'h', minW: 1, costPerTile: 500, star: 1, desc: '空きフロア。施設の土台になる' },
+  bridge:      { name: '連絡通路', cat: 'basic', drag: 'h', minW: 1, costPerTile: 3000, star: 2, only: 'aboveGround', desc: '下に支えがなくても架けられる橋。離れた棟やフロアの切れ目をつなぐ' },
   lobby:       { name: 'ロビー', cat: 'basic', drag: 'h', minW: 4, costPerTile: 2000, star: 1, only: 'lobbyFloor', desc: '人の出入口。1Fと15F毎のスカイロビー階に設置' },
   stairs:      { name: '階段', cat: 'transport', w: 8, cost: 5000, star: 1, desc: '1つ上の階とつなぐ。近い階の移動向き' },
   escalator:   { name: 'エスカレーター', cat: 'transport', w: 8, cost: 20000, star: 2, desc: '1つ上の階とつなぐ。商業施設向き' },

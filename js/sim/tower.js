@@ -225,6 +225,7 @@ export class Tower {
         m.get(o.f).push(o);
         continue;
       }
+      if (o.type === 'bridge') continue; // 連絡通路は歩ける床として区画にだけ効く
       if (o.type !== 'lobby') this.facs.push(o);
       if (HOTEL.has(o.type)) this.hotels.push(o);
       for (let r = 0; r < o.h; r++) {
@@ -1286,7 +1287,7 @@ export class Tower {
           if (num(s.constructUntil, 0) > 0) { o.constructStart = num(s.constructStart, this.time); o.constructUntil = s.constructUntil; }
           continue;
         }
-        const h = T.h || 1, w = s.type === 'lobby' ? Math.max(1, s.w | 0) : T.w;
+        const h = T.h || 1, w = s.type === 'lobby' || s.type === 'bridge' ? Math.max(1, s.w | 0) : T.w;
         // 古い1フロアのごみ収集室は、あとで地下に移す
         if (s.type === 'garbage' && (s.f + h - 1 >= 0 || (s.h || 1) !== h)) { oldGarbage.push(s); oldBags += Math.max(0, num(s.bags, 0)); continue; }
         // 幅が変わった施設（例: オフィス 9→10）は、差の分だけ左右にずらして置ける場所を探す

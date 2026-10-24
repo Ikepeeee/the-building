@@ -1918,6 +1918,59 @@ test('巡回: フロアの切れ目をまたぐ巡回範囲でも固まらない
   assert.ok(p.x <= 59.5 || p.state !== 'walk', '切れ目を宙歩きしない');
 });
 
+test('§15 連絡通路: 離れた2棟を5Fでつなぐ・宙に浮く橋は不可・橋の上に施設や上の階は不可', () => {
+  const s = new Tower({ seed: 140 });
+  s.money = 1e9; s.star = 2;
+  mustBuild(s, 'lobby', { f: 0, x: 0, x2: 40 });
+  mustBuild(s, 'floor', { f: 0, x: 80, x2: 120 });
+  for (let f = 1; f <= 6; f++) { mustBuild(s, 'floor', { f, x: 0, x2: 40 }); mustBuild(s, 'floor', { f, x: 80, x2: 120 }); }
+  mustBuild(s, 'elevator', { f: 0, f2: 6, x: 20 });   // 左の棟だけにエレベーター
+  mustBuild(s, 'office', { f: 4, x: 100 });           // 右の棟の5F
+  const o = s.objAt(4, 100);
+  assert.equal(o.unreachable, true, '橋が無いと行けない');
+  assert.match(s.check('bridge', { f: 4, x: 50, x2: 60 }).reason, /接していません/, '宙に浮いた橋は不可');
+  assert.match(s.check('bridge', { f: 0, x: 41, x2: 79 }).reason, /2F以上/);
+  assert.equal(s.check('bridge', { f: 4, x: 41, x2: 79 }).cost, 39 * TYPES.bridge.costPerTile);
+  mustBuild(s, 'bridge', { f: 4, x: 41, x2: 79 });
+  const br = s.objAt(4, 60);
+  assert.equal(br.type, 'bridge'); assert.equal(br.w, 39);
+  assert.equal(s.grid[3][60], 0, '下に支えは要らない');
+  assert.equal(o.unreachable, false, '橋を渡って行ける');
+  assert.equal(s.nodeOf(4, 10), s.nodeOf(4, 110), '2棟の5Fが同じ区画になる');
+  // 人が実際に橋を渡る
+  const p = s.newPerson('visitor', null);
+  s.spawnAt(p, s.entrances[0], 20);
+  let done = false, onBridge = false;
+  assert.ok(s.startTrip(p, 4, 105, () => { done = true; s.leave(p); }));
+  for (let i = 0; i < 2000 && !done; i++) { s.step(0.02); const d = s.drawPos(p); if (d && d.f === 4 && d.x > 41 && d.x < 79) onBridge = true; }
+  assert.ok(done && onBridge, '橋の上を歩いて着く');
+  // 橋の上には施設・移動手段を置けず、上の階も支えない
+  assert.match(s.check('office', { f: 4, x: 50 }).reason, /連絡通路/);
+  assert.match(s.check('stairs', { f: 4, x: 50 }).reason, /連絡通路|上の階/);
+  assert.equal(s.check('stairs', { f: 3, x: 36 }).ok, false);
+  assert.match(s.check('elevator', { f: 3, f2: 5, x: 60 }).reason, /連絡通路|フロアがありません/);
+  assert.match(s.check('floor', { f: 5, x: 50, x2: 60 }).reason, /支え/, '橋の上の階は支えられない');
+  // 保存・コピー
+  const r = new Tower(); r.restore(JSON.parse(JSON.stringify(s.serialize())));
+  assert.equal(r.objAt(4, 60).type, 'bridge'); assert.equal(r.objAt(4, 60).w, 39);
+  assert.equal(r.objAt(4, 100).unreachable, false);
+  const bp = s.blueprint({ f1: 0, x1: 0, f2: 6, x2: 120 });
+  const bops = bp.ops.filter((op) => op.tool === 'bridge');
+  assert.equal(bops.length, 1);
+  assert.ok(bp.ops.indexOf(bops[0]) > bp.ops.findIndex((op) => op.tool === 'office'), '橋は両側の棟のあと');
+  assert.ok(!bp.ops.some((op) => op.tool === 'floor' && op.p.f === 4 && op.p.x <= 50 && op.p.x2 >= 50), '橋の下にフロアは作らない');
+  mustBuild(s, 'floor', { f: 0, x: 200, x2: 330 });
+  const ok = s.buildBatch(bp.ops, { f: 0, x: 200 });
+  assert.ok(ok.ok, ok.reason);
+  assert.equal(s.objAt(4, 260).type, 'bridge');
+  const bpo = s.blueprintOf([br.id, o.id]);
+  assert.ok(bpo.ops.some((op) => op.tool === 'bridge'));
+  // 撤去すると何も残らない
+  s.act(br, 'remove');
+  assert.equal(s.grid[4][60], 0);
+  assert.equal(o.unreachable, true);
+});
+
 test('性能: 横幅480・30フロア・人口6000超の横長ビルで 1 ゲーム日', () => {
   const s = new Tower({ seed: 113 });
   s.money = 1e12; s.star = 3;
