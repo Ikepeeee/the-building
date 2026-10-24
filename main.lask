@@ -70,7 +70,9 @@ deploy() = do {
     |> trim
   $ git -C dist init -q -b gh-pages
   $ git -C dist add -A
-  $ git -C dist commit -q -m #{shell_quote("Deploy #{rev}")}
-  $ git -C dist push -q -f #{shell_quote(remote)} gh-pages
+  // lask 0.11 から埋め込んだ値は自動で引用符付きになるので shell_quote は使わない
+  message = "Deploy #{rev}"
+  $ git -C dist commit -q -m #{message}
+  $ git -C dist push -q -f #{remote} gh-pages
   log("公開しました: #{rev} → gh-pages")
 }
