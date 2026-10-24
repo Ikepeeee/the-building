@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#1c2a6b">
+<meta name="description" content="The Building: ブラウザで遊べるビル経営シミュレーション。ロビーから100階の大聖堂まで、超高層ビルを育てよう。">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="The Building">
+<meta name="format-detection" content="telephone=no">
+<title>The Building</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Crect width='16' height='16' fill='%232b4fa8'/%3E%3Crect x='0' y='13' width='16' height='3' fill='%235a3d22'/%3E%3Crect x='5' y='2' width='6' height='11' fill='%23222'/%3E%3Crect x='6' y='3' width='4' height='10' fill='%23d9d4c4'/%3E%3Crect x='6' y='4' width='1' height='1' fill='%23ffd34d'/%3E%3Crect x='8' y='4' width='1' height='1' fill='%23ffd34d'/%3E%3Crect x='7' y='6' width='1' height='1' fill='%23ffd34d'/%3E%3Crect x='9' y='6' width='1' height='1' fill='%23ffd34d'/%3E%3Crect x='6' y='8' width='1' height='1' fill='%23ffd34d'/%3E%3Crect x='8' y='8' width='1' height='1' fill='%23ffd34d'/%3E%3Crect x='7' y='11' width='2' height='2' fill='%23553'/%3E%3Crect x='7' y='0' width='2' height='2' fill='%23ffd34d'/%3E%3C/svg%3E">
+<link rel="manifest" href="manifest.json">
+<script>
+  // ホーム画面用のアイコン（iOS は PNG が必要なので、画像ファイルを置かずにその場で描いて data URI にする）
+  (function () {
+    try {
+      var c = document.createElement('canvas'); c.width = c.height = 180;
+      var g = c.getContext('2d'), u = 180 / 16;
+      var R = function (col, x, y, w, h) { g.fillStyle = col; g.fillRect(x * u, y * u, w * u, h * u); };
+      R('#2b4fa8', 0, 0, 16, 16); R('#5a3d22', 0, 13, 16, 3); R('#222', 5, 2, 6, 11); R('#d9d4c4', 6, 3, 4, 10);
+      [[6, 4], [8, 4], [7, 6], [9, 6], [6, 8], [8, 8]].forEach(function (p) { R('#ffd34d', p[0], p[1], 1, 1); });
+      R('#553', 7, 11, 2, 2); R('#ffd34d', 7, 0, 2, 2);
+      var l = document.createElement('link'); l.rel = 'apple-touch-icon'; l.href = c.toDataURL('image/png');
+      c.width = c.height = 0;
+      document.head.appendChild(l);
+    } catch (e) { /* アイコンが無くても遊べる */ }
+    // ホーム画面から起動したとき（ブラウザの UI なし）
+    var sa = window.navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches);
+    if (sa) document.documentElement.classList.add('standalone');
+  })();
+</script>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app" class="is-title">
+  <canvas id="view" aria-label="ビルの断面図"></canvas>
+
+  <header id="hud" class="frame">
+    <button class="hud-star" id="hud-star" title="★の進捗と財務"><span id="hud-stars">★☆☆☆☆</span></button>
+    <button class="hud-cell hud-money" id="hud-money" title="財務を見る">
+      <span class="hud-label">資金</span><span class="hud-val" id="hud-money-val">$0</span>
+      <span class="hud-sub" id="hud-net"></span>
+    </button>
+    <div class="hud-cell hud-pop"><span class="hud-label">人口</span><span class="hud-val" id="hud-pop">0</span></div>
+    <div class="hud-cell hud-date"><span class="hud-label" id="hud-day">1日目</span><span class="hud-val" id="hud-time">月 06:00</span></div>
+    <div class="hud-speed" id="hud-speed" role="group" aria-label="速度"></div>
+    <div class="hud-buttons">
+      <button class="btn-icon" id="btn-fs" title="全画面表示" aria-label="全画面表示">⛶</button>
+      <button class="btn-icon" id="btn-mute" title="音 (M)" aria-label="音"></button>
+      <button class="btn-icon" id="btn-menu" title="メニュー" aria-label="メニュー">☰</button>
+    </div>
+  </header>
+  <div id="pause-badge" hidden>一時停止中</div>
+  <div id="night-badge" hidden>🌙 早送り中</div>
+
+  <div id="toasts" aria-live="polite"></div>
+
+  <aside id="panel" class="frame" hidden></aside>
+
+  <div id="confirm-bar" class="frame" hidden>
+    <div class="cb-text"><b id="cb-name"></b><span id="cb-cost"></span></div>
+    <div class="cb-nudge" role="group" aria-label="1マスずつ動かす">
+      <button class="btn" id="cb-l" aria-label="左へ1マス">◀</button>
+      <button class="btn" id="cb-u" aria-label="上へ1階">▲</button>
+      <button class="btn" id="cb-d" aria-label="下へ1階">▼</button>
+      <button class="btn" id="cb-r" aria-label="右へ1マス">▶</button>
+    </div>
+    <button class="btn" id="cb-cancel">✕ やめる</button>
+    <button class="btn btn-primary" id="cb-ok">✓ 建設</button>
+  </div>
+
+  <div id="copy-bar" class="frame" hidden>
+    <span id="cp-text"></span>
+    <button class="btn btn-small" id="cp-clear">選択解除</button>
+    <button class="btn btn-small" id="cp-free" aria-pressed="false">↔ 横も動かす</button>
+    <button class="btn btn-small" id="cp-back">◀ 選び直す</button>
+    <button class="btn btn-small btn-primary" id="cp-go">貼り付けへ ▶</button>
+  </div>
+
+  <nav id="toolbar" class="frame" aria-label="施設ツールバー">
+    <div class="tb-tabs" id="tb-tabs" role="tablist"></div>
+    <div class="tb-row">
+      <div class="tb-fixed" id="tb-fixed"></div>
+      <div class="tb-items" id="tb-items"></div>
+    </div>
+    <div class="tb-hint" id="tb-hint"></div>
+  </nav>
+  <div id="tooltip" hidden></div>
+
+  <section id="title-screen">
+    <div class="title-sky" aria-hidden="true"></div>
+    <div class="title-box frame">
+      <div class="title-logo" aria-label="The Building">
+        <span class="tl-sub">ビル経営シミュレーション</span>
+        <h1>The Building</h1>
+      </div>
+      <div class="title-buttons">
+        <button class="btn btn-big btn-primary" id="t-new">新しく建てる</button>
+        <button class="btn btn-big" id="t-continue">続きから</button>
+        <div class="t-saveinfo" id="t-saveinfo"></div>
+        <button class="btn btn-big" id="t-help">遊び方</button>
+        <button class="btn btn-small" id="t-import">セーブデータを読み込む</button>
+      </div>
+      <p class="title-note">ファンメイドのオリジナル作品です。既存のゲーム会社・作品とは関係ありません。</p>
+    </div>
+  </section>
+
+  <div id="modal-root"></div>
+  <div id="fatal" hidden></div>
+</div>
+<noscript><p style="padding:2em;font-size:18px">このゲームを遊ぶには JavaScript を有効にしてください。</p></noscript>
+<script>
+  // モジュールの読み込みに失敗したときの最終手段の表示
+  window.__showFatal = function (msg) {
+    var el = document.getElementById('fatal');
+    if (!el) return;
+    el.hidden = false;
+    el.innerHTML = '<div class="frame fatal-box"><h2>読み込みに失敗しました</h2><p></p><button class="btn" onclick="location.reload()">再読み込み</button></div>';
+    el.querySelector('p').textContent = String(msg || '');
+  };
+  // 起動前のエラー（構文エラー・読み込み失敗など）は画面に出す。起動後はゲーム内で扱う
+  window.addEventListener('error', function (e) {
+    if (window.__gameStarted) return;
+    window.__showFatal((e.error && (e.error.stack || e.error.message)) || e.message || 'スクリプトエラー');
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    if (window.__gameStarted) return;
+    var r = e.reason;
+    window.__showFatal((r && (r.stack || r.message)) || String(r));
+  });
+  // iOS のピンチによるページ拡大を防ぐ
+  document.addEventListener('gesturestart', function (e) { e.preventDefault(); });
+</script>
+<script type="module" src="js/main.js" onerror="window.__showFatal('js/main.js を読み込めませんでした')"></script>
+<script>
+  // ES Modules に対応していない古いブラウザ向け
+  if (!('noModule' in HTMLScriptElement.prototype)) window.__showFatal('このブラウザは古いため遊べません。最新の Chrome / Safari / Firefox / Edge をお使いください。');
+</script>
+</body>
+</html>
