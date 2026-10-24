@@ -6,6 +6,10 @@ const MUTE_KEY = SAVE_KEY + '.mute';
 const SFX_KEY = SAVE_KEY + '.sfx';
 const N = (s) => 440 * Math.pow(2, (s - 69) / 12); // MIDI ノート番号 → Hz
 
+// 同時に鳴らす単発音の上限（iOS の Safari は AudioNode を作りすぎるとタブが落ちることがある）
+export const MAX_VOICES = 16;
+const PRIORITY = new Set(['alarm', 'boom', 'fanfare', 'bells', 'built', 'error']);
+
 const THROTTLE = { built: 250, cash: 140, ding: 120, build: 60, complaint: 400, roach: 300, fire: 600, alarm: 1500, boom: 300, bells: 1500, fanfare: 1500 };
 
 export class Sound {
@@ -16,6 +20,41 @@ export class Sound {
     this.muted = storage.get(MUTE_KEY) === '1';
     this.sfxOn = storage.get(SFX_KEY) !== '0'; // 効果音（環境音は ambience.js 側で別に切り替え）
     this.last = {};
+    this.voices = 0; // 鳴っている単発音（ソースノード）の数
+    this.idleSince = 0;
+  }
+
+  /** あと n 個鳴らせるか（優先度の高い音は少しだけ枠を超えてよい） */
+  canVoice(n = 1, priority = false) {
+    return this.voices + n <= MAX_VOICES + (priority ? 8 : 0);
+  }
+
+  /** 鳴り終わったら止めて、つないだノードも全部外す（ノードを溜めない） */
+  track(src, ...extra) {
+    this.voices++;
+    let done = false;
+    const end = () => {
+      if (done) return;
+      done = true;
+      this.voices = Math.max(0, this.voices - 1);
+      try { src.disconnect(); } catch { /* */ }
+      for (const n of extra) { try { n.disconnect(); } catch { /* */ } }
+    };
+    src.onended = end;
+    return src;
+  }
+
+  /** 遊んでいない（一時停止・タイトル）状態が続いたら AudioContext を止めて電池と負荷を減らす */
+  idle(isIdle) {
+    if (!this.ctx) return;
+    const now = performance.now();
+    if (isIdle) {
+      if (!this.idleSince) this.idleSince = now;
+      if (now - this.idleSince > 3000 && this.ctx.state === 'running' && this.voices === 0) this.suspend();
+    } else {
+      this.idleSince = 0;
+      if (this.ctx.state === 'suspended' && !document.hidden) this.resume();
+    }
   }
 
   /** 初回のユーザー操作で呼ぶ（自動再生制限の解除） */
@@ -59,6 +98,7 @@ export class Sound {
     g.gain.exponentialRampToValueAtTime(v, t + (o.attack ?? 0.005));
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     osc.connect(g); g.connect(this.master);
+    this.track(osc, g);
     osc.start(t); osc.stop(t + dur + 0.05);
   }
 
@@ -78,6 +118,7 @@ export class Sound {
     g.gain.exponentialRampToValueAtTime(v, t + (o.attack ?? 0.005));
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     src.connect(f); f.connect(g); g.connect(this.master);
+    this.track(src, f, g);
     src.start(t, Math.random() * 0.5); src.stop(t + dur + 0.05);
   }
 
@@ -87,7 +128,10 @@ export class Sound {
   }
 
   play(name) {
-    if (this.muted || !this.sfxOn || !this.ctx || this.ctx.state !== 'running') return;
+    if (this.muted || !this.sfxOn || !this.ctx) return;
+    if (this.ctx.state === 'suspended' && !document.hidden) { this.resume(); this.idleSince = 0; }
+    if (this.ctx.state !== 'running') return;
+    if (!this.canVoice(2, PRIORITY.has(name))) return; // 鳴りすぎのときは落とす
     const now = performance.now();
     if (now - (this.last[name] || 0) < (THROTTLE[name] ?? 80)) return;
     this.last[name] = now;

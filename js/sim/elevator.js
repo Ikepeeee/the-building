@@ -34,13 +34,14 @@ export const ElevatorMixin = {
     if (!e.config) e.config = defaultElevConfig(e.type, e.lo, e.hi);
     const cfg = e.config;
     cfg.skip = [...new Set((cfg.skip || []).filter((f) => Number.isInteger(f) && f >= e.lo && f <= e.hi))].sort((a, b) => a - b);
-    // 停止階が2つ未満になる古いデータは既定に戻す
-    if (countStops(e.lo, e.hi, cfg.skip) < 2) cfg.skip = defaultSkip(e.type, e.lo, e.hi);
     const skip = new Set(cfg.skip);
     e.stops = [];
     e.isStop = new Uint8Array(NF);
     for (let f = e.lo; f <= e.hi; f++) if (!skip.has(f)) { e.stops.push(f); e.isStop[FI(f)] = 1; }
-    e.sLo = e.stops[0]; e.sHi = e.stops[e.stops.length - 1];
+    // 停止階が2つ未満でも建てられる（経路には使われない）。カゴは端で待機する
+    e.usable = e.stops.length >= 2;
+    e.sLo = e.stops.length ? e.stops[0] : e.lo;
+    e.sHi = e.stops.length ? e.stops[e.stops.length - 1] : e.lo;
     const k = KIN[e.type], fast = cfg.speed === 2;
     e.vmax = fast ? k.vmax2 : k.vmax;
     e.acc = k.acc;
@@ -79,8 +80,7 @@ export const ElevatorMixin = {
       if (!Array.isArray(patch.skip)) return { ok: false, reason: 'skip は階の配列です' };
       const sk = [...new Set(patch.skip.map((f) => f | 0))].sort((a, b) => a - b);
       for (const f of sk) if (f < e.lo || f > e.hi) return { ok: false, reason: `${floorName(f)}はこのエレベーターの範囲外です` };
-      if (countStops(e.lo, e.hi, sk) < 2) return { ok: false, reason: '停止階が2つ以上必要です' };
-      cfg.skip = sk;
+      cfg.skip = sk; // 停止階が2つ未満になってもよい（使われないだけ）
     }
     if ('standby' in patch) { if (!STANDBY.includes(patch.standby)) return { ok: false, reason: '待機方法が不正です' }; cfg.standby = patch.standby; }
     if ('rush' in patch) cfg.rush = !!patch.rush;
@@ -141,7 +141,6 @@ export const ElevatorMixin = {
     if (typeof fresh === 'string') return fail(fresh);
     const r = this.checkTransportCells(e.type, e.x, e.w, lo, hi, e.id, fresh);
     if (r) return fail(r);
-    if (countStops(lo, hi, this.resizedSkip(e, lo, hi)) < 2) return fail('停止階が2つ以上必要です');
     const added = Math.max(0, e.lo - lo) + Math.max(0, hi - e.hi);
     const cost = added * SIM.EXTEND_COST[e.type] + fresh.length * TYPES.floor.costPerTile;
     return {

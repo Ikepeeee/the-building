@@ -223,6 +223,8 @@ export class App {
       this.recheckGhosts();
     }
     if (now - (this.guideTimer || 0) > 1500) { this.guideTimer = now; this.guide.update(); }
+    // 遊んでいない（タイトル・一時停止）ときは AudioContext を止める
+    this.sound.idle(!this.started || (spd === 0 && !this.dialogs.count));
     if (now - this.ambTimer > 200) {
       this.ambTimer = now;
       try { this.ambience.update(this); } catch (e) { this.reportError(e, 'ambience'); }
@@ -240,6 +242,7 @@ export class App {
         selectedId: this.selectedId,
         selectedPerson: this.selectedPerson || null,
         overlay: this.started ? this.overlay : null,
+        simplifyPeople: spd >= 4, // 4倍速以上（夜の早送りを含む）は歩く人の描写を省く
         hover: this.started && this.input.lastType === 'mouse' ? this.hover : null,
         nowMs: now,
       });
@@ -368,7 +371,7 @@ export class App {
     return { f: Math.max(MIN_F, Math.min(MAX_F, c.f)), x: Math.max(0, Math.min(W - 1, c.x)) };
   }
 
-  clickParams(tool, cell) {
+  clickParams(tool, cell, snap = !this.noSnap) {
     const t = TYPES[tool];
     const c = this.clampCell(cell);
     const h = t.h || 1;
@@ -376,12 +379,13 @@ export class App {
     let f = t.only === 'basement' ? c.f - (h - 1) : c.f;
     f = Math.max(MIN_F, Math.min(MAX_F - h + 1, f));
     let x = Math.max(0, Math.min(W - w, c.x - Math.floor(w / 2)));
-    if (!this.noSnap) x = this.snapX(tool, f, x, w, h);
+    if (snap) x = this.snapX(tool, f, x, w, h);
     return { f, x };
   }
 
   /**
-   * すき間なく並べやすいように x を寄せる（2マス以内のときだけ）。Shift を押している間は寄せない。
+   * すき間なく並べやすいように x を寄せる（1マスずれているときだけの弱い磁石）。Shift を押している間は寄せない。
+   * どの位置にも置けるよう、寄せるのは「1マス」だけにする（2マス以上は寄せない＝その位置にも置ける）。
    * 優先: 隣の施設にぴったり付く位置 → 施設の幅の倍数（W は全施設の幅で割り切れる）
    */
   snapX(tool, f, x, w, h) {
@@ -395,7 +399,7 @@ export class App {
       for (const row of rows) for (let i = cx; i < cx + w; i++) if (row[i] > 0) return false;
       return true;
     };
-    const R = 2;
+    const R = 1;
     const cands = [];
     for (const row of rows) {
       // 左隣の施設の右端、右隣の施設の左端
@@ -780,8 +784,9 @@ export class App {
     const cell = this.clampCell({ x: Math.floor(fc.x + pl.off.x), f: Math.floor(fc.f + pl.off.f) });
     if (pl.last && pl.last.x === cell.x && pl.last.f === cell.f) return;
     pl.last = cell;
+    // 滑らせている間は寄せない（1マスずつ動かせるように）。寄せるのは指を離したときだけ
     if (this.tool === 'copy') this.setCopyPending(cell, true);
-    else this.setPending(this.tool, this.clickParams(this.tool, cell), cell, true);
+    else this.setPending(this.tool, this.clickParams(this.tool, cell, false), cell, true);
   }
 
   placeEnd() {
@@ -790,7 +795,40 @@ export class App {
     if (!pl) return;
     // 仮置きを動かさずにタップ → 確定
     if (pl.grab && !pl.moved) { this.confirmPending(); return; }
+    const pd = this.pending;
+    if (pd && pd.tool !== 'copy' && pd.tool !== 'bulldoze' && pd.cell && !this.noSnap) {
+      const snapped = this.clickParams(pd.tool, pd.cell, true);
+      if (snapped.x !== pd.p.x) {
+        const cell = { ...pd.cell, x: pd.cell.x + (snapped.x - pd.p.x) };
+        this.setPending(pd.tool, snapped, cell, true);
+      }
+    }
     this.sound.play(this.pending && this.pending.ghost && this.pending.ghost.ok ? 'click' : 'error');
+  }
+
+  /** 仮置きを1マス（1階）ずつ動かす（確定バーの ◀ ▶ ▲ ▼） */
+  nudge(dx, df) {
+    const pd = this.pending;
+    if (!pd) return;
+    this.userGesture();
+    if (pd.tool === 'copy') {
+      const cp = this.copy;
+      let cell = { ...pd.cell };
+      if (dx && !cp.xFree) {
+        // 横に動かすときは「横も動かす」をオンにして、今の位置から1マスずつ
+        cell.x = cp.anchor.x + Math.floor(cp.bp.w / 2);
+        cp.freeX = true;
+        this.updateCopyBar();
+      }
+      cell = this.clampCell({ x: cell.x + dx, f: cell.f + df });
+      this.setCopyPending(cell, true);
+    } else if (pd.tool !== 'bulldoze') {
+      const t = TYPES[pd.tool];
+      const p = { ...pd.p, x: Math.max(0, Math.min(W - (t.w || 1), pd.p.x + dx)), f: Math.max(MIN_F, Math.min(MAX_F - (t.h || 1) + 1, pd.p.f + df)) };
+      const cell = { x: (pd.cell ? pd.cell.x : p.x) + (p.x - pd.p.x), f: (pd.cell ? pd.cell.f : p.f) + (p.f - pd.p.f) };
+      this.setPending(pd.tool, p, cell, true);
+    }
+    this.sound.play('click');
   }
 
   placeCancel() { this.place = null; }
@@ -885,6 +923,16 @@ export class App {
     };
     this.cb.ok.addEventListener('click', () => { this.userGesture(); this.confirmPending(); });
     this.cb.cancel.addEventListener('click', () => { this.cancelPending(); });
+    for (const [id, dx, df] of [['cb-l', -1, 0], ['cb-r', 1, 0], ['cb-u', 0, 1], ['cb-d', 0, -1]]) {
+      const b = document.getElementById(id);
+      if (!b) continue;
+      // 押しっぱなしで連続して動く
+      let timer = 0;
+      const stop = () => { clearInterval(timer); clearTimeout(timer); timer = 0; };
+      b.addEventListener('pointerdown', (e) => { e.preventDefault(); this.nudge(dx, df); stop(); timer = setTimeout(() => { timer = setInterval(() => this.nudge(dx, df), 90); }, 380); });
+      for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) b.addEventListener(ev, stop);
+      b.addEventListener('contextmenu', (e) => e.preventDefault());
+    }
   }
 
   updateConfirmBar() {
@@ -902,6 +950,8 @@ export class App {
     cb.ok.disabled = !pd.ghost.ok;
     cb.ok.textContent = pd.tool === 'bulldoze' ? '✓ 撤去' : '✓ 建設';
     cb.ok.className = 'btn ' + (pd.tool === 'bulldoze' ? 'btn-danger' : 'btn-primary');
+    const nudges = cb.el.querySelector('.cb-nudge');
+    if (nudges) nudges.hidden = pd.tool === 'bulldoze';
   }
 
   onPanelChange() {
@@ -962,6 +1012,10 @@ export class App {
   }
   autosave() {
     if (!this.started || !this.sim || this.simFailed) return;
+    // 画面を隠す・閉じるで続けて呼ばれても、1秒以内の2回目は書かない
+    const now = performance.now();
+    if (now - (this.lastSaveT || -1e9) < 1000) return;
+    this.lastSaveT = now;
     const r = saveGame(this.sim, this.uiState());
     if (!r.ok) console.warn(r.error);
     if (r.ok && !r.persisted && !this.warnedStorage) {

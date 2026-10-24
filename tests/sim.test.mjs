@@ -137,7 +137,8 @@ test('建設: エレベーター（スパン・急行の停止階・移動手段
   assert.match(s.check('elevator', { f: 0, f2: 10, x: 12 }).reason, /移動手段/);
   assert.match(s.check('stairs', { f: 30, x: 8 }).reason, /移動手段/, '機械室と重なる');
   // 急行: ロビー階と地下のみ
-  assert.match(s.check('express', { f: 1, f2: 10, x: 30 }).reason, /停止階/);
+  // 停止階が無くても建てられる（使われないだけ）
+  assert.ok(s.check('express', { f: 1, f2: 10, x: 30 }).ok);
   mustBuild(s, 'express', { f: 0, f2: 40, x: 30 });
   const x = s.transportAt(1, 31);
   assert.deepEqual(x.stops, [0, 14, 29]);
@@ -1148,7 +1149,11 @@ test('v2 §4: 設定 skip・standby・rush が実際に効く', () => {
   assert.equal(e.isStop[10 + 10], 0);
   assert.equal(s.route(0, 10), null, '止まらない階へは行けない');
   assert.ok(s.route(0, 11));
-  assert.match(s.setElevatorConfig(e, { skip: Array.from({ length: 20 }, (_, i) => i) }).reason, /2つ以上/);
+  assert.ok(s.setElevatorConfig(e, { skip: Array.from({ length: 20 }, (_, i) => i) }).ok, '停止階1つにもできる');
+  assert.equal(e.usable, false);
+  assert.equal(s.route(0, 15), null, '使われない');
+  assert.match(s.describe(e).warning, /停止階が2つ未満/);
+  assert.ok(s.setElevatorConfig(e, { skip: [] }).ok);
   assert.match(s.setElevatorConfig(e, { skip: [40] }).reason, /範囲外/);
   // standby: lobby → 空きカゴは1Fへ
   assert.ok(s.setElevatorConfig(e, { skip: [], standby: 'lobby' }).ok);
@@ -1184,7 +1189,9 @@ test('v2 §11: 急行の停止階は既定でロビー階と地下、任意の�
   const skip = e.config.skip.filter((f) => f !== 20);
   assert.ok(s.setElevatorConfig(e, { skip }).ok);
   assert.deepEqual(s.route(0, 20).map((l) => [l.kind, l.to]), [['express', 20]], '足した階に止まる');
-  assert.equal(s.setElevatorConfig(e, { skip: [...Array(38).keys()].map((i) => i - 2).filter((f) => f !== 0) }).ok, false, '停止階1つは不可');
+  assert.ok(s.setElevatorConfig(e, { skip: [...Array(38).keys()].map((i) => i - 2).filter((f) => f !== 0) }).ok, '停止階1つでもエラーにしない');
+  assert.equal(e.usable, false);
+  assert.ok(s.setElevatorConfig(e, { skip }).ok);
   // 伸ばした階は既定どおり通過
   mustBuild(s, 'floor', { f: 36, x: 0, x2: 80 });
   assert.ok(s.act(e, 'extendUp').ok);
@@ -1740,6 +1747,175 @@ test('§14 ごみ・リサイクルセンター: 旧 recycling と旧 w16 の ga
   assert.equal(req().done, true);
   s.garbageBags = s.garbageCap;
   assert.equal(req().done, false, '溢れていると満たさない');
+});
+
+test('停止階が2つ未満のエレベーターも建てて伸ばせる（使われない・警告）', () => {
+  const s = new Tower({ seed: 130 });
+  s.money = 1e9; s.star = 3;
+  mustBuild(s, 'lobby', { f: 0, x: 0, x2: 80 });
+  for (let f = 1; f <= 20; f++) mustBuild(s, 'floor', { f, x: 0, x2: 80 });
+  // 2F〜10F: ロビー階も地下も無いので急行の停止階は0
+  mustBuild(s, 'express', { f: 1, f2: 9, x: 30 });
+  const e = s.transportAt(5, 31);
+  assert.equal(e.stops.length, 0); assert.equal(e.usable, false);
+  assert.equal(s.describe(e).warning, '停止階が2つ未満のため使われません');
+  assert.equal(s.route(1, 9), null);
+  // 延長もできる。1F まで伸ばすと停止階1つ、15F まで伸ばすと2つになって使われる
+  assert.ok(s.act(e, 'extendDown').ok);
+  assert.deepEqual(e.stops, [0]); assert.equal(e.usable, false);
+  assert.ok(s.build('resizeElevator', { id: e.id, lo: 0, hi: 14 }).ok);
+  assert.deepEqual(e.stops, [0, 14]); assert.equal(e.usable, true);
+  assert.equal(s.describe(e).warning, undefined);
+  assert.deepEqual(s.route(0, 14).map((l) => l.kind), ['express']);
+  s.step(60);
+  checkInvariants(s);
+});
+
+test('エスカレーター: 近い階はエスカレーター、遠い階はエレベーター（見込み時間で選ぶ）', () => {
+  const s = new Tower({ seed: 131 });
+  s.money = 1e9; s.star = 2;
+  mustBuild(s, 'lobby', { f: 0, x: 0, x2: 149 });
+  for (let f = 1; f <= 12; f++) mustBuild(s, 'floor', { f, x: 0, x2: 149 });
+  mustBuild(s, 'elevator', { f: 0, f2: 12, x: 70 });
+  mustBuild(s, 'escalator', { f: 0, x: 80 });
+  mustBuild(s, 'escalator', { f: 1, x: 80 });
+  for (const f of [1, 2]) for (let x = 0; x + 12 <= 64; x += 12) s.build('shop', { f, x });
+  for (let x = 0; x + OW <= 64; x += OW) s.build('office', { f: 10, x });
+  // 経路のコストの時点で、1〜2階分はエスカレーター
+  assert.deepEqual(s.route(0, 2).map((l) => l.kind), ['esc', 'esc']);
+  assert.deepEqual(s.route(0, 10).map((l) => l.kind), ['elev']);
+  const used = { short: { esc: 0, elev: 0 }, long: { esc: 0, elev: 0 } };
+  const P = Object.getPrototypeOf(Object.getPrototypeOf(s));
+  const orig = P.reached;
+  s.reached = function (p) {
+    const r = orig.call(this, p);
+    if (p.dest && (p.state === 'stairs' || p.state === 'wait')) {
+      const k = p.dest.f >= 9 ? 'long' : 'short';
+      if (p.state === 'stairs' && p.esc) used[k].esc++;
+      if (p.state === 'wait') used[k].elev++;
+    }
+    return r;
+  };
+  for (let i = 0; i < 60; i++) {
+    const p = s.newPerson('visitor', null);
+    s.spawnAt(p, s.entrances[0], i % 2 ? 72 : 82);
+    const long = i % 3 === 0;
+    s.startTrip(p, long ? 10 : 1 + (i % 2), long ? 20 : 30, (pp) => s.leave(pp));
+  }
+  stepTo(s, 0, 12);
+  console.log(`    近い階: エスカレーター ${used.short.esc}・エレベーター ${used.short.elev} / 遠い階: エスカレーター ${used.long.esc}・エレベーター ${used.long.elev}`);
+  assert.ok(used.short.esc > used.short.elev, '近い階は多くがエスカレーター（エレベーターの真ん前にいる人は乗ることもある）');
+  assert.ok(used.long.elev > 0 && used.long.esc === 0, '遠い階はエレベーター');
+  // エレベーターのすぐ前にいて、待ちが無いなら、1階分でもエレベーターを選ぶことがある（見込み時間の比較）
+  const e = s.transportAt(1, 71);
+  const tE = s.expectElevator(e, 0, 2, 70), ch = s.stairChain(0, 2, 70);
+  assert.ok(ch && tE < ch.t, '真ん前で待ちが無ければエレベーターが早い');
+  // 行列が長いとエスカレーターに回る
+  e.q[0] = { up: Array.from({ length: 40 }, () => ({})), down: [] };
+  assert.ok(s.expectElevator(e, 0, 2, 70) > ch.t, '行列が長ければエスカレーター');
+  e.q[0] = { up: [], down: [] };
+});
+
+test('医療センター: 病人が受診し、満床・不足なら評価の内訳と助言', () => {
+  const s = new Tower({ seed: 132 });
+  s.money = 1e9; s.star = 3;
+  smallTower(s, 12);
+  for (let f = 1; f <= 11; f++) for (let x = 40; x + OW <= 100; x += OW) s.build('office', { f, x });
+  for (const o of s.byType.office) s.moveIn(o);
+  const old = SIM.MEDICAL.daily;
+  SIM.MEDICAL.daily = 0.25; // テストでは病人を多めに
+  try {
+    const ev = collect(s);
+    // 医療センターが無い
+    stepTo(s, 1, 14);
+    assert.ok(s.sickToday > 0, '病人が出る');
+    const short = s.byType.office.filter((o) => s.medShortRecent(o));
+    assert.ok(short.length > 0);
+    assert.ok(s.describe(short[0]).reasons.some((r) => r.label === '医療センターが足りない'));
+    assert.ok(ev.message.some((m) => /医療センターがありません/.test(m.text)));
+    // 1つ建てる（8床）。満床になり、混雑の助言が出る
+    mustBuild(s, 'medical', { f: 12, x: 40 });
+    const c = s.objAt(12, 40);
+    assert.equal(c.beds, 8);
+    let sawSick = false, maxPat = 0;
+    s._medMsgAt = -1e9;
+    for (let t = 0; t < 60 * 30; t++) {
+      s.step(1);
+      maxPat = Math.max(maxPat, c.patients);
+      assert.ok(c.patients <= c.beds, '定員を超えない');
+      if ([...s.active].some((p) => p.sick && p.medAt === c)) sawSick = true;
+    }
+    assert.ok(sawSick, '病人が医療センターへ向かう');
+    assert.ok(c.custToday > 0 || c.custYesterday > 0, '受診');
+    assert.equal(maxPat, c.beds, '満床になる');
+    assert.ok(ev.message.some((m) => /混雑しています/.test(m.text) && m.f === 12), '混雑の助言（場所つき）');
+    const d = s.describe(c);
+    assert.ok(d.stats.some(([k, v]) => k === '利用' && /\/ 8床/.test(v)));
+    assert.ok(d.stats.some(([k]) => k === '今日の受診'));
+    // 数時間で退院
+    SIM.MEDICAL.daily = 0;
+    stepTo(s, s.day + 2, 6);
+    assert.equal(c.patients, 0, '退院して空く');
+    assert.ok(!c.members.length);
+    checkInvariants(s);
+  } finally { SIM.MEDICAL.daily = old; }
+});
+
+test('事件を繰り返しても重くならない・増え続けない（480×60）', () => {
+  const s = new Tower({ seed: 133 });
+  buildWideTower(s, 60);
+  s.star = 5; s.money = 1e12;
+  for (let f = 60; f <= 99; f++) mustBuild(s, 'floor', { f, x: 0, x2: 40 });
+  mustBuild(s, 'cathedral', { f: 99, x: 0 });
+  mustBuild(s, 'elevator', { f: 59, f2: 88, x: 2 });
+  mustBuild(s, 'elevator', { f: 88, f2: 99, x: 8 });
+  let msgs = 0, prompts = 0;
+  s.on('message', () => msgs++);
+  s.on('prompt', (p) => { prompts++; s.answer(p.id, p.kind === 'bomb' ? 'refuse' : p.kind === 'fire' ? (prompts % 2 ? 'heli' : 'wait') : 'ok'); });
+  stepTo(s, 1, 8);
+  let worstStep = 0, maxHeap = 0, maxEffects = 0;
+  const msgsPerDay = [];
+  for (let d = 0; d < 4; d++) {
+    const m0 = msgs;
+    for (let i = 0; i < 24; i++) {
+      for (const k of ['bomb', 'fire', 'complaint', 'vip', 'wedding']) s.trigger(k);
+      const h = s.hotels[i % Math.max(1, s.hotels.length)]; if (h) s.trigger('roach', h);
+      const t = performance.now();
+      s.step(60);
+      worstStep = Math.max(worstStep, performance.now() - t);
+      maxHeap = Math.max(maxHeap, s.events.size + s.walkQ.size);
+      maxEffects = Math.max(maxEffects, s.effects.length);
+      assert.ok(s.pending.size <= 3, '答えていないプロンプトが溜まらない');
+    }
+    msgsPerDay.push(msgs - m0);
+  }
+  console.log(`    1時間分の最悪 ${worstStep.toFixed(0)}ms, 予定の最大 ${maxHeap}, 演出の最大 ${maxEffects}, 1日の通知 ${msgsPerDay.join('/')}`);
+  assert.ok(maxEffects <= SIM.MAX_EFFECTS);
+  assert.ok(maxHeap < 200000);
+  assert.ok(Math.max(...msgsPerDay) < 400, '通知が洪水にならない');
+  assert.ok(worstStep < 2000, '1時間分の計算が重くなりすぎない');
+  checkInvariants(s);
+});
+
+test('巡回: フロアの切れ目をまたぐ巡回範囲でも固まらない（爆弾捜索の無限ループの回帰）', () => {
+  const s = new Tower({ seed: 5 });
+  s.money = 1e9;
+  mustBuild(s, 'lobby', { f: 0, x: 0, x2: 199 });
+  // 5F は 0〜59 と 120〜199 の2区画（60〜119 は切れ目）
+  for (let f = 1; f <= 4; f++) mustBuild(s, 'floor', { f, x: 0, x2: 199 });
+  mustBuild(s, 'floor', { f: 5, x: 0, x2: 59 });
+  mustBuild(s, 'floor', { f: 5, x: 120, x2: 199 });
+  const p = s.newPerson('guard', null);
+  p.f = 5; p.x = 30; p.state = 'walk'; s.active.add(p);
+  let done = false;
+  // 範囲を指定しない巡回は階全体（切れ目をまたぐ）になる
+  s.startPatrol(p, 60, () => { done = true; });
+  const t0 = Date.now();
+  for (let i = 0; i < 90 * 4; i++) s.step(0.25);
+  assert.ok(Date.now() - t0 < 2000, '時間が進む（無限ループしない）');
+  assert.ok(done, '巡回が時間どおりに終わる');
+  // 区画の外に出ていない
+  assert.ok(p.x <= 59.5 || p.state !== 'walk', '切れ目を宙歩きしない');
 });
 
 test('性能: 横幅480・30フロア・人口6000超の横長ビルで 1 ゲーム日', () => {

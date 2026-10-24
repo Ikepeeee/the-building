@@ -1,8 +1,8 @@
 // 建設: 施設の層（grid）と移動手段の層（tgrid）、撤去、破壊、一括コピー（Tower.prototype に混ぜ込む）
 import { W, MIN_F, MAX_F, TYPES, VARIANTS, floorName, fmtMoney } from './constants.js';
-import { LOBBY_SET, TRANSPORT, ELEV, HOTEL, COMMERCE, TENANT, STAFF_KIND } from './rules.js';
+import { LOBBY_SET, TRANSPORT, ELEV, HOTEL, COMMERCE, TENANT, STAFF_KIND, SIM } from './rules.js';
 import { pickBrand } from './brands.js';
-import { defaultElevConfig, defaultSkip, countStops } from './elevator.js';
+import { defaultElevConfig } from './elevator.js';
 
 const BATCH_TOOLS = new Set(Object.keys(TYPES));
 
@@ -179,7 +179,6 @@ export const BuildMixin = {
     if (hi - lo + 1 > T.maxSpan) return fail(`最大${T.maxSpan}フロアまでです`);
     const r = this.checkTransportCells(tool, x, w, lo, hi);
     if (r) return fail(r);
-    if (countStops(lo, hi, defaultSkip(tool, lo, hi)) < 2) return fail('停止階（ロビー階・地下）が2つ以上必要です');
     return { ok: true, reason: '', cost: T.cost, ghost, apply: () => this._placeTransport(tool, x, lo, hi) };
   },
 
@@ -248,6 +247,7 @@ export const BuildMixin = {
       salesToday: 0, custToday: 0, salesYesterday: 0, custYesterday: 0, noisy: false,
     };
     if (HOTEL.has(type)) Object.assign(o, { dirty: false, infested: false, dirtySince: null, cleaner: null, checkedIn: 0, cleanFail: -1e9 });
+    if (type === 'medical') Object.assign(o, { patients: 0, beds: SIM.MEDICAL.beds });
     this.objs.set(o.id, o);
     if (o.id >= this.nextId) this.nextId = o.id + 1;
     if (this._batch) this._batch.created.push(o);
@@ -352,8 +352,9 @@ export const BuildMixin = {
     if (kind === 'fire') o.burnt = 1;
     if (HOTEL.has(o.type)) Object.assign(o, { dirty: false, infested: false, cleaner: null });
     if (this.fire && this.fire.burning.has(o)) { this.fire.burning.delete(o); this.updateFires(); }
-    this.reindex();
-    this.recalcPop();
+    // 爆発・延焼では一度に何十件も壊れるので、索引の作り直しは tick の終わりにまとめる
+    this._needReindex = true;
+    this._popDirty = true;
   },
 
   dropOff(e, p, f) {

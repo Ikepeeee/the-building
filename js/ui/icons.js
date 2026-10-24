@@ -196,6 +196,7 @@ export function iconURL(key) {
     const g = c.getContext('2d');
     (DRAW[key] || DRAW.floor)(g);
     url = c.toDataURL();
+    c.width = c.height = 0; // 使い終わったキャンバスはすぐ解放
   } catch { /* ignore */ }
   cache.set(key, url);
   return url;

@@ -53,7 +53,14 @@ export class Renderer {
     this.dpr = 1;
     this.cssW = canvas.clientWidth || canvas.width || 300;
     this.cssH = canvas.clientHeight || canvas.height || 150;
-    this.opts = { cache: true, lod: true };   // cache: 静的レイヤーのチャンク化、lod: 引いたときの簡略描画
+    this.opts = { cache: true, lod: true, caps: true };
+    // キャンバスのメモリ予算（iOS Safari はキャンバスの合計メモリに上限があり、超えるとタブが落ちる）
+    const nav = typeof navigator !== 'undefined' ? navigator : null;
+    const ua = nav && nav.userAgent || '';
+    this.mobile = /iPhone|iPad|iPod|Android|Mobile/.test(ua) || (!!nav && nav.maxTouchPoints > 1 && /Macintosh/.test(ua));
+    const totalMB = this.mobile ? 96 : 256;
+    this.budget = { chunkPx: totalMB * 0.55 * 262144, spritePx: totalMB * 0.25 * 262144 };   // 1MB = 262144 px（4バイト/px）
+    this.pool = [];   // 使い回すチャンク用キャンバス   // cache: 静的レイヤーのチャンク化、lod: 引いたときの簡略描画
     this.cache = new Map();      // スプライトキャッシュ
     this.tiles = new Map();      // タイル
     this.carAnim = new WeakMap();
@@ -68,6 +75,7 @@ export class Renderer {
   }
 
   setSim(sim) {
+    if (this.sim && sim !== this.sim && this.chunks) this.dropCaches();
     this.sim = sim || null;
     this.memo = new WeakMap();
     this.carAnim = new WeakMap();
@@ -178,11 +186,13 @@ export class Renderer {
   X(wx) { return Math.round((wx - this.cx) * this.S); }
   Y(wy) { return Math.round((wy - this.cy) * this.S); }
   img(c, wx, wy, ww, wh) {
+    if (!c || !c.width) return;
     const x0 = this.X(wx), y0 = this.Y(wy);
     const w = this.X(wx + ww) - x0, h = this.Y(wy + wh) - y0;
     if (w > 0 && h > 0) this.ctx.drawImage(c, x0, y0, w, h);
   }
   imgPart(c, sx, sy, sw, sh, wx, wy, ww, wh) {
+    if (!c || !c.width) return;
     const x0 = this.X(wx), y0 = this.Y(wy);
     const w = this.X(wx + ww) - x0, h = this.Y(wy + wh) - y0;
     if (w > 0 && h > 0) this.ctx.drawImage(c, sx, sy, sw, sh, x0, y0, w, h);
@@ -337,14 +347,33 @@ export class Renderer {
     if (!c) { c = make(); this.tiles.set(key, c); }
     return c;
   }
+  // スプライトのキャッシュ（ピクセル数で上限をかけた LRU。約 4M px = 16MB）
   sprite(key, make) {
     let c = this.cache.get(key);
-    if (!c) {
-      if (this.cache.size > 3000) this.cache.clear();
-      c = make();
-      this.cache.set(key, c);
+    if (c) { this.cache.delete(key); this.cache.set(key, c); return c; }
+    c = make();
+    this.cache.set(key, c);
+    this._spritePx = (this._spritePx || 0) + c.width * c.height;
+    if (!this.opts.caps) { if (this.cache.size > 3000) { this.cache.clear(); this._spritePx = 0; } return c; }
+    while (this._spritePx > this.budget.spritePx && this.cache.size > 64) {
+      const k = this.cache.keys().next().value;
+      const old = this.cache.get(k);
+      this._spritePx -= old.width * old.height;
+      this.cache.delete(k);
+      freeCanvas(old);   // iOS Safari ではサイズを 0 にしないとメモリが返らない
     }
     return c;
+  }
+  // メモリの目安（キャッシュしているキャンバスのピクセル数×4バイト）
+  memoryEstimate() {
+    let tiles = 0;
+    for (const c of this.tiles.values()) tiles += (c.width || 0) * (c.height || 0);
+    let pool = 0;
+    for (const c of this.pool) pool += c.width * c.height;
+    const main = this.canvas.width * this.canvas.height;
+    const mb = (px) => +(px * 4 / 1048576).toFixed(2);
+    const totalPx = (this._spritePx || 0) + (this._chunkPx || 0) + tiles + pool + main;
+    return { spritesMB: mb(this._spritePx || 0), chunksMB: mb(this._chunkPx || 0), poolMB: mb(pool), tilesMB: mb(tiles), mainMB: mb(main), totalMB: mb(totalPx), sprites: this.cache.size, chunks: this.chunks ? this.chunks.size : 0, created: this._created || 0 };
   }
 
   // 毎フレーム描き直す（チャンクに焼かない）施設: 動きがあるもの
@@ -520,6 +549,7 @@ export class Renderer {
         if (cap != null && n > cap) n = cap;
         if (t === 'garbage') n = ((num(o.fill) * 12) | 0) + ((num(o.bags) > 0) ? 100 : 0);
         else if (t === 'parking') n = o.used | 0;
+        else if (t === 'medical') n = Math.min(3, num(o.patients, (o.inCount | 0) - 2) | 0) * 8 + Math.min(6, o.inCount | 0);
         let open = 1;
         if (COMMERCE.has(t) && typeof sim.isOpen === 'function') { try { open = sim.isOpen(o) ? 1 : 0; } catch (e) { open = 1; } }
         s = (n | ((o.occupied !== false) << 7) | ((o.dirty ? 1 : 0) << 8) | (open << 9) | ((o.variant | 0) << 10) | (((num(o.burnt) * 8) | 0) << 14)
@@ -533,6 +563,7 @@ export class Renderer {
   drawChunks(view) {
     const sim = this.sim;
     this._frame = (this._frame || 0) + 1;
+    this._chunkBudget = this.opts.caps ? 24 : Infinity;
     const S = this.S;
     const cs = S >= 1 ? 1 : S >= 0.5 ? 0.5 : 0.25;
     const idx = this.chunkIndex();
@@ -556,8 +587,11 @@ export class Renderer {
         const check = !ch || ch.base !== b2 || ((cx + cy * 7 + this._frame) % 3 === 0);
         const sig = check ? this.chunkSig(list, b2, nightOn, 0, week) : ch.sig;
         if (ch) ch.base = b2;
+        // 描き直しは 1 フレームあたり 24 チャンクまで（事件で一斉に変わっても固まらない）。既存のものは次のフレームへ回す
+        if (ch && ch.sig !== sig && this._chunkBudget <= 0) { ch.base = -1; this.img(ch.c, cx * CH_W, cy * CH_H, CH_W, CH_H); continue; }
         if (!ch || ch.sig !== sig) {
-          if (!ch) { ch = { c: makeCanvasLike(Math.ceil(CH_W * cs), Math.ceil(CH_H * cs)), sig: 0, base: b2 }; cache.set(key, ch); this._chunkPx = (this._chunkPx || 0) + ch.c.width * ch.c.height; }
+          this._chunkBudget--;
+          if (!ch) { ch = { c: this.chunkCanvas(Math.ceil(CH_W * cs), Math.ceil(CH_H * cs)), sig: 0, base: b2 }; cache.set(key, ch); this._chunkPx = (this._chunkPx || 0) + ch.c.width * ch.c.height; }
           this.renderChunk(view, ch, cx * CH_W, cy * CH_H, cs, list);
           ch.sig = sig;
           this.stats.chunkRedraw = (this.stats.chunkRedraw || 0) + 1;
@@ -565,13 +599,37 @@ export class Renderer {
         this.img(ch.c, cx * CH_W, cy * CH_H, CH_W, CH_H);
       }
     }
-    // 古いチャンクを捨てる（約 8M ピクセル = 32MB まで）
-    while (this._chunkPx > 8e6 && cache.size > 4) {
+    // 古いチャンクを捨てる（予算まで）。キャンバスはプールに戻して使い回し、あふれた分はサイズ 0 にして解放
+    while (this._chunkPx > this.budget.chunkPx && cache.size > 4) {
       const k = cache.keys().next().value;
       const c = cache.get(k).c;
       this._chunkPx -= c.width * c.height;
       cache.delete(k);
+      this.releaseChunkCanvas(c);
     }
+  }
+  chunkCanvas(w, h) {
+    const pool = this.pool;
+    for (let i = pool.length - 1; i >= 0; i--) {
+      const c = pool[i];
+      if (c.width === w && c.height === h) { pool.splice(i, 1); return c; }
+    }
+    this._created = (this._created || 0) + 1;
+    return makeCanvasLike(w, h);
+  }
+  releaseChunkCanvas(c) {
+    if (this.pool.length < 12) this.pool.push(c);
+    else freeCanvas(c);
+  }
+  // 全キャッシュを捨てる（setSim や画面を閉じるとき）
+  dropCaches() {
+    if (this.chunks) { for (const ch of this.chunks.values()) freeCanvas(ch.c); this.chunks.clear(); }
+    for (const c of this.pool) freeCanvas(c);
+    this.pool.length = 0;
+    for (const c of this.cache.values()) freeCanvas(c);
+    this.cache.clear();
+    this._chunkPx = 0; this._spritePx = 0;
+    this.memo = new WeakMap();
   }
 
   renderChunk(view, ch, x0, y0, cs, list) {
@@ -640,6 +698,14 @@ export class Renderer {
     const dirty = o.dirty ? 1 : 0;
     const alt = (num(o.id) % 3 + 3) % 3;
     if (type === 'metro' && this.hour < 5) n = 0;
+    if (type === 'medical') {
+      // 患者（o.patients があればそれ、無ければ在室から推定）と職員
+      const ic = Math.max(0, num(o.inCount) | 0);
+      const pf = num(o.patients, NaN);
+      const pts = pf === pf ? Math.max(0, pf | 0) : Math.max(0, ic - 2);
+      const staff = pf === pf ? Math.max(0, ic - pts) : Math.min(3, ic);
+      n = Math.min(3, pts) | (Math.min(3, staff) << 3);
+    }
     if (type === 'garbage') {
       // 袋の量（fill 0..1 → 0..12、満杯以上は 13 = あふれ）。fill が無ければ bags / capacity
       let fl = num(o.fill, NaN);
@@ -667,7 +733,7 @@ export class Renderer {
     const sig = (v.n | (v.occ << 5) | (v.dirty << 6) | (v.open << 7) | (v.alt << 8) | (v.night << 10) | (v.week << 11) | (v.frame << 13)
       | (v.var << 15) | (v.seed << 19) | (v.destroyed << 23) | (v.flip << 25)) >>> 0;
     let m = this.memo.get(o);
-    if (!m || m.sig !== sig || m.type !== type || m.tw !== tw || m.th !== th) {
+    if (!m || m.sig !== sig || m.type !== type || m.tw !== tw || m.th !== th || !m.img.width || (m.fg && !m.fg.width)) {
       const art = v.destroyed === 2 ? 'ruinFire' : v.destroyed ? 'ruinBomb' : type;
       const key = type + '|' + tw + '|' + th + '|' + sig;
       const img = this.sprite(key, () => makeFacilitySprite(art, tw, th, v));
@@ -755,7 +821,8 @@ export class Renderer {
         const by = y + j * FH;
         const h = Math.min(FH, y + uh - by);
         if (h <= 0) break;
-        for (let xx = 0; xx < ww; xx += 16) {
+        const xs = Math.max(0, Math.floor((this.vb[0] - x) / 16) * 16), xe = Math.min(ww, this.vb[2] - x + 16);
+        for (let xx = xs; xx < xe; xx += 16) {
           const w = Math.min(16, ww - xx);
           this.imgPart(fr, 0, 0, w, h, x + xx, by, w, h);
         }
@@ -768,13 +835,13 @@ export class Renderer {
       ctx.globalAlpha = 0.42;
       this.rect(x + 1, y, ww - 2, netH, ((id >> 1) & 1) ? '#2f7a8a' : '#3a8a4a');
       ctx.globalAlpha = 0.25;
-      for (let xx = 3; xx < ww - 2; xx += 4) this.rect(x + xx, y, 1, netH, '#123018');
+      for (let xx = 3 + Math.max(0, Math.floor((this.vb[0] - x) / 4) * 4); xx < Math.min(ww - 2, this.vb[2] - x + 4); xx += 4) this.rect(x + xx, y, 1, netH, '#123018');
       ctx.globalAlpha = 1;
     }
     // 足場（パイプと板）
     const sTop = y - 2, sBot = Math.min(y + hh - 3, y + uh + 8);
     if (sBot > sTop) {
-      for (let xx = 2; xx < ww; xx += 16) this.rect(x + xx, sTop, 1, sBot - sTop, '#d8b040');
+      for (let xx = 2 + Math.max(0, Math.floor((this.vb[0] - x) / 16) * 16); xx < Math.min(ww, this.vb[2] - x + 16); xx += 16) this.rect(x + xx, sTop, 1, sBot - sTop, '#d8b040');
       this.rect(x + ww - 2, sTop, 1, sBot - sTop, '#d8b040');
       for (let yy = sTop + 6; yy < sBot; yy += 8) { this.rect(x, yy, ww, 1, '#8a6a20'); this.rect(x, yy + 1, ww, 0.5, '#5a4410'); }
     }
@@ -1119,12 +1186,25 @@ export class Renderer {
     };
     // 移動中の人
     const act = sim.active;
-    if (act && typeof act[Symbol.iterator] === 'function') {
+    const simplify = !!(this._view && this._view.simplifyPeople);
+    const fMin = this.fLo - 2, fMax = this.fHi + 2;
+    if (simplify) {
+      // 高速時: 歩いている人は描かない（選択中の人だけは描く）
+      if (sel && (sel.state === 'walk' || sel.state === 'stairs')) {
+        let pos = null;
+        try { pos = typeof sim.drawPos === 'function' ? sim.drawPos(sel) : null; } catch (e) { pos = null; }
+        const px = pos ? num(pos.x, NaN) : num(sel.x, NaN), pf = pos ? num(pos.f, NaN) : num(sel.f, NaN);
+        if (px === px && pf === pf) drawOne(sel, px * TW + TW / 2, pf, 1, false);
+      }
+    } else if (act && typeof act[Symbol.iterator] === 'function') {
       const hasDP = typeof sim.drawPos === 'function';
       for (const p of act) {
         if (!p) continue;
         const st = p.state;
         if (st === 'ride' || st === 'wait') continue;
+        // 画面から遠い階の人は drawPos を呼ぶ前に捨てる
+        const pf0 = p.f;
+        if (typeof pf0 === 'number' && (pf0 < fMin || pf0 > fMax) && p !== sel) continue;
         let pos = null;
         try { pos = hasDP ? sim.drawPos(p) : null; } catch (e) { pos = null; }
         let px, pf;
@@ -1222,8 +1302,12 @@ export class Renderer {
     const fires = Array.isArray(sim.fires) ? sim.fires : [];
     for (const fi of fires) {
       if (!fi) continue;
-      const f = num(fi.f), x0 = num(fi.x0), x1 = Math.max(x0, num(fi.x1, x0));
+      const f = num(fi.f);
       if (f < this.fLo - 1 || f > this.fHi + 1) continue;
+      // 範囲は画面内とビルの幅に切り詰める（巨大な区間でも重くならない）
+      const caps = this.opts.caps;
+      const x0 = caps ? Math.max(num(fi.x0), this.xA - 1, 0) : num(fi.x0), x1 = caps ? Math.min(Math.max(num(fi.x0), num(fi.x1, fi.x0)), this.xB + 1, W - 1) : Math.max(num(fi.x0), num(fi.x1, fi.x0));
+      if (!(x1 >= x0)) continue;
       const wy = -(f + 1) * FH;
       ctx.globalAlpha = 0.28 + 0.1 * Math.sin(ms / 90);
       this.rect(x0 * TW, wy, (x1 - x0 + 1) * TW, FH - 2, '#ff5010');
@@ -1242,9 +1326,16 @@ export class Renderer {
       ctx.globalAlpha = 1;
     }
     // エフェクト
-    const effs = Array.isArray(sim.effects) ? sim.effects : [];
-    for (const ef of effs) {
+    const effs = Array.isArray(sim.effects) ? sim.effects : EMPTY;
+    // 多すぎるときは新しいものから最大 48 個（走査は 400 件まで）
+    let drawn = 0;
+    const effMax = this.opts.caps ? 48 : Infinity, scanMax = this.opts.caps ? 400 : Infinity;
+    for (let i = effs.length - 1, k = 0; i >= 0 && k < scanMax && drawn < effMax; i--, k++) {
+      const ef = effs[i];
       if (!ef) continue;
+      const efx = num(ef.x) * TW, efy = -(num(ef.f) + 0.5) * FH;
+      if (efx + 160 < this.vb[0] || efx - 160 > this.vb[2] || efy + 140 < this.vb[1] || efy - 220 > this.vb[3]) continue;
+      drawn++;
       const dur = Math.max(0.01, num(ef.dur, 30));
       const pr = Math.max(0, Math.min(1, (now - num(ef.t0, now)) / dur));
       const cx = num(ef.x) * TW + TW / 2, cy = -(num(ef.f) + 0.5) * FH;
@@ -1791,6 +1882,10 @@ export class Renderer {
       ctx.fillText(label, x0 + padX, cy + Math.round(dpr * 0.5));
     }
   }
+}
+
+function freeCanvas(c) {
+  try { c.width = 0; c.height = 0; } catch (e) { /* OffscreenCanvas などで失敗しても無視 */ }
 }
 
 function makeCanvasLike(w, h) {

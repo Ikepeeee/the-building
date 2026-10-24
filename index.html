@@ -24,6 +24,7 @@
       [[6, 4], [8, 4], [7, 6], [9, 6], [6, 8], [8, 8]].forEach(function (p) { R('#ffd34d', p[0], p[1], 1, 1); });
       R('#553', 7, 11, 2, 2); R('#ffd34d', 7, 0, 2, 2);
       var l = document.createElement('link'); l.rel = 'apple-touch-icon'; l.href = c.toDataURL('image/png');
+      c.width = c.height = 0;
       document.head.appendChild(l);
     } catch (e) { /* アイコンが無くても遊べる */ }
     // ホーム画面から起動したとき（ブラウザの UI なし）
@@ -61,6 +62,12 @@
 
   <div id="confirm-bar" class="frame" hidden>
     <div class="cb-text"><b id="cb-name"></b><span id="cb-cost"></span></div>
+    <div class="cb-nudge" role="group" aria-label="1マスずつ動かす">
+      <button class="btn" id="cb-l" aria-label="左へ1マス">◀</button>
+      <button class="btn" id="cb-u" aria-label="上へ1階">▲</button>
+      <button class="btn" id="cb-d" aria-label="下へ1階">▼</button>
+      <button class="btn" id="cb-r" aria-label="右へ1マス">▶</button>
+    </div>
     <button class="btn" id="cb-cancel">✕ やめる</button>
     <button class="btn btn-primary" id="cb-ok">✓ 建設</button>
   </div>

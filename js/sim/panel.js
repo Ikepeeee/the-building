@@ -28,6 +28,7 @@ export const PanelMixin = {
     if (o.noisy) out.push({ label: '騒音（近くの飲食店・映画館など）', level: 'bad' });
     if (o.garbageBad) out.push({ label: this.garbageProblem() === 'none' ? 'ごみが溜まっている（ごみ集積所がない）' : 'ごみが溜まっている（集積所が満杯）', level: 'bad' });
     if (o.parkingShort > 0) out.push({ label: `駐車場がない（${o.parkingShort}台不足）`, level: 'bad' });
+    if (this.medShortRecent(o)) out.push({ label: '医療センターが足りない', level: 'bad' });
     else if (o.needsParking > 0) out.push({ label: `駐車場 ${o.needsParking}台 確保`, level: 'good' });
     if (HOTEL.has(o.type)) {
       if (o.infested) out.push({ label: 'ゴキブリが出る', level: 'bad' });
@@ -78,7 +79,8 @@ export const PanelMixin = {
       const riders = o.cars.reduce((s, c) => s + c.pass.length, 0);
       stats.push(['カゴ', `${o.cars.length} / ${T.maxCars}台`]);
       stats.push(['定員', `${o.cap}人`]);
-      stats.push(['停止階', `${o.stops.length}フロア${cfg.skip.length ? `（通過 ${cfg.skip.map(floorName).join('・')}）` : ''}`]);
+      stats.push(['停止階', `${o.stops.length}フロア${cfg.skip.length && cfg.skip.length <= 12 ? `（通過 ${cfg.skip.map(floorName).join('・')}）` : cfg.skip.length ? `（通過 ${cfg.skip.length}フロア）` : ''}`]);
+      if (!o.usable) d0warn = '停止階が2つ未満のため使われません';
       stats.push(['待っている人', `${o.waitN}人`]);
       stats.push(['乗っている人', `${riders}人`]);
       stats.push(['平均待ち時間', `${(o.avgWait || 0).toFixed(1)}分（直近1時間）`]);
@@ -133,6 +135,11 @@ export const PanelMixin = {
       stats.push(['メイド', `${o.members.length}人（清掃中 ${away}人）`]);
       stats.push(['要清掃の客室', `${dirty}室`]);
       stats.push(['維持費', `${fmtMoney(SIM.MAINT.housekeeping)}/日`]);
+    } else if (o.type === 'medical') {
+      stats.push(['利用', `${o.patients} / ${o.beds}床`]);
+      stats.push(['今日の受診', `${o.custToday}人`]);
+      stats.push(['維持費', `${fmtMoney(SIM.MAINT.medical)}/日`]);
+      if (o.patients >= o.beds) d0warn = '満床です。医療センターの増設を検討してください';
     } else if (o.type === 'garbage') {
       stats.push(['この集積所', `${Math.round(o.bags)} / ${TYPES.garbage.capacity}袋（${Math.round(o.fill * 100)}%）`]);
       stats.push(['ビル全体', `${Math.round(this.garbageBags)} / ${this.garbageCap}袋（${this.byType.garbage.length}室）`]);

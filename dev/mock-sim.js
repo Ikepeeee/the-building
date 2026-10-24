@@ -265,6 +265,9 @@ export class MockTower {
     this.elevators.push(sE, sX);
     // 破壊されたテナント
     for (const [f, x, k] of [[5, 260, 'bomb'], [5, 269, 'bomb'], [11, 400, 'fire'], [7, 380, 'fire'], [2, 160, 'bomb']]) { const o = this.objAt(f, x); if (o) { o.destroyed = k; o.inCount = 0; } }
+    // 医療センターの患者（§sick）
+    let mi = 0;
+    for (const o of this.objs.values()) if (o.type === 'medical') { o.beds = 3; o.patients = [2, 3, 1, 0][mi++ % 4]; o.inCount = o.patients + 2; }
     // variant と brand
     const BR = {
       office: ['山田商事', 'ネクスト・ソフト', '桜法律事務所', 'スタジオ彩', 'みらい銀行', '青空出版', 'ピクセル工房', '東西トレーディング'],

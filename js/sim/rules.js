@@ -23,8 +23,8 @@ export const isStopFloor = (type, f) => type !== 'express' || f < 0 || LOBBY_SET
 export const SIM = {
   TICK: 0.25,
   WALK: 40,             // マス/分（1マス=2m、80m/分。横幅480マスを12分で歩く）
-  STAIR_TIME: 1.2,      // 階段1階分（分）
-  ESC_TIME: 0.7,        // エスカレーター1階分（分）
+  STAIR_TIME: 0.4,      // 階段1階分（分）≈ 24秒
+  ESC_TIME: 0.3,        // エスカレーター1階分（分）≈ 18秒
   DOOR: 0.12,           // ドア開閉（分）≈ 7秒（実際は elevator.js の DOOR_TIME）
   BOARD: 1 / 60,        // 1人の乗降（分）= 1秒
   WAIT_GRACE: 1,        // この時間（分）を超える待ちでストレス増（実在の速さのエレベーターでは1分でも長い）
@@ -35,7 +35,9 @@ export const SIM = {
   STAIR_STRESS: 5,      // /階
   ESC_STRESS: 1,        // /階
   TRIP_LIMIT: 360,
-  MAX_BACKLOG: 30,      // 予算付き step で持ち越すゲーム分の上限      // これを超えた移動は救済（リーク防止）
+  MAX_BACKLOG: 30,
+  MEDICAL: { beds: 8, daily: 0.003, stay: [120, 120], penalty: 6 }, // 1日に体調を崩す確率、入院（分）
+  MAX_EFFECTS: 120,     // 同時に出す演出の上限      // 予算付き step で持ち越すゲーム分の上限      // これを超えた移動は救済（リーク防止）
   EXTEND_COST: { elevator: 10000, express: 20000 },
   EXTERMINATE: 10000,
   HELI: 500000,
@@ -67,7 +69,9 @@ export const SIM = {
   MAINT: { garbage: 500, parking: 300, escalator: 300, security: 1500, housekeeping: 800, medical: 3000, metro: 8000, cathedral: 5000 },
   STAFF: { security: 6, housekeeping: 6 },
   // 経路コスト（ダイクストラ）
-  COST: { elevBase: 5, elevPer: 0.12, expBase: 5, expPer: 0.04, stairs: 2.2, esc: 1.6 },
+  // 経路のコスト（分の見込み）: エレベーターは待ち＋乗り降りの基本分と1フロアごとの分、階段は疲れの分を上乗せ
+  COST: { elevBase: 1.0, elevPer: 0.05, expBase: 1.2, expPer: 0.01, stairs: 0.8, esc: 0.35 },
+  STAIR_PENALTY: 0.4,   // 階段1階分の「疲れ」を分に換算したもの（その場の判断用）
 };
 
 // 商業施設: 滞在時間 [最小, 幅]、来客率、1時間あたりの上限

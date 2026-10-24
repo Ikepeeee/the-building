@@ -450,29 +450,43 @@ DRAW.housekeeping = (p, v) => {
 };
 
 DRAW.medical = (p, v) => {
+  // v.n = 患者数（下位3ビット、0..3） + 職員数×8（0..3）
+  const pts = v.n & 7, staff = (v.n >> 3) & 3;
   const fy = shell(p, '#eef4f2', '#9ab8b4', { base: '#cfe0dc' });
   p.box(6, 2, 11, 11, '#ffffff'); p.r(10, 4, 3, 7, '#20a050'); p.r(8, 6, 7, 3, '#20a050');
-  if (v.n > 0) coatFig(p, 12, 19, '#f0a0c0', 1);
+  if (staff > 0) coatFig(p, 12, 19, '#f0a0c0', 1);
   p.box(4, 14, 26, 7, '#d0dcd8'); p.r(3, 13, 28, 1, '#7a8a88');
   const beds = p.w < 200 ? [36, 74, 112] : [38, 80, 122];
   for (let i = 0; i < 3; i++) {
     const x = beds[i];
+    const sick = i < pts;
     p.r(x - 2, 1, 38, 1, '#888');
-    p.r(x - 2, 2, 6, 18, '#a8d0e8'); p.r(x, 2, 1, 18, '#88b0c8'); p.r(x + 2, 2, 1, 18, '#88b0c8');
+    // 患者がいるベッドはカーテンを半分閉める
+    p.r(x - 2, 2, sick ? 10 : 6, 18, '#a8d0e8'); p.r(x, 2, 1, 18, '#88b0c8'); p.r(x + 2, 2, 1, 18, '#88b0c8'); if (sick) p.r(x + 5, 2, 1, 18, '#88b0c8');
     p.box(x + 8, 14, 22, 4, '#ffffff'); p.box(x + 8, 12, 5, 3, '#ffffff');
     p.r(x + 9, 18, 1, 3, '#888'); p.r(x + 28, 18, 1, 3, '#888'); p.r(x + 8, 18, 22, 1, '#a0a8a8');
-    p.box(x + 13, 13, 16, 3, '#9ad8c8');
-    if (v.n > i + 1) p.r(x + 9, 10, 3, 3, FIG);
-    p.r(x + 32, 5, 1, 16, '#888'); p.box(x + 31, 4, 3, 5, '#d8f0ff'); p.r(x + 30, 20, 5, 1, '#888');
+    if (sick) {
+      // 横になった患者: 枕の上の頭と、布団のふくらみ
+      p.r(x + 9, 11, 3, 2, '#2a2a2a'); p.p(x + 10, 13, '#f0d0b8');
+      p.box(x + 12, 12, 17, 4, '#9ad8c8'); p.r(x + 15, 11, 9, 1, '#9ad8c8'); p.r(x + 14, 11, 11, 1, '#000'); p.r(x + 14, 11, 1, 1, '#000');
+      p.r(x + 15, 12, 9, 1, '#b8e8dc');
+      // 点滴（中身あり）と心電図
+      p.r(x + 32, 5, 1, 16, '#888'); p.box(x + 31, 4, 3, 5, '#d8f0ff'); p.r(x + 32, 6, 1, 2, '#e8c040'); p.r(x + 30, 20, 5, 1, '#888');
+      p.line(x + 32, 9, x + 28, 13, '#c8d8e0');
+      p.box(x + 22, 4, 7, 5, '#202a28'); p.r(x + 23, 6, 2, 1, '#40e080'); p.p(x + 25, 5, '#40e080'); p.r(x + 26, 6, 2, 1, '#40e080');
+    } else {
+      p.box(x + 13, 13, 16, 3, '#9ad8c8');
+      p.r(x + 32, 5, 1, 16, '#888'); p.box(x + 31, 4, 3, 5, '#d8f0ff'); p.r(x + 30, 20, 5, 1, '#888');
+    }
   }
   const mx = p.w - 42, sx = p.w - 24;
   p.box(mx, 5, 13, 9, '#202a28'); p.r(mx + 1, 9, 3, 1, '#40e080'); p.r(mx + 4, 7, 1, 2, '#40e080'); p.r(mx + 5, 10, 1, 1, '#40e080'); p.r(mx + 6, 9, 5, 1, '#40e080');
   p.box(sx, 3, 20, 18, '#e0e8e8');
   for (const row of [8, 13]) { p.r(sx + 1, row, 18, 1, '#9aa'); for (let i = 0; i < 6; i++) p.r(sx + 2 + i * 3, row - 3, 2, 3, ['#e05050', '#ffffff', '#5090e0', '#f0c040'][i % 4]); }
   p.r(sx + 1, 18, 18, 1, '#9aa');
-  if (v.n > 1) coatFig(p, sx - 6, fy - 1, '#ffffff', 0);
-  if (v.n > 4) coatFig(p, 72, fy - 1, '#ffffff', 1);
-  if (v.n > 5) standFig(p, 34, fy - 1, FIG, 0, 1);
+  if (staff > 1) coatFig(p, sx - 6, fy - 1, '#ffffff', 0);
+  if (staff > 2) coatFig(p, beds[1] - 6, fy - 1, '#ffffff', 1);
+  if (pts > 0 && staff > 0) coatFig(p, beds[0] + 30, fy - 1, '#ffffff', 0);
 };
 
 
@@ -784,6 +798,8 @@ export function carSprite(w, express, n, open) {
 export const SPRITE_TOP = { cathedral: 88 };
 
 export function makeFacilitySprite(type, wTiles, hFloors, v) {
+  // 異常な大きさでも巨大なキャンバスを作らない
+  wTiles = Math.max(1, Math.min(64, wTiles | 0)); hFloors = Math.max(1, Math.min(6, hFloors | 0));
   const W = wTiles * TILE_W, H = hFloors * FLOOR_H;
   const top = SPRITE_TOP[type] || 0;
   const p = new Painter(W, H + top);

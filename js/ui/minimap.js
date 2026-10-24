@@ -54,8 +54,11 @@ export class Minimap {
     const [cw, ch] = this.size();
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const b = this.base;
-    b.width = cw * dpr; b.height = ch * dpr;
+    // 大きさが変わったときだけ確保し直す（毎回 width を代入するとメモリを取り直してしまう）
+    if (b.width !== cw * dpr || b.height !== ch * dpr) { b.width = cw * dpr; b.height = ch * dpr; }
     const g = b.getContext('2d');
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, b.width, b.height);
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     // 各列の最上階・最下階
     const tops = new Int16Array(W).fill(-999), bots = new Int16Array(W).fill(999);

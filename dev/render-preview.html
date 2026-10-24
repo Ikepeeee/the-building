@@ -63,6 +63,7 @@ const canvas = document.getElementById('c');
 const r = new Renderer(canvas, sim);
 if (q.get('nocache') === '1') r.opts.cache = false;
 if (q.get('nolod') === '1') r.opts.lod = false;
+if (q.get('nocaps') === '1') r.opts.caps = false;
 window.renderer = r;
 const cam = { x: 0, y: 0, zoom: num('zoom', 2) };
 function center(f, x) {
@@ -74,6 +75,7 @@ function size() { r.resize(innerWidth, innerHeight); }
 addEventListener('resize', size); size();
 
 const view = { cam, ghost: null, selectedId: null, hover: null, nowMs: 0 };
+if (q.get('simplify') === '1') view.simplifyPeople = true;
 if (q.get('ghost') === '1') {
   view.ghost = { x: 30, w: 9, f: 21, h: 1, ok: true, label: 'オフィス $40,000', type: 'office' };
 }
@@ -125,11 +127,53 @@ if (q.has('bench')) {
   window.__bench = `bench avg ${avg.toFixed(2)}ms/frame (render) people=${r.stats.people} objs=${r.stats.objs}`;
 }
 let last = performance.now(), fps = 0, acc = 0, frames = 0;
+// ---- 事件のストレステスト: ?big=1&stress=1&dur=120（秒）。結果は window.__stress ----
+const stress = q.get('stress') === '1' ? { t0: performance.now(), dur: num('dur', 120) * 1000, samples: [], acc: [], last: performance.now(), lastSample: performance.now(), nextEv: 0 } : null;
+const allObjs = stress ? [...sim.objs.values()].filter((o) => o.type !== 'elevator' && o.type !== 'express') : [];
+const rnd = () => Math.random();
+const pickO = () => allObjs[(rnd() * allObjs.length) | 0];
+function stressTick(now) {
+  const T = sim.time;
+  // 毎フレーム: 200 室の在室人数と 300 室の焼け具合を変える（チャンクの描き直しを誘発）
+  for (let i = 0; i < 200; i++) { const o = pickO(); o.inCount = (rnd() * 8) | 0; }
+  for (let i = 0; i < 300; i++) { const o = pickO(); o.burnt = rnd(); }
+  if (now > stress.nextEv) {
+    stress.nextEv = now + 400;
+    const kinds = ['explosion', 'smoke', 'fireworks', 'confetti', 'bells', 'sparkle'];
+    for (let i = 0; i < 8; i++) sim.effects.push({ kind: kinds[(rnd() * kinds.length) | 0], f: (rnd() * 60) | 0, x: (rnd() * 470) | 0, t0: T, dur: 30 + rnd() * 200 });
+    // 期限切れの効果は sim と同じく取り除く
+    sim.effects = sim.effects.filter((e) => e._loop || T - e.t0 < e.dur);
+    sim.fires = [];
+    for (let i = 0; i < 40; i++) { const x0 = (rnd() * 470) | 0; sim.fires.push({ f: (rnd() * 60) | 0, x0, x1: x0 + 2 + ((rnd() * 60) | 0) }); }
+    for (let i = 0; i < 20; i++) { const o = pickO(); o.destroyed = rnd() < 0.5 ? (rnd() < 0.5 ? 'bomb' : 'fire') : undefined; }
+    for (let i = 0; i < 30; i++) { const o = pickO(); o.constructStart = T - rnd() * 100; o.constructUntil = T + rnd() * 100; }
+    for (let i = 0; i < 20; i++) { const o = pickO(); o.infested = rnd() < 0.5; o.dirty = rnd() < 0.5; o.complaintUntil = T + 60; }
+    sim.heli = { phase: 'spray', x: 100 + rnd() * 200, f: 30, targetX: 150, targetF: 25 };
+    sim.bomb = { f: 20, x: 100, deadline: T + 100, searched: new Set(Array.from({ length: (rnd() * 60) | 0 }, (_, i) => i)), found: rnd() < 0.3 };
+  }
+  // カメラを動かし、ズームも変える（チャンクの解像度が切り替わる）
+  const k = (now - stress.t0) / 1000;
+  cam.zoom = [0.25, 0.5, 1, 2][((k / 7) | 0) % 4];
+  center(30 + Math.sin(k / 5) * 25, 240 + Math.sin(k / 3) * 200);
+}
+function stressSample(now, ms) {
+  stress.acc.push(ms);
+  if (now - stress.lastSample >= 1000) {
+    const a = stress.acc; const avg = a.reduce((x, y) => x + y, 0) / a.length; const max = Math.max(...a);
+    const mem = r.memoryEstimate ? r.memoryEstimate() : {};
+    stress.samples.push({ t: Math.round((now - stress.t0) / 1000), fps: a.length, avg: +avg.toFixed(2), max: +max.toFixed(1), heapMB: performance.memory ? +(performance.memory.usedJSHeapSize / 1048576).toFixed(1) : null, ...mem, effects: sim.effects.length });
+    stress.acc = []; stress.lastSample = now;
+  }
+  if (now - stress.t0 > stress.dur && !window.__stress) window.__stress = JSON.stringify(stress.samples);
+}
 function loop(now) {
   const dt = Math.min(0.1, (now - last) / 1000); last = now;
   if (speed > 0) sim.step(dt * 6 * speed);
   view.nowMs = now;
+  if (stress) stressTick(now);
+  const rt0 = performance.now();
   r.render(view);
+  if (stress) stressSample(now, performance.now() - rt0);
   frames++; acc += dt;
   if (acc > 0.5) { fps = frames / acc; frames = 0; acc = 0; }
   hud.textContent = (window.__bench ? window.__bench + '\n' : '') + (window.__fails && window.__fails.length ? 'FAIL ' + window.__fails.slice(0, 6).join('\n') + '\n' : '') + `fps ${fps.toFixed(0)}  draw ${r.stats.ms.toFixed(1)}ms\nobjs ${r.stats.objs}  people ${r.stats.people}\n${sim.hour}:${String(sim.minute).padStart(2, '0')} zoom ${cam.zoom.toFixed(2)}` + (r.lastError ? '\nERR ' + (r.lastError.stack || r.lastError) : '');

@@ -686,3 +686,21 @@ html.standalone, html.standalone body { background: #0d1030; }
   #copy-bar #cp-text { font-size: 12px; }
   #app.confirming #copy-bar #cp-text { display: none; }
 }
+#confirm-bar { flex-wrap: wrap; justify-content: center; }
+#confirm-bar .cb-nudge { display: flex; gap: 2px; }
+#confirm-bar .cb-nudge .btn { min-width: 40px; min-height: 40px; padding: 0 6px; font-size: 14px; touch-action: none; }
+@media (max-width: 760px) {
+  #confirm-bar { gap: 4px 6px; padding: 5px 6px; width: calc(100% - 12px); }
+  #confirm-bar .cb-text { flex: 1 1 100%; flex-direction: row; gap: 8px; align-items: baseline; }
+  #confirm-bar .cb-nudge .btn { min-width: 44px; }
+  #app.confirming #copy-bar { bottom: calc(var(--tb-h, 130px) + 128px); }
+}
+.modal .warnline { color: #fff; background: #b8341f; border: 2px solid var(--edge); padding: 4px 8px; font-weight: 700; font-size: 12px; }
+@media (max-width: 760px) {
+  #confirm-bar .cb-text { flex: 1 1 0; flex-direction: column; gap: 0; order: 0; min-width: 0; }
+  #confirm-bar #cb-cancel { order: 1; }
+  #confirm-bar #cb-ok { order: 2; }
+  #confirm-bar .cb-nudge { order: 3; flex: 1 1 100%; justify-content: center; }
+  #confirm-bar .cb-nudge .btn { flex: 1; max-width: 70px; min-height: 38px; }
+  #app.confirming #copy-bar { bottom: calc(var(--tb-h, 130px) + 118px); }
+}

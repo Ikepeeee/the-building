@@ -103,6 +103,13 @@ export class Dialogs {
 
   // ---------- 順番待ちの事件・演出 ----------
   enqueue(item) {
+    // 同じ prompt（id）が何度届いても1回だけ。★・TOWER も重ねない。待ち行列は上限つき
+    const key = item.type === 'prompt' ? `p:${item.data && item.data.id}` : item.type === 'star' ? `s:${item.star}` : item.type;
+    this.seen ||= new Set();
+    if (this.seen.has(key)) return;
+    if (this.queue.length >= 8) return;
+    this.seen.add(key);
+    item.key = key;
     this.queue.push(item);
     this.pump();
   }
@@ -112,7 +119,13 @@ export class Dialogs {
     const item = this.queue.shift();
     this.busy = true;
     this.app.onModalChange();
-    const done = () => { this.busy = false; this.app.onModalChange(); setTimeout(() => this.pump(), 50); };
+    const done = () => {
+      this.busy = false;
+      // 答えた prompt は、同じ id でまた届いても出さない（sim が再送しても重複しない）。★は次の昇格のために消す
+      if (item.type !== 'prompt' && this.seen) this.seen.delete(item.key);
+      this.app.onModalChange();
+      setTimeout(() => this.pump(), 50);
+    };
     try {
       if (item.type === 'prompt') this.showPrompt(item.data, done);
       else if (item.type === 'star') this.showStar(item.star, done);
@@ -124,7 +137,7 @@ export class Dialogs {
     }
   }
 
-  clearQueue() { this.queue = []; }
+  clearQueue() { this.queue = []; this.seen = new Set(); }
 
   showPrompt(p, done) {
     const app = this.app;
@@ -311,7 +324,10 @@ export class Dialogs {
       let r;
       try { r = sim.setElevatorConfig(e, patch); } catch (err) { console.error(err); r = { ok: false, reason: 'エラーが発生しました' }; }
       if (!r || !r.ok) { app.toasts.show({ text: (r && r.reason) || '変更できませんでした', kind: 'bad' }); app.sound.play('error'); }
-      else app.sound.play('click');
+      else {
+        app.sound.play('click');
+        if (r.warning) app.toasts.show({ text: r.warning, kind: 'info' });
+      }
       render();
     };
     const act = (actionId) => {
@@ -358,8 +374,16 @@ export class Dialogs {
       for (let f = e.hi; f >= e.lo; f--) floors.push(f);
       body.append(h('h3', { text: '停止階（押すと止まる／通過を切り替え）' }));
       body.append(h('p', { class: 'small', text: express
-        ? '急行は最初はロビー階（★印）と地下だけに止まります。ほかの階も止まるようにできます。止まる階は2つ以上必要です。'
-        : '★印はロビー階です。止まる階は2つ以上必要です。' }));
+        ? '急行は最初はロビー階（★印）と地下だけに止まります。ほかの階も止まるようにできます。'
+        : '★印はロビー階です。' }));
+      // 止まる階が2つ未満のときは、sim の警告（describe().warning）か既定の文で知らせる
+      let stopsN = 0;
+      for (let f = e.lo; f <= e.hi; f++) if (!skip.has(f)) stopsN++;
+      if (stopsN < 2) {
+        let warn = '';
+        try { warn = (sim.describe(e) || {}).warning || ''; } catch { /* */ }
+        body.append(h('p', { class: 'warnline', text: `⚠ ${warn || '止まる階が2つ未満なので、このエレベーターはまだ使われません。止まる階を増やすか、範囲を伸ばしてください。'}` }));
+      }
       const grid = h('div', { class: 'stops' });
       for (const f of floors) {
         const stop = !skip.has(f);

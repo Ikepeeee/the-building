@@ -1,6 +1,6 @@
 // 人のプロフィールとホテルのレビュー（Tower.prototype に混ぜ込む）。SPEC §14
-import { TYPES, floorName } from './constants.js';
-import { HOTEL, KIND_NAME } from './rules.js';
+import { DAY, TYPES, floorName } from './constants.js';
+import { HOTEL, KIND_NAME, SIM } from './rules.js';
 import { makeRng } from './util.js';
 
 const SURNAME = ['佐藤', '鈴木', '高橋', '田中', '伊藤', '渡辺', '山本', '中村', '小林', '加藤', '吉田', '山田', '佐々木', '山口', '松本', '井上', '木村', '林', '清水', '森', '池田', '橋本', '阿部', '石川', '前田', '藤田', '小川', '岡田', '後藤', '長谷川'];
@@ -106,6 +106,7 @@ export const PeopleMixin = {
     }
     let doing = STATE_TEXT[p.state] || p.state;
     if (p.patrol) doing = '巡回中';
+    if (p.sick) doing = p.medAt ? `体調不良で${this.placeName(p.medAt)}へ` : `体調不良（${doing}）`;
     stats.push(['いま', doing]);
     if (p.dest) {
       const o = this.objAt(p.dest.f, p.dest.x);
@@ -118,6 +119,70 @@ export const PeopleMixin = {
       level: mood, actions: [], kind: p.kind,
     };
   },
+
+  // ---- 病人と医療センター ----
+  // 毎日0時: 建物の中にいる人のうち、ごく一部がその日のどこかで体調を崩す
+  dailyIllness() {
+    const M = SIM.MEDICAL, wk = this.day % 7 < 5, b = this.day * DAY;
+    for (const o of this.facs) {
+      if (!o.occupied || !o.members.length) continue;
+      if (o.type === 'office' ? !wk : !(o.type === 'condo' || HOTEL.has(o.type))) continue;
+      const pr = M.daily * (1 + Math.min(2, this.evalScore(o) / 30));
+      for (const p of o.members) {
+        if (this.r() >= pr) continue;
+        this.at(b + (9 + this.rand(11)) * 60, () => this.fallIll(p));
+      }
+    }
+  },
+
+  fallIll(p) {
+    if (p.sick || p.state !== 'in' || !p.loc) return;
+    const home = p.home;
+    p.sick = true;
+    this.sickToday = (this.sickToday || 0) + 1;
+    const cs = (this.byType.medical || []);
+    let best = null, bd = Infinity, busy = null;
+    for (const c of cs) {
+      if (c.patients >= c.beds) { busy = busy || c; continue; }
+      const d = this.dist(p.f, c.f, p.x, c.x + c.w / 2);
+      if (d < bd) { bd = d; best = c; }
+    }
+    const cure = () => this.later(SIM.MEDICAL.stay[0] + this.rand(SIM.MEDICAL.stay[1]), () => { p.sick = false; });
+    if (!best) {
+      if (home) home.medShort = this.day;
+      this.medAdvice(busy);
+      cure();
+      return;
+    }
+    best.patients++;
+    p.medAt = best;
+    const c = best;
+    const ok = this.startTrip(p, c.f, this.spotIn(c), (pp) => {
+      if (c.dead || c.destroyed) { this.recover(pp, c); return; }
+      this.settle(pp, c);
+      c.custToday++;
+      this.later(SIM.MEDICAL.stay[0] + this.rand(SIM.MEDICAL.stay[1]), () => this.recover(pp, c));
+    });
+    if (!ok) { c.patients--; p.medAt = null; if (home) home.medShort = this.day; cure(); }
+  },
+
+  recover(p, c) {
+    if (p.medAt !== c) return;
+    c.patients = Math.max(0, c.patients - 1);
+    p.medAt = null;
+    p.sick = false;
+    if (p.state === 'in' && p.loc === c) this.goBack(p);
+  },
+
+  // 混雑・不足の知らせ（6時間に1回まで）
+  medAdvice(busy) {
+    if (this.time - (this._medMsgAt ?? -1e9) < 360) return;
+    this._medMsgAt = this.time;
+    if (busy) this.msg('医療センターが混雑しています。増設を検討してください', 'info', busy.f, busy.x + busy.w / 2);
+    else this.msg('病人が出ましたが、医療センターがありません。建設を検討してください', 'info');
+  },
+
+  medShortRecent(o) { return o.medShort !== undefined && o.medShort !== null && this.day - o.medShort <= 1; },
 
   // ---- ホテルのレビュー ----
   noteStay(o, p) {

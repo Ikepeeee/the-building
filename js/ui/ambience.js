@@ -185,6 +185,7 @@ export class Ambience {
 
   // ---- 単発の合成音 ----
   burst(t, dur, o) {
+    if (!this.s.canVoice()) return;
     const c = this.s.ctx;
     const src = c.createBufferSource();
     src.buffer = this.s.noiseBuf;
@@ -195,10 +196,12 @@ export class Ambience {
     g.gain.exponentialRampToValueAtTime(o.vol, t + (o.attack ?? 0.003));
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     src.connect(f); f.connect(g); g.connect(this.n.out);
+    this.s.track(src, f, g);
     src.start(t, Math.random() * 0.8); src.stop(t + dur + 0.02);
   }
 
   tone(t, freq, dur, vol, type = 'sine') {
+    if (!this.s.canVoice()) return;
     const c = this.s.ctx;
     const o = c.createOscillator(); o.type = type; o.frequency.value = freq;
     const g = c.createGain();
@@ -206,6 +209,7 @@ export class Ambience {
     g.gain.exponentialRampToValueAtTime(vol, t + 0.004);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     o.connect(g); g.connect(this.n.out);
+    this.s.track(o, g);
     o.start(t); o.stop(t + dur + 0.02);
   }
 
@@ -237,6 +241,7 @@ export class Ambience {
   }
 
   drill(k) {
+    if (!this.s.canVoice(2)) return;
     const c = this.s.ctx;
     const t = c.currentTime + Math.random() * 0.1;
     const dur = 0.5 + Math.random() * 0.5;
@@ -249,10 +254,12 @@ export class Ambience {
     g.gain.setValueAtTime(0.03 * k, t + dur - 0.08); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     amG.connect(g.gain);
     o.connect(f); f.connect(g); g.connect(this.n.out);
+    this.s.track(o, f, g); this.s.track(am, amG);
     o.start(t); am.start(t); o.stop(t + dur + 0.02); am.stop(t + dur + 0.02);
   }
 
   hydraulic(k) {
+    if (!this.s.canVoice()) return;
     const c = this.s.ctx, t = c.currentTime;
     const o = c.createOscillator(); o.type = 'sawtooth';
     o.frequency.setValueAtTime(220, t); o.frequency.linearRampToValueAtTime(420, t + 0.9);
@@ -261,6 +268,7 @@ export class Ambience {
     g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.025 * k, t + 0.1);
     g.gain.exponentialRampToValueAtTime(0.0001, t + 1);
     o.connect(f); f.connect(g); g.connect(this.n.out);
+    this.s.track(o, f, g);
     o.start(t); o.stop(t + 1.05);
   }
 
@@ -275,7 +283,8 @@ export class Ambience {
       const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 260;
       const g = c.createGain();
       g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.04 * k, t + 0.15); g.gain.exponentialRampToValueAtTime(0.0001, t + 1.3);
-      o.connect(f); f.connect(g); g.connect(this.n.out); o.start(t); o.stop(t + 1.35);
+      if (!this.s.canVoice()) return;
+      o.connect(f); f.connect(g); g.connect(this.n.out); this.s.track(o, f, g); o.start(t); o.stop(t + 1.35);
     }
   }
 

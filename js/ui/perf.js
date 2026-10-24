@@ -10,7 +10,9 @@ export class Perf {
     this.app = app;
     this.frameMs = null; this.simMs = null; this.renderMs = null; this.uiMs = null;
     this.fps = 0; this.frames = 0; this.fpsT = 0;
-    this.native = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
+    // iOS は大きなキャンバスでタブが落ちやすいので解像度は最大 ×2
+    const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    this.native = Math.min(ios ? 2 : 3, Math.max(1, window.devicePixelRatio || 1));
     this.dpr = this.native;
     this.slowSince = 0; this.fastSince = 0;
     let st = {};
