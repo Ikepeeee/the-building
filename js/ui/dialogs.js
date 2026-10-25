@@ -1,6 +1,7 @@
 // モーダル類: 事件の prompt、確認、メニュー、遊び方、状況（★進捗・財務）、セーブ入出力、★昇格演出、エンディング
 import { TYPES, STAR_POP, LOBBY_FLOORS, fmtMoney, floorName } from '../sim/constants.js';
 import { iconURL } from './icons.js';
+import { portraitURL } from './portraits.js';
 import { exportText, parseImport, downloadText, peekSave, storage } from './save.js';
 
 const PROMPT_ICON = { bomb: '💣', fire: '🔥', vip: '🎩', wedding: '💒', roach: '🪳', santa: '🎅' };
@@ -104,7 +105,8 @@ export class Dialogs {
   // ---------- 順番待ちの事件・演出 ----------
   enqueue(item) {
     // 同じ prompt（id）が何度届いても1回だけ。★・TOWER も重ねない。待ち行列は上限つき
-    const key = item.type === 'prompt' ? `p:${item.data && item.data.id}` : item.type === 'star' ? `s:${item.star}` : item.type;
+    const key = item.type === 'prompt' ? `p:${item.data && item.data.id}` : item.type === 'star' ? `s:${item.star}`
+      : item.type === 'scenario' ? `sc:${item.data && item.data.kind}:${item.data && item.data.title}` : item.type;
     this.seen ||= new Set();
     if (this.seen.has(key)) return;
     if (this.queue.length >= 8) return;
@@ -130,6 +132,7 @@ export class Dialogs {
       if (item.type === 'prompt') this.showPrompt(item.data, done);
       else if (item.type === 'star') this.showStar(item.star, done);
       else if (item.type === 'tower') this.showEnding(done);
+      else if (item.type === 'scenario') this.showScenario(item.data, done);
       else done();
     } catch (e) {
       console.error(e);
@@ -242,16 +245,90 @@ export class Dialogs {
     document.getElementById('app').append(el);
   }
 
+  // ---------- シナリオ ----------
+  showScenario(d, done) {
+    if (!d) { done(); return; }
+    if (d.kind === 'clear') { this.showScenarioClear(d, done); return; }
+    if (d.kind === 'fail') { this.showScenarioFail(d, done); return; }
+    const speaker = d.speaker || '';
+    const body = h('div', { class: 'talk' },
+      h('div', { class: 'talk-who' }, h('img', { class: 'talk-face', src: portraitURL(speaker), alt: '' }), h('b', { text: speaker || 'お知らせ' })),
+      h('div', { class: 'talk-text' }, ...String(d.text || '').split('\n').map((line) => h('p', { text: line }))));
+    this.open({
+      title: d.title || '', kind: 'talk', body, closable: false,
+      buttons: [{ label: d.kind === 'intro' && !this.queue.some((i) => i.type === 'scenario') ? 'はじめる ▶' : 'つぎへ ▶', primary: true }],
+    }).then(() => done());
+  }
+
+  scenarioStats(sim) {
+    const rooms = [...sim.objs.values()].filter((o) => /^hotel/.test(o.type)).length;
+    const startDay = (sim.scenario && sim.scenario.startDay) || 0;
+    return h('table', { class: 'fin' },
+      h('tr', {}, h('th', { text: 'かかった日数' }), h('td', { text: `${sim.day - startDay + 1}日` })),
+      h('tr', {}, h('th', { text: 'ホテルの客室' }), h('td', { text: `${rooms}室` })),
+      h('tr', {}, h('th', { text: '人口' }), h('td', { text: `${(sim.pop | 0).toLocaleString('en-US')}人` })),
+      h('tr', {}, h('th', { text: '資金' }), h('td', { text: fmtMoney(sim.money) })));
+  }
+
+  showScenarioClear(d, done) {
+    const app = this.app, sim = app.sim;
+    const grade = Math.max(0, Math.min(3, d.grade ?? (sim.scenario && sim.scenario.grade) ?? 0));
+    const best = sim.scenario ? app.recordScenario(sim.scenario.id, grade, sim.day) : false;
+    app.sound.play('fanfare');
+    const el = h('div', { class: 'ending scn-end clear', role: 'dialog', 'aria-label': 'シナリオクリア' });
+    el.append(this.confetti(70));
+    const close = (fn) => { el.remove(); done(); if (fn) fn(); };
+    el.append(h('div', { class: 'e-box' },
+      h('p', { text: sim.scenario ? sim.scenario.name : '' }),
+      h('h1', { class: 'e-tower', text: 'CLEAR!' }),
+      h('div', { class: 'big-stars', html: '★'.repeat(grade) + `<span class="dim">${'★'.repeat(3 - grade)}</span>` }),
+      best ? h('p', { class: 'best', text: '🏆 最高記録を更新しました！' }) : null,
+      h('div', { class: 'talk end-talk' }, h('img', { class: 'talk-face', src: portraitURL(d.speaker || '町長'), alt: '' }),
+        h('div', {}, h('b', { text: d.speaker || '町長' }), h('p', { text: d.text || 'ありがとう！ 浜に人が戻ってきました。' }))),
+      this.scenarioStats(sim),
+      h('div', { class: 'e-btns' },
+        h('button', { class: 'btn btn-big btn-primary', text: 'このまま続ける', onclick: () => close() }),
+        h('button', { class: 'btn btn-big', text: 'タイトルへ', onclick: () => close(() => app.toTitle()) }))));
+    el.querySelectorAll('.btn-big').forEach((b) => { b.style.width = 'auto'; });
+    document.getElementById('app').append(el);
+    app.manualSave(true);
+  }
+
+  showScenarioFail(d, done) {
+    const app = this.app, sim = app.sim;
+    app.sound.play('error');
+    const el = h('div', { class: 'ending scn-end fail', role: 'dialog', 'aria-label': 'シナリオ失敗' });
+    const close = (fn) => { el.remove(); done(); if (fn) fn(); };
+    const id = sim.scenario && sim.scenario.id;
+    el.append(h('div', { class: 'e-box' },
+      h('p', { text: sim.scenario ? sim.scenario.name : '' }),
+      h('h1', { class: 'e-tower', text: '残念…' }),
+      h('h2', { text: d.title || 'シナリオ失敗' }),
+      h('div', { class: 'talk end-talk' }, h('img', { class: 'talk-face', src: portraitURL(d.speaker || '民宿のおかみさん'), alt: '' }),
+        h('div', {}, h('b', { text: d.speaker || '民宿のおかみさん' }), h('p', { text: d.text || 'また一緒にがんばりましょう。' }))),
+      this.scenarioStats(sim),
+      h('p', { class: 'small', text: '「このまま続ける」と、成績は付きませんがこのビルで遊び続けられます。' }),
+      h('div', { class: 'e-btns' },
+        h('button', { class: 'btn btn-big btn-primary', text: 'このまま続ける', onclick: () => close() }),
+        h('button', { class: 'btn btn-big', text: '最初から', onclick: () => close(() => app.newGame(id)) }),
+        h('button', { class: 'btn btn-big', text: 'タイトルへ', onclick: () => close(() => app.toTitle()) }))));
+    el.querySelectorAll('.btn-big').forEach((b) => { b.style.width = 'auto'; });
+    document.getElementById('app').append(el);
+    app.manualSave(true);
+  }
+
   // ---------- メニュー・情報 ----------
   menu() {
     const app = this.app;
     const item = (label, key, fn, cls = '') => h('button', { class: 'btn ' + cls, onclick: () => { app.sound.play('click'); close(); fn(); } }, label, key ? h('span', { class: 'k', text: key }) : null);
     let close = () => {};
-    const list = h('div', { class: 'menu-list' },
+    const sc = app.sim && app.sim.scenario;
+    const modeLine = h('div', { class: 'menu-mode' }, h('span', { text: sc ? '🎯 シナリオ' : '🏗 フリープレイ' }), h('b', { text: sc ? sc.name : '期限なし' }));
+    const list = h('div', { class: 'menu-list' }, modeLine,
       item('💾 セーブする', 'Ctrl+S', () => app.manualSave()),
       item('📂 最後のセーブを読み込む', '', () => app.askLoad()),
       item('🗂 バックアップから読み込む', '', () => app.askLoadBackup()),
-      item('🏗 新しく建てる', '', () => app.askNewGame()),
+      sc ? item('🔁 このシナリオを最初から', '', () => app.startScenario(sc.id, true)) : item('🏗 新しく建てる', '', () => app.askNewGame()),
       item('⇅ セーブデータの書き出し／読み込み', '', () => this.saveIO()),
       item('📊 タワーの状況・財務', '', () => this.status()),
       item('❓ 遊び方・操作方法', '', () => this.help()),
@@ -448,6 +525,9 @@ export class Dialogs {
     const body = h('div', { html: `
       <h3>目標</h3>
       <p>1Fにロビーを作り、オフィス・マンション・ホテル・お店を建ててビルに人を呼び込みましょう。人口が増えると★が上がり、新しい施設が建てられるようになります。★5で100Fに大聖堂を建て、結婚式が成功すれば最高ランク「TOWER」達成です。</p>
+      <h3>フリープレイとシナリオ</h3>
+      <p><b>フリープレイ</b>は期限なしで TOWER を目指す遊び方。<b>シナリオ</b>は目標と期限のある物語つきのステージで、シナリオごとに別に保存され、クリアすると成績（★1〜3）が残ります。シナリオ中は左下の「🎯 目標」パネルで進み具合と残り日数が見られます。</p>
+      <p>「海辺のリゾート」: 120日以内に、ホテルの客室40室・平均レビュー★4.0（直近30日）・人口1,500人を同時に達成。夏は観光客が倍増、浜からの客は 1F・2F の店に多く来ます。秋の台風に注意（警備室があると被害が減ります）。</p>
       <h3>はじめの一歩</h3>
       <ul>
         <li>「基本」の<b>ロビー</b>を1Fに横長に置く（人の出入口）</li>
@@ -559,8 +639,8 @@ export class Dialogs {
     return this.open({ title: importOnly ? 'セーブデータを読み込む' : 'セーブデータの書き出し／読み込み', body, wide: true });
   }
 
-  saveInfoText() {
-    const s = peekSave();
+  saveInfoText(key) {
+    const s = peekSave(key);
     if (!s) return '';
     const m = s.meta || {};
     const parts = [];

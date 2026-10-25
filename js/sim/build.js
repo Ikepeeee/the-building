@@ -89,6 +89,7 @@ export const BuildMixin = {
     else if (T.drag === 'h') r = this._planHoriz(tool, T, p);
     else if (TRANSPORT.has(tool)) r = this._planStairs(tool, T, p);
     else r = this._planFacility(tool, T, p);
+    if (r.ok && r.ghost && (r.ghost.lo ?? r.ghost.f) < this.minFloor) return { ...r, ok: false, reason: `地下水位が高く、${floorName(this.minFloor)}より下は掘れません` };
     if (r.ok && T.star > this.star) return { ...r, ok: false, reason: `★${T.star}で解放されます` };
     if (r.ok && r.cost > this.money) return { ...r, ok: false, reason: `資金が足りません（${fmtMoney(r.cost)}）` };
     return r;

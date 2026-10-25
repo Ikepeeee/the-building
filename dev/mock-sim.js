@@ -23,6 +23,20 @@ export class MockTower {
     this.walkers = [];
     this.walkMin = 11; this.walkMax = 130;
     if (opt.big) this.buildBig(opt); else this.build(opt);
+    // §16: テーマと天気
+    this.theme = opt.theme || 'default';
+    this.weather = opt.weather ? { kind: opt.weather, intensity: opt.intensity != null ? opt.intensity : 0.85, until: 1e12 } : null;
+    this.minFloor = opt.minFloor != null ? opt.minFloor : (this.theme === 'seaside' ? -2 : MIN_F);
+    if (this.minFloor > MIN_F) {
+      // 掘れない階のものは取り除く
+      for (const [id, o] of [...this.objs]) {
+        const lo = o.lo != null ? o.lo : o.f;
+        if (o.f < this.minFloor && !(o.lo != null)) this.objs.delete(id);
+        else if (o.lo != null && lo < this.minFloor) { o.lo = this.minFloor; o.f = o.lo; for (const c of o.cars) if (c.pos < o.lo) c.pos = o.lo; }
+      }
+      for (let f = MIN_F; f < this.minFloor; f++) { this.grid[f].fill(0); this.tgrid[f].fill(0); }
+      for (const p of this.walkers) if (p.f < this.minFloor) p.f = 0;
+    }
     this.updateClock();
   }
   updateClock() {

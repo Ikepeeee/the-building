@@ -46,7 +46,9 @@ export class Camera {
     // 縦: HUD・ツールバーの下も見えるように。100F が画面の中央まで下ろせるよう空を広めに許す
     const usable = Math.max(1, this.vh - this.insetTop - this.insetBottom);
     const minY = Math.min(WORLD_T - this.insetTop / z, -(MAX_F + 0.5) * FLOOR_H - (this.insetTop + usable * 0.5) / z);
-    const maxY = WORLD_B - (this.vh - this.insetBottom) / z;
+    // 下端: そのマップで掘れる最下層（sim.minFloor）の 1.5 フロア下まで。フリープレイは MIN_F
+    const bottom = this.minFloor != null && this.minFloor > MIN_F ? -this.minFloor * FLOOR_H + FLOOR_H * 1.5 : WORLD_B;
+    const maxY = bottom - (this.vh - this.insetBottom) / z;
     this.y = minY > maxY ? (minY + maxY) / 2 : Math.min(maxY, Math.max(minY, this.y));
   }
 

@@ -97,11 +97,21 @@
         <span class="tl-sub">ビル経営シミュレーション</span>
         <h1>The Building</h1>
       </div>
+      <div class="title-modes">
+        <section class="t-mode" aria-labelledby="t-free-h">
+          <h2 id="t-free-h">フリープレイ</h2>
+          <p class="t-mode-desc">期限なし。好きなように超高層ビルを育てて、TOWER を目指す。</p>
+          <button class="btn btn-big" id="t-continue">続きから</button>
+          <div class="t-saveinfo" id="t-saveinfo"></div>
+          <button class="btn btn-big btn-primary" id="t-new">新しく建てる</button>
+        </section>
+        <section class="t-mode" aria-labelledby="t-scn-h">
+          <h2 id="t-scn-h">シナリオ</h2>
+          <div id="t-scenarios"><p class="t-mode-desc">読み込み中…</p></div>
+        </section>
+      </div>
       <div class="title-buttons">
-        <button class="btn btn-big btn-primary" id="t-new">新しく建てる</button>
-        <button class="btn btn-big" id="t-continue">続きから</button>
-        <div class="t-saveinfo" id="t-saveinfo"></div>
-        <button class="btn btn-big" id="t-help">遊び方</button>
+        <button class="btn" id="t-help">遊び方</button>
         <button class="btn btn-small" id="t-import">セーブデータを読み込む</button>
       </div>
       <p class="title-note">ファンメイドのオリジナル作品です。既存のゲーム会社・作品とは関係ありません。</p>

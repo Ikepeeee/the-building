@@ -133,6 +133,7 @@ export const ElevatorMixin = {
     const ghost = { x: e.x, w: e.w, lo, hi };
     const fail = (reason) => ({ ok: false, reason, cost: 0, ghost });
     if (lo < MIN_F || hi > MAX_F) return fail('建設範囲の外です');
+    if (lo < this.minFloor) return fail(`地下水位が高く、${floorName(this.minFloor)}より下は掘れません`);
     if (hi - lo + 1 < 2) return fail('2フロア以上必要です');
     if (hi - lo + 1 > T.maxSpan) return fail(`最大${T.maxSpan}フロアまでです`);
     if (lo === e.lo && hi === e.hi) return fail('範囲が変わっていません');

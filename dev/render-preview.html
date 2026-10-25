@@ -56,7 +56,7 @@ if (q.get('real') === '1') {
   }
   if (q.has('evSteps')) for (let i = 0; i < +q.get('evSteps'); i++) sim.step(0.5);
 } else {
-  sim = new MockTower({ hour, people: num('people', 160), bombFound: q.get('bombFound') === '1', santa: q.get('santa') !== '0', santaF: q.has('santaF') ? +q.get('santaF') : undefined, heli: q.get('heli') === '1', big: q.get('big') === '1', floors: num('floors', 60), truck: q.get('truck') || null, heliT: num('heliT', 0), bomb: q.get('bomb') !== '0' });
+  sim = new MockTower({ hour, people: num('people', 160), bombFound: q.get('bombFound') === '1', santa: q.get('santa') !== '0', santaF: q.has('santaF') ? +q.get('santaF') : undefined, heli: q.get('heli') === '1', theme: q.get('theme') || undefined, weather: q.get('weather') || undefined, intensity: q.has('intensity') ? num('intensity', 0.85) : undefined, minFloor: q.has('minFloor') ? num('minFloor', -2) : undefined, big: q.get('big') === '1', floors: num('floors', 60), truck: q.get('truck') || null, heliT: num('heliT', 0), bomb: q.get('bomb') !== '0' });
 }
 window.sim = sim;
 const canvas = document.getElementById('c');

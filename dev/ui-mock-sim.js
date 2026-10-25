@@ -5,7 +5,12 @@ import { TYPES, W, MIN_F, MAX_F, DAY, STAR_POP, LOBBY_FLOORS, START_MONEY, TRANS
 const isT = (t) => TRANSPORT_TYPES.includes(t);
 
 export class Tower {
-  constructor() {
+  constructor(opts = {}) {
+    this.scenario = opts.scenario === 'seaside' ? { id: 'seaside', name: '海辺のリゾート', startDay: 0, deadlineDay: 120, state: 'playing', grade: 0 } : null;
+    this.theme = this.scenario ? 'seaside' : 'default';
+    this.minFloor = this.scenario ? -2 : -10;
+    this.weather = null;
+    this._introDone = !this.scenario;
     this.time = 6 * 60;
     this.money = START_MONEY;
     this.pop = 0;
@@ -37,7 +42,19 @@ export class Tower {
   on(n, fn) { (this._h[n] ||= []).push(fn); }
   emit(n, d) { for (const fn of this._h[n] || []) fn(d); }
 
+  scenarioProgress() {
+    if (!this.scenario) return null;
+    const rooms = [...this.objs.values()].filter((o) => /^hotel/.test(o.type)).length;
+    const goals = [
+      { label: 'ホテルの客室', value: rooms, target: 40, done: rooms >= 40 },
+      { label: '平均レビュー（直近30日）', value: 3.6, target: 4.0, done: false },
+      { label: '人口（宿泊客を含む）', value: this.pop, target: 1500, done: this.pop >= 1500 },
+    ];
+    return { name: this.scenario.name, goals, daysLeft: this.scenario.deadlineDay - this.day, state: this.scenario.state, grade: this.scenario.grade, gradeRule: '60日以内★3・90日以内★2・120日以内★1' };
+  }
+
   step(min) {
+    if (!this._introDone) { this._introDone = true; this.emit('scenario', { kind: 'intro', title: 'ようこそ、潮見町へ', speaker: '町長', text: 'よく来てくださった！ この浜にもう一度、人を呼べるリゾートホテルを建ててほしいのです。' }); }
     const d0 = this.day, h0 = this.hour;
     this.time += min;
     if (this.day !== d0) { this.yesterday = this.ledger; this.ledger = { income: 0, expense: 0 }; }
@@ -332,11 +349,13 @@ export class Tower {
   serialize() {
     const grid = {}, tgrid = {};
     for (const f in this.grid) { grid[f] = Array.from(this.grid[f]); tgrid[f] = Array.from(this.tgrid[f]); }
-    return { time: this.time, money: this.money, star: this.star, tower: this.tower, nextId: this.nextId, objs: [...this.objs.values()], grid, tgrid, ledger: this.ledger, yesterday: this.yesterday };
+    return { scenario: this.scenario, weather: this.weather, time: this.time, money: this.money, star: this.star, tower: this.tower, nextId: this.nextId, objs: [...this.objs.values()], grid, tgrid, ledger: this.ledger, yesterday: this.yesterday };
   }
   restore(o) {
     if (!o || typeof o.time !== 'number') throw new Error('bad save');
     Object.assign(this, { time: o.time, money: o.money, star: o.star, tower: o.tower, nextId: o.nextId, ledger: o.ledger, yesterday: o.yesterday });
+    if (o.scenario) { this.scenario = o.scenario; this.theme = 'seaside'; this.minFloor = -2; this._introDone = true; }
+    this.weather = o.weather || null;
     this.objs = new Map(o.objs.map((x) => [x.id, x]));
     for (const f in o.grid) this.grid[f] = Int32Array.from(o.grid[f]);
     for (const f in o.tgrid || {}) this.tgrid[f] = Int32Array.from(o.tgrid[f]);

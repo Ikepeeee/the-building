@@ -194,10 +194,17 @@ export const PeopleMixin = {
 
   addReview(o) {
     const causes = [];
-    let stars = 5;
     const st = o.stayStress || 0, wt = o.stayWait || 0;
-    if (st >= 60) { stars -= 2; causes.push('stress'); } else if (st >= 30) { stars -= 1; causes.push('stress'); }
-    if (wt >= 8) { stars -= 1; causes.push('wait'); }
+    let stars = 5;
+    if (this.scenarioDef) {
+      // シナリオでは辛め: 問題が無くても3割は★4、移動や待ちにも敏感
+      if (this.r() >= 0.7) stars = 4;
+      if (st >= 40) { stars -= 2; causes.push('stress'); } else if (st >= 15) { stars -= 1; causes.push('stress'); }
+      if (wt >= 3) { stars -= 1; causes.push('wait'); }
+    } else {
+      if (st >= 60) { stars -= 2; causes.push('stress'); } else if (st >= 30) { stars -= 1; causes.push('stress'); }
+      if (wt >= 8) { stars -= 1; causes.push('wait'); }
+    }
     if (o.noisy) { stars -= 1; causes.push('noisy'); }
     if (o.infested) { stars -= 2; causes.push('roach'); }
     if (o.garbageBad) { stars -= 1; causes.push('garbage'); }
@@ -210,6 +217,7 @@ export const PeopleMixin = {
     const text = pool[Math.floor(this.r() * pool.length)];
     o.reviews = o.reviews || [];
     o.reviews.push({ stars, text, day: this.day, name: o.stayName || '宿泊客' });
+    if (stars === 5) this.storyOnce('firstFiveStar');
     if (o.reviews.length > 20) o.reviews.splice(0, o.reviews.length - 20);
     o.stayStress = 0; o.stayWait = 0; o.stayName = '';
   },

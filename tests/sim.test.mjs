@@ -3,7 +3,9 @@
 import assert from 'node:assert/strict';
 import { Tower, TYPES, DAY, W, LOBBY_FLOORS, AutoPlayer, autoPlay, buildMegaTower, mustBuild, stepTo, smallTower, bombTrial, fireTrial, securityTower, elevatorStress, buildWideTower } from './helpers.mjs';
 import { VARIANTS } from '../js/sim/constants.js';
+import { SCENARIOS } from '../js/sim/scenarios.js';
 import { runStrategy } from './balance.mjs';
+import { runSeaside } from './scenario.mjs';
 import { SIM } from '../js/sim/rules.js';
 import { MIN_F, MAX_F, START_MONEY } from '../js/sim/constants.js';
 
@@ -1969,6 +1971,195 @@ test('§15 連絡通路: 離れた2棟を5Fでつなぐ・宙に浮く橋は不�
   s.act(br, 'remove');
   assert.equal(s.grid[4][60], 0);
   assert.equal(o.unreachable, true);
+});
+
+// ====================================================================
+// §16 シナリオ
+// ====================================================================
+test('§16 フリープレイは今まで通り（シナリオなし）', () => {
+  const s = new Tower({ seed: 150 });
+  assert.equal(s.scenario, null); assert.equal(s.theme, 'default'); assert.equal(s.weather, null);
+  assert.equal(s.minFloor, MIN_F); assert.equal(s.money, START_MONEY); assert.equal(s.star, 1);
+  assert.deepEqual(s.date, { month: 4, day: 1 });
+  assert.equal(s.scenarioProgress(), null);
+  assert.equal(s.demandMul('office'), 1); assert.equal(s.seasonMul(), 1); assert.equal(s.weatherVisitorMul(), 1);
+  const ev = []; s.on('scenario', (e) => ev.push(e));
+  smallTower(s, 3);
+  mustBuild(s, 'floor', { f: -1, x: 40, x2: 60 }); mustBuild(s, 'floor', { f: -2, x: 40, x2: 60 });
+  assert.ok(s.check('floor', { f: -3, x: 40, x2: 60 }).ok, 'フリープレイは B10F まで');
+  s.step(DAY * 2);
+  assert.equal(ev.length, 0);
+  const d = JSON.parse(JSON.stringify(s.serialize()));
+  assert.equal(d.scenario, null);
+  const r = new Tower(); r.restore(d);
+  assert.equal(r.scenario, null); assert.equal(r.theme, 'default');
+});
+
+test('§16 海辺のリゾート: 開始時の状態と最初の会話', () => {
+  assert.ok(SCENARIOS.some((x) => x.id === 'seaside' && x.name && x.theme === 'seaside'));
+  const s = new Tower({ seed: 151, scenario: 'seaside' });
+  assert.equal(s.theme, 'seaside');
+  assert.equal(s.money, 1500000);
+  assert.equal(s.star, 2, '★2 から始まる');
+  assert.deepEqual(s.date, { month: 7, day: 1 });
+  assert.equal(s.minFloor, -2);
+  assert.deepEqual(s.scenario, { id: 'seaside', name: '海辺のリゾート', startDay: 0, deadlineDay: 120, state: 'playing', grade: 0 });
+  const g = s.scenarioProgress();
+  assert.deepEqual(g.goals.map((x) => x.target), [40, 4.0, 1500]);
+  assert.equal(g.daysLeft, 120);
+  assert.deepEqual(g.gradeRule.map((r) => r.days), [60, 90, 120]);
+  const ev = []; s.on('scenario', (e) => ev.push(e));
+  s.step(1);
+  assert.equal(ev.length, 2);
+  assert.ok(ev.every((e) => e.kind === 'intro' && e.text && e.title));
+  assert.deepEqual(ev.map((e) => e.speaker), ['町長', '民宿のおかみさん']);
+  // ホテルとレストランは最初から
+  mustBuild(s, 'lobby', { f: 0, x: 0, x2: 60 });
+  mustBuild(s, 'floor', { f: 1, x: 0, x2: 60 });
+  assert.ok(s.check('hotelSingle', { f: 1, x: 0 }).ok);
+  assert.ok(s.check('restaurant', { f: 0, x: 61 }).ok);
+  // 需要と季節
+  assert.ok(s.demandMul('hotelTwin') > 1 && s.demandMul('office') < 1);
+  assert.equal(s.seasonMul(), 2, '7月は観光シーズン');
+  // 地下は B2F まで
+  mustBuild(s, 'floor', { f: -1, x: 0, x2: 30 }); mustBuild(s, 'floor', { f: -2, x: 0, x2: 30 });
+  assert.match(s.check('floor', { f: -3, x: 0, x2: 30 }).reason, /地下水位/);
+  assert.match(s.check('elevator', { f: -3, f2: 2, x: 10 }).reason, /地下水位|フロアがありません/);
+  mustBuild(s, 'elevator', { f: -2, f2: 1, x: 20 });
+  assert.match(s.act(s.transportAt(0, 21), 'extendDown').reason, /地下水位/);
+});
+
+test('§16 目標・成績・クリア（★3/★2/★1）と、クリア後も続けられる', () => {
+  const s = new Tower({ seed: 152, scenario: 'seaside' });
+  buildWideTower(s, 8);
+  s.star = 3;
+  for (let f = 8; f <= 9; f++) mustBuild(s, 'floor', { f, x: 0, x2: 200 });
+  for (let x = 0; x + 4 <= 200; x += 4) s.build('hotelSingle', { f: 9, x });
+  assert.ok(s.hotels.length >= 40);
+  const ev = []; s.on('scenario', (e) => ev.push(e));
+  s.step(60);
+  assert.equal(s.scenario.state, 'playing', 'レビューがまだ無い');
+  assert.equal(s.scenarioProgress().goals[1].value, null);
+  for (let i = 0; i < 12; i++) s.hotels[i].reviews = [{ stars: 5, text: 'よかった', day: s.day, name: 'テスト' }];
+  s.scenario.startDay = s.day - 75; // 75日目にクリアしたことにする → ★2
+  s.step(60);
+  assert.equal(s.scenario.state, 'cleared');
+  assert.equal(s.scenario.grade, 2);
+  const c = ev.find((e) => e.kind === 'clear');
+  assert.ok(c && c.grade === 2 && c.speaker === '町長');
+  s.step(DAY);
+  assert.equal(s.scenario.state, 'cleared', 'そのまま続けられる');
+  // 成績の区切り
+  for (const [days, grade] of [[30, 3], [60, 3], [61, 2], [90, 2], [91, 1], [120, 1]]) {
+    const t = new Tower({ seed: 1, scenario: 'seaside' });
+    t.scenario.startDay = t.day - days; t.clearScenario();
+    assert.equal(t.scenario.grade, grade, `${days}日`);
+  }
+});
+
+test('§16 失敗: 資金 −$50万が7日続く・期限切れ（失敗しても続けられる）', () => {
+  const s = new Tower({ seed: 153, scenario: 'seaside' });
+  smallTower(s, 2);
+  const ev = []; s.on('scenario', (e) => ev.push(e));
+  s.money = -600000;
+  stepTo(s, 6, 1);
+  assert.equal(s.scenario.state, 'playing', '6日ではまだ');
+  stepTo(s, 8, 1);
+  assert.equal(s.scenario.state, 'failed');
+  assert.match(ev.find((e) => e.kind === 'fail').text, /下回った/);
+  s.money = 1e9;
+  s.step(DAY);
+  assert.equal(s.scenario.state, 'failed', '続けても成績は付かない');
+  const t = new Tower({ seed: 154, scenario: 'seaside' });
+  t.scenario.deadlineDay = 3;
+  stepTo(t, 5, 1);
+  assert.equal(t.scenario.state, 'failed');
+  assert.match(t.scenario.failReason, /期限/);
+  assert.equal(t.scenarioProgress().daysLeft, 0);
+});
+
+test('§16 台風: 予告 → 上陸（来客停止・キャンセル・最上階の被害、警備室で軽減）→ 去る', () => {
+  const s = new Tower({ seed: 156, scenario: 'seaside' });
+  s.money = 1e9;
+  mustBuild(s, 'lobby', { f: 0, x: 0, x2: 48 });
+  mustBuild(s, 'floor', { f: 0, x: 49, x2: 80 });
+  for (let f = 1; f <= 6; f++) mustBuild(s, 'floor', { f, x: 0, x2: 80 });
+  mustBuild(s, 'elevator', { f: 0, f2: 6, x: 40 });
+  for (let f = 1; f <= 6; f++) for (let x = 0; x + 4 <= 40; x += 4) s.build('hotelSingle', { f, x });
+  mustBuild(s, 'housekeeping', { f: 1, x: 50 });
+  mustBuild(s, 'fastfood', { f: 0, x: 50 });
+  stepTo(s, 0, 17); // 予約が入る
+  const booked = s.hotels.filter((o) => o.occupied && !o.checkedIn).length;
+  const ev = []; s.on('scenario', (e) => ev.push(e));
+  const pr = []; s.on('prompt', (p) => { pr.push(p); s.answer(p.id, 'ok'); });
+  const msg = []; s.on('message', (m) => msg.push(m));
+  assert.ok(s.announceTyphoon());
+  assert.equal(pr[0].kind, 'typhoon');
+  stepTo(s, 1, 6); s.step(1);
+  assert.equal(s.weather.kind, 'typhoon');
+  assert.ok(s.weather.intensity >= 0 && s.weather.intensity <= 1 && s.weather.until > s.time);
+  assert.ok(msg.some((m) => /上陸/.test(m.text)));
+  if (booked) assert.ok(msg.some((m) => /キャンセル/.test(m.text)) || s.hotels.filter((o) => o.occupied && !o.checkedIn).length < booked);
+  const visitorsBefore = [...s.active].filter((p) => p.kind === 'visitor').length;
+  s.step(120);
+  assert.ok([...s.active].filter((p) => p.kind === 'visitor').length <= visitorsBefore, '外からの来客が止まる');
+  assert.equal(s.weatherVisitorMul(), 0);
+  stepTo(s, 3, 6);
+  assert.equal(s.weather, null, '去る');
+  assert.ok(ev.some((e) => e.title === '台風一過'));
+  // 被害は警備室で減る（修理費の比較）
+  const dmg = (sec) => {
+    const t = new Tower({ seed: 157, scenario: 'seaside' });
+    t.money = 1e9;
+    mustBuild(t, 'lobby', { f: 0, x: 0, x2: 200 });
+    for (let f = 1; f <= 3; f++) { mustBuild(t, 'floor', { f, x: 0, x2: 200 }); for (let x = 0; x + 10 <= 200; x += 10) t.build('office', { f, x }); }
+    if (sec) {
+      for (const x of [0, 10, 100, 110]) t.act(t.objAt(1, x), 'remove');
+      mustBuild(t, 'security', { f: 1, x: 0 }); mustBuild(t, 'security', { f: 1, x: 100 });
+    }
+    t.scenarioDef.weather.typhoon.damage = 0.5;
+    const m = t.money; t.typhoonDamage(); t.scenarioDef.weather.typhoon.damage = 0.15;
+    return m - t.money;
+  };
+  const a = dmg(false), b = dmg(true);
+  console.log(`    台風の修理費: 警備室なし ${a}、警備室2室 ${b}`);
+  assert.ok(a > 0 && b < a, '警備室があると修理費が減る');
+});
+
+test('§16 シナリオの途中で保存・読み込み（会話は繰り返さない、台風の予告も続く）', () => {
+  const s = new Tower({ seed: 158, scenario: 'seaside' });
+  smallTower(s, 3);
+  s.step(1);
+  s.storyOnce('firstHotel');
+  s.announceTyphoon();
+  s.answer([...s.pending.keys()][0], 'ok');
+  s.money = 777777;
+  const data = JSON.parse(JSON.stringify(s.serialize()));
+  assert.equal(data.scenario.id, 'seaside');
+  const r = new Tower(); r.restore(data);
+  assert.equal(r.theme, 'seaside'); assert.equal(r.minFloor, -2);
+  assert.equal(r.money, 777777, '初期資金で上書きしない');
+  assert.deepEqual(r.date, s.date);
+  assert.deepEqual(r.scenario, s.scenario);
+  const ev = []; r.on('scenario', (e) => ev.push(e));
+  r.step(1);
+  assert.equal(ev.filter((e) => e.kind === 'intro').length, 0, '開始の会話は繰り返さない');
+  r.storyOnce('firstHotel');
+  r.step(1);
+  assert.equal(ev.length, 0, '済んだ会話は出ない');
+  stepTo(r, r.day + 1, 7);
+  assert.equal(r.weather && r.weather.kind, 'typhoon', '予告済みの台風は読み込み後も来る');
+  const d2 = JSON.parse(JSON.stringify(r.serialize()));
+  const r2 = new Tower(); r2.restore(d2);
+  assert.equal(r2.weather.kind, 'typhoon', '台風の最中も保存できる');
+});
+
+test('§16 バランス: 上手なプレイは60〜90日、普通のプレイは100日前後でクリア', () => {
+  const a = runSeaside('competent', 1), b = runSeaside('average', 1);
+  console.log(`    上手: ${a.clearDay}日（★${a.grade}）、普通: ${b.clearDay}日（★${b.grade}）、上手の物語 ${a.story.map((x) => x[2]).join('・')}`);
+  assert.equal(a.state, 'cleared'); assert.ok(a.clearDay >= 55 && a.clearDay <= 90, `上手 ${a.clearDay}`);
+  assert.equal(b.state, 'cleared'); assert.ok(b.clearDay > a.clearDay && b.clearDay <= 120, `普通 ${b.clearDay}`);
+  assert.ok(a.story.some((x) => x[1] === 'clear'));
 });
 
 test('性能: 横幅480・30フロア・人口6000超の横長ビルで 1 ゲーム日', () => {

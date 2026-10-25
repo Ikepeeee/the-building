@@ -100,7 +100,10 @@ export class Guide {
   }
 
   update() {
-    if (this.hidden || !this.app.started || !this.app.sim) return;
+    // シナリオ中は目標パネルを出すので、こちらは出さない
+    const scn = !!(this.app.sim && this.app.sim.scenario);
+    if (this.el.hidden !== (this.hidden || scn)) this.el.hidden = this.hidden || scn;
+    if (this.hidden || scn || !this.app.started || !this.app.sim) return;
     const items = this.items();
     const sig = JSON.stringify(items);
     if (sig === this.sig) return;

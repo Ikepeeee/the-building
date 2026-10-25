@@ -12,6 +12,8 @@ import { BuildMixin } from './build.js';
 import { ElevatorMixin, STANDBY } from './elevator.js';
 import { RouteMixin } from './route.js';
 import { PeopleMixin } from './people.js';
+import { ScenarioMixin } from './scenario.js';
+import { scenarioById } from './scenarios.js';
 import { GarbageMixin } from './garbage.js';
 
 const K_ELEV = 1, K_EXP = 2, K_STAIR = 3, K_ESC = 4;
@@ -34,11 +36,16 @@ export class Tower {
     this.frameBudgetMs = opts.frameBudgetMs ?? null; // 既定は予算なし（呼ばれた分を全部進める）
     // 工事期間（false にすると建てた瞬間に完成。テスト用）
     this.construction = opts.construction !== false;
+    // シナリオ（省略するとフリープレイ）
+    this._scnId = opts.scenario && scenarioById(opts.scenario) ? opts.scenario : null;
     this.reset();
   }
 
   reset() {
     this.rng = makeRng(this.seed);
+    // シナリオ（フリープレイでは null・既定値）
+    this.scenario = null; this.scenarioDef = null; this.scn = null; this.theme = 'default';
+    this.minFloor = MIN_F; this.weather = null; this.dateOffset = 0; this._scnQueue = [];
     this.time = 6 * 60;
     this.money = START_MONEY;
     this.star = 1;
@@ -78,13 +85,14 @@ export class Tower {
     // 統計（テスト・デバッグ用）: 到着数、救済数、ストレス合計、移動時間合計
     this.stats = { trips: 0, rescues: 0, stress: 0, tripTime: 0 };
     this.reindex();
+    if (this._scnId) this.applyScenarioStart(this._scnId);
   }
 
   newDayLog() { return { rent: 0, sale: 0, hotel: 0, shop: 0, inOffice: 0, inCondo: 0, out: 0, buyback: 0, garbage: 0, garbageBags: 0 }; }
 
   // ---- カレンダー: 0日目 = 4月1日、1ゲーム日 = 1日（365日周期）----
   get date() {
-    let d = this.day % 365;
+    let d = (this.day + this.dateOffset) % 365;
     for (let i = 0; i < 12; i++) {
       const m = (i + 3) % 12; // 4月から
       if (d < MONTH_DAYS[m]) return { month: m + 1, day: d + 1 };
@@ -796,7 +804,7 @@ export class Tower {
   }
 
   visit(o) {
-    if (o.dead || o.destroyed || !this.isOpen(o) || o.burning) return;
+    if (o.dead || o.destroyed || !this.isOpen(o) || o.burning || this.isTyphoon()) return;
     const ent = this.pickVisitorEntrance(o.f, o.x + o.w / 2);
     if (!ent) return;
     const p = this.newPerson('visitor', null);
@@ -831,6 +839,7 @@ export class Tower {
       const l = this._reemit; this._reemit = [];
       for (const pr of l) this.emit('prompt', pr);
     }
+    this.flushScenario();
     this.backlog += Math.max(0, +minutes || 0);
     const budget = budgetMs > 0 ? budgetMs : 0;
     if (budget && this.backlog > SIM.MAX_BACKLOG) this.backlog = SIM.MAX_BACKLOG; // 追いつけない分は捨てる（ゲームが遅く進む）
@@ -844,6 +853,12 @@ export class Tower {
     if (this.backlog < 1e-9) this.backlog = 0;
     this.lastStepMs = now() - t0;
     return this.lastStepMs;
+  }
+
+  flushScenario() {
+    if (!this._scnQueue.length) return;
+    const l = this._scnQueue; this._scnQueue = [];
+    for (const ev of l) this.emit('scenario', ev);
   }
 
   tick(h) {
@@ -911,6 +926,7 @@ export class Tower {
     this.dailyEvents();
     this.sickToday = 0;
     this.dailyIllness();
+    this.scenarioDaily();
     this._xmas = this.isXmasEve();
   }
 
@@ -979,6 +995,8 @@ export class Tower {
     this.hourlyGarbage();
     this.updateParking();
     this.hourlyEvents(h);
+    this.scenarioHourly(h);
+    this.flushScenario();
   }
 
   every5() {
@@ -1024,7 +1042,7 @@ export class Tower {
         if (o.eval >= 45) f *= 0.3;
         if (o.vacantUntil > this.time) continue; // 悪評で退去した直後は入居が決まらない
         f *= this.serviceFactor(o.f);
-        const p = (t === 'office' ? SIM.TENANCY.office : SIM.TENANCY.condo) * scale * f;
+        const p = (t === 'office' ? SIM.TENANCY.office : SIM.TENANCY.condo) * scale * f * this.demandMul(t);
         if (this.r() < p) {
           this.moveIn(o);
           moved[t]++;
@@ -1115,7 +1133,8 @@ export class Tower {
       if (o.occupied || o.dirty || o.infested || o.burning || o.vipHold) continue;
       if (vipComing && o.type === 'hotelSuite') continue; // VIP のために空けておく
       if (this.entranceDist(o.f, o.x + o.w / 2) === Infinity) continue;
-      if (this.r() >= 0.75 * demand * this.evalFactor(o)) continue;
+      const book = 0.75 * demand * this.evalFactor(o) * this.demandMul(o.type) * this.seasonMul() * (this.isTyphoon() ? 0.1 : 1);
+      if (this.r() >= Math.min(0.98, book)) continue;
       o.occupied = true; o.checkedIn = 0; o.members = [];
       if (o.type === 'hotelSuite') this.rollParking(o);
       const T = TYPES[o.type];
@@ -1155,13 +1174,16 @@ export class Tower {
 
   spawnVisitors(h) {
     if (!this.entrances.length) return;
-    const base = 0.4 + this.pop / 250;
+    const wmul = this.weatherVisitorMul();
+    if (wmul <= 0) return; // 台風の間は外からの来客が止まる
+    this.beachVisitors(h);
+    const base = (0.4 + this.pop / 250) * wmul * this.seasonMul();
     for (const t of COMMERCE) {
       for (const o of this.byType[t]) {
         if (o.burning || !this.isOpen(o, h)) continue;
         if (t === 'partyHall' && h !== 12 && h !== 18) continue;
         if (this.entranceDist(o.f, o.x + o.w / 2) === Infinity) continue;
-        const lam = base * VISIT_RATE[t] * this.evalFactor(o);
+        const lam = base * VISIT_RATE[t] * this.evalFactor(o) * this.demandMul(t);
         const n = Math.min(VISIT_CAP[t], Math.floor(lam * (0.5 + this.r())));
         for (let i = 0; i < n; i++) this.later(this.rand(55), () => this.visit(o));
       }
@@ -1221,6 +1243,7 @@ export class Tower {
     return {
       v: SAVE_VERSION, w: W, seed: this.seed, time: this.time, money: this.money, star: this.star, tower: this.tower,
       nextId: this.nextId, ledger: { ...this.ledger }, yesterday: this.yesterday ? { ...this.yesterday } : null,
+      scenario: this.serializeScenario(), weather: this.weather ? { ...this.weather } : null,
       dayLog: { ...this.dayLog }, rows, objs, flags: { ...this.flags }, garbageBags: +this.garbageBags.toFixed(2), moveSeqN: this.moveSeqN,
       bomb: this.bomb ? { f: this.bomb.f, x: this.bomb.x, deadline: this.bomb.deadline, searched: [...this.bomb.searched], found: this.bomb.found } : null,
       fire: this.fire ? { start: this.fire.start, nextSpread: this.fire.nextSpread, heli: this.fire.heli, burned: this.fire.burned, saved: this.fire.saved, burning: [...this.fire.burning].map((o) => o.id) } : null,
@@ -1237,7 +1260,21 @@ export class Tower {
     if (d.v > SAVE_VERSION) throw new Error('新しいバージョンのセーブデータです');
     const num = (v, def) => (typeof v === 'number' && Number.isFinite(v) ? v : def);
     this.seed = num(d.seed, this.seed) >>> 0;
+    this._scnId = d.scenario && typeof d.scenario === 'object' && scenarioById(d.scenario.id) ? d.scenario.id : null;
     this.reset();
+    // シナリオの状態は保存したものを使う（開始時の会話や初期資金は付け直さない）
+    this._scnQueue = [];
+    if (this._scnId) {
+      const sc = d.scenario;
+      Object.assign(this.scenario, {
+        startDay: num(sc.startDay, 0), deadlineDay: num(sc.deadlineDay, this.scenario.deadlineDay),
+        state: ['playing', 'cleared', 'failed'].includes(sc.state) ? sc.state : 'playing', grade: Math.max(0, Math.min(3, num(sc.grade, 0) | 0)),
+      });
+      if (typeof sc.clearDay === 'number') this.scenario.clearDay = sc.clearDay;
+      if (typeof sc.failReason === 'string') this.scenario.failReason = sc.failReason;
+      const scn = sc.scn || {};
+      this.scn = { story: { ...(scn.story || {}) }, poorDays: num(scn.poorDays, 0), typhoonAt: typeof scn.typhoonAt === 'number' ? scn.typhoonAt : null, rainUntil: null };
+    }
     this.rng = makeRng((this.seed ^ Math.floor(num(d.time, 0) * 7)) >>> 0);
     this.time = Math.max(0, num(d.time, 360));
     this.money = num(d.money, START_MONEY);
@@ -1405,6 +1442,16 @@ export class Tower {
     if (typeof F.bombAt === 'number' && F.bombAt > this.time) { const t = F.bombAt; this.at(t, () => { if (F.bombAt === t) this.startBombThreat(); }); } else F.bombAt = null;
     if (typeof F.fireAt === 'number' && F.fireAt > this.time) { const t = F.fireAt; this.at(t, () => { if (F.fireAt === t) this.startFire(); }); } else F.fireAt = null;
     this._xmas = this.isXmasEve();
+    // 天気と、予告済みの台風
+    if (this.scenarioDef) {
+      const w = d.weather;
+      if (w && typeof w === 'object' && (w.kind === 'typhoon' || w.kind === 'rain') && num(w.until, 0) > this.time) {
+        this.weather = { kind: w.kind, intensity: Math.max(0, Math.min(1, num(w.intensity, 0.5))), until: w.until, start: num(w.start, this.time) };
+      }
+      const at = this.scn.typhoonAt;
+      if (typeof at === 'number' && at > this.time) this.at(at, () => { if (this.scn && this.scn.typhoonAt === at) this.startTyphoon(); });
+      else this.scn.typhoonAt = null;
+    }
     this.recalcPop();
     this.planDay(this.day, this.time);
     this.revision++;
@@ -1479,5 +1526,5 @@ export class Tower {
   }
 }
 
-Object.assign(Tower.prototype, RouteMixin, BuildMixin, ElevatorMixin, GarbageMixin, EventsMixin, PanelMixin, PeopleMixin);
+Object.assign(Tower.prototype, RouteMixin, BuildMixin, ElevatorMixin, GarbageMixin, EventsMixin, PanelMixin, PeopleMixin, ScenarioMixin);
 export default Tower;

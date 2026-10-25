@@ -2,13 +2,14 @@
 // const r = new Renderer(canvas, sim); r.resize(w, h); r.render(view); r.setSim(sim);
 import { TILE_W, FLOOR_H, W, MIN_F, MAX_F, DAY, LOBBY_FLOORS, TYPES, floorName } from '../sim/constants.js';
 import { makeFacilitySprite, lobbyTile, floorTile, shaftSeg, carSprite, CAR_H, SPRITE_TOP, treeSprite, machineRoom, pitSprite, bridgeTile, fireEscapeSprite, fireEscapeTop, ESC_W, frameTile, craneSprite, truckSprite } from './facilities.js';
+import { SEA_H, WAVE_W, waveFrame, islandSprite, boatSprite, gullSprite, lighthouseSprite, palmSprite, sandStrata, deepTile } from './seaside.js';
 import { heliSprite, planeSprite, bannerPlaneSprite, bannerSprite } from './vehicles.js';
 import { peopleAtlas, KIND_INDEX, PW, PH, stressIndex, STRESS_COLORS } from './people.js';
 import {
   skyColors, nightness, cloudTint, cloudSprite, sunSprite, moonSprite, strataSprite, STRATA_W, STRATA_H,
   flameSprite, boomSprite, BOOM, bellSprite, bombSprite, santaSprite, bubbleSprite, roachIcon, dirtyIcon, warnIcon, mirrored,
 } from './scenery.js';
-import { hash2, Painter } from './pixel.js';
+import { hash2, Painter, lerpColor } from './pixel.js';
 
 const TW = TILE_W, FH = FLOOR_H;
 const WORLD_W = W * TW;
@@ -130,6 +131,11 @@ export class Renderer {
     this.night = night;
     this.hour = hour;
     this.simTime = num(sim && sim.time, 0);
+    // テーマと天気（フリープレイは 'default' / null で、従来と同じ描画）
+    this.seaside = !!(sim && sim.theme === 'seaside');
+    const wx = sim && sim.weather;
+    this.weather = wx && typeof wx === 'object' && (wx.kind === 'typhoon' || wx.kind === 'rain') ? wx : null;
+    this.storm = this.weather ? Math.max(0, Math.min(1, num(this.weather.intensity, 0.7))) * (this.weather.kind === 'typhoon' ? 1 : 0.6) : 0;
 
     this.drawSky(hour, night, wx0, wy0, wx1, wy1);
     this.drawGround(wx0, wy0, wx1, wy1);
@@ -153,6 +159,7 @@ export class Renderer {
       this.phase(() => this.drawOverlays(view));
       this.phase(() => this.drawBadges());
     }
+    if (this.storm > 0) this.phase(() => this.drawWeather());
     this.phase(() => this.drawUI(view));
     // フロア番号は最後（景色・木・UI 枠の上）
     this.phase(() => this.drawFloorLabels());
@@ -212,7 +219,10 @@ export class Renderer {
   // ---------------- 空 ----------------
   drawSky(hour, night, wx0, wy0, wx1, wy1) {
     const ctx = this.ctx, cw = this.canvas.width, ch = this.canvas.height;
-    const [top, bot] = skyColors(hour);
+    let [top, bot] = skyColors(hour);
+    const storm = this.storm;
+    if (storm > 0) { top = lerpColor(top, '#262a32', 0.8 * storm); bot = lerpColor(bot, '#5a6068', 0.75 * storm); }
+    this._skyTop = top; this._skyBot = bot;
     const gy = this.Y(0);
     if (gy > 0) {
       const g = ctx.createLinearGradient(0, this.Y(-(MAX_F + 8) * FH), 0, gy);
@@ -239,18 +249,22 @@ export class Renderer {
     }
     // 太陽・月（画面に固定）
     const ps = Math.max(2, Math.round(this.dpr * 2.5));
-    if (hour >= 5.2 && hour <= 19) {
+    this._cel = null;
+    if (storm > 0.5) { /* 嵐のときは太陽も月も見えない */ }
+    else if (hour >= 5.2 && hour <= 19) {
       const t = (hour - 5.2) / 13.8;
       const x = cw * (0.08 + 0.84 * t), y = ch * 0.1 + Math.pow(Math.abs(t - 0.5) * 2, 2) * ch * 0.35;
       if (y < skyH) ctx.drawImage(sunSprite(), Math.round(x), Math.round(y), 16 * ps, 16 * ps);
+      this._cel = { x: x + 8 * ps, sun: true };
     } else {
       const hh = hour < 12 ? hour + 24 : hour;
       const t = (hh - 19.5) / 10;
       const x = cw * (0.1 + 0.8 * t), y = ch * 0.08 + Math.pow(Math.abs(t - 0.5) * 2, 2) * ch * 0.3;
       if (y < skyH) ctx.drawImage(moonSprite(), Math.round(x), Math.round(y), 14 * ps, 14 * ps);
+      this._cel = { x: x + 7 * ps, sun: false };
     }
     // 雲
-    const tint = cloudTint(hour);
+    const tint = storm > 0.3 ? 2 : cloudTint(hour);
     const drift = this.nowMs * 0.004;
     for (const c of CLOUDS) {
       const spr = cloudSprite(c.shape, tint);
@@ -260,7 +274,132 @@ export class Renderer {
       if (y + spr.height * k < wy0 || y > Math.min(wy1, 0) || x + spr.width * k < wx0 || x > wx1) continue;
       this.img(spr, x, y, spr.width * k, spr.height * k);
     }
-    this.drawPlanes(hour, night, skyH);
+    if (storm < 0.6) this.drawPlanes(hour, night, skyH);
+    if (this.seaside) this.drawSea(hour, night, wx0, wy0, wx1, wy1);
+  }
+
+  // ---------------- 海辺（seaside）の遠景: 海・波・島・灯台・船・カモメ ----------------
+  drawSea(hour, night, wx0, wy0, wx1, wy1) {
+    const ctx = this.ctx, cw = this.canvas.width, ms = this.nowMs, storm = this.storm;
+    if (wy1 < -SEA_H - 60 || wy0 > 0) return;
+    const y0 = this.Y(-SEA_H), y1 = this.Y(0);
+    // 海の色は空の色から（嵐では灰色に）
+    let cTop = lerpColor(this._skyBot, '#2f78a8', 0.55), cBot = lerpColor(this._skyTop, '#0c3a5c', 0.65);
+    if (storm > 0) { cTop = lerpColor(cTop, '#56646a', storm * 0.7); cBot = lerpColor(cBot, '#2a3a40', storm * 0.7); }
+    const g = ctx.createLinearGradient(0, y0, 0, y1);
+    g.addColorStop(0, cTop); g.addColorStop(1, cBot);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, y0, cw, y1 - y0);
+    ctx.fillStyle = lerpColor(cTop, '#ffffff', 0.35); ctx.fillRect(0, y0, cw, Math.max(1, Math.round(this.S * 0.6)));
+    // 遠くの島と岬の灯台
+    for (let k = -1; k * 900 - 400 < WORLD_W + 900; k++) {
+      const ix = k * 900 + ((k * 337) % 260) + 120;
+      if (ix + 120 < wx0 || ix > wx1) continue;
+      const isl = islandSprite(((k % 3) + 3) % 3);
+      this.img(isl, ix, -SEA_H - isl.height + 3, isl.width, isl.height);
+    }
+    const lh = lighthouseSprite();
+    const lhx = [-300, WORLD_W + 260];
+    for (const lx of lhx) if (lx + 30 > wx0 && lx < wx1) this.img(lh, lx, -SEA_H - lh.height + 14, lh.width, lh.height);
+    // 波（8コマ、横に繰り返す）
+    const wf = waveFrame(((ms / (storm > 0.3 ? 120 : 260)) | 0) % 8, storm > 0.3);
+    for (let x = Math.floor(wx0 / WAVE_W) * WAVE_W; x < wx1; x += WAVE_W) this.img(wf, x, -SEA_H, WAVE_W, SEA_H);
+    // 太陽・月の照り返し
+    if (this._cel && storm < 0.5) {
+      const a = this._cel.sun ? (night > 0.2 ? 0.5 : 0.35) : 0.55 * night;
+      if (a > 0.02) {
+        ctx.fillStyle = this._cel.sun ? '#fff4c0' : '#e8f0ff';
+        for (let i = 0; i < 14; i++) {
+          const t = i / 14;
+          const yy = y0 + (y1 - y0) * (0.05 + t * 0.85);
+          const w = (6 + t * 28) * this.dpr * (0.6 + 0.4 * Math.abs(Math.sin(ms / 400 + i * 1.7)));
+          ctx.globalAlpha = a * (1 - t * 0.5);
+          ctx.fillRect(Math.round(this._cel.x - w / 2 + Math.sin(ms / 700 + i) * 4 * this.dpr), Math.round(yy), Math.round(w), Math.max(1, Math.round(this.dpr)));
+        }
+        ctx.globalAlpha = 1;
+      }
+    }
+    // 船（嵐の日は出ない）
+    if (storm < 0.3) {
+      for (let k = 0; k < 4; k++) {
+        const span = WORLD_W + 1200;
+        const bx = ((hash2(k, 21) * span + ms * (0.002 + k * 0.0012) * (k % 2 ? -1 : 1)) % span + span) % span - 600;
+        const b = boatSprite(k % 3);
+        if (bx + 24 < wx0 || bx > wx1) continue;
+        const by = -SEA_H + 8 + k * 13 + Math.sin(ms / 500 + k) * 0.8;
+        this.img(b, bx, by - b.height + 4, b.width, b.height);
+        if (night > 0.4) this.rect(bx + 12, by - 6, 1, 1, '#fff0a0');
+      }
+    }
+    // カモメ
+    if (storm < 0.6 && night < 0.6) {
+      for (let i = 0; i < 8; i++) {
+        const gx = ((hash2(i, 3) * (WORLD_W + 800) + ms * 0.012 * (0.6 + hash2(i, 4))) % (WORLD_W + 800)) - 400 + Math.sin(ms / 3000 + i) * 40;
+        const gyw = -SEA_H - 20 - hash2(i, 5) * 160 + Math.sin(ms / 800 + i * 2) * 6;
+        if (gx + 9 < wx0 || gx > wx1 || gyw > wy1 || gyw + 4 < wy0) continue;
+        this.img(gullSprite(((ms / 170 + i * 3) | 0) % 2), gx, gyw, 9, 4);
+      }
+    }
+    // 灯台の光（夜、回る）
+    if (night > 0.3) {
+      const th = ms / 1600;
+      const c = Math.cos(th);
+      for (const lx of lhx) {
+        const lampX = this.X(lx + 14), lampY = this.Y(-SEA_H - lh.height + 14 + 6);
+        if (lampX < -800 * this.S || lampX > cw + 800 * this.S) continue;
+        const len = 520 * this.S * Math.abs(c), spread = (6 + 40 * (1 - Math.abs(c))) * this.S;
+        const dir = c >= 0 ? 1 : -1;
+        ctx.globalAlpha = Math.min(0.45, 0.18 + 0.3 * (1 - Math.abs(c))) * night;
+        ctx.fillStyle = '#fff2b8';
+        ctx.beginPath(); ctx.moveTo(lampX, lampY); ctx.lineTo(lampX + dir * len, lampY - spread); ctx.lineTo(lampX + dir * len, lampY + spread); ctx.closePath(); ctx.fill();
+        ctx.globalAlpha = 0.9 * night; ctx.fillRect(lampX - 2 * this.dpr, lampY - 2 * this.dpr, 4 * this.dpr, 4 * this.dpr);
+        ctx.globalAlpha = 1;
+      }
+    }
+    // 荒れた海のしぶき（波打ち際）
+    if (storm > 0.3) {
+      ctx.fillStyle = '#f4fbff';
+      for (let i = 0; i < 26; i++) {
+        const ph = ((ms / 900) + hash2(i, 8)) % 1;
+        const x = hash2(i, 9) * cw;
+        ctx.globalAlpha = (1 - ph) * 0.8 * storm;
+        const r = (2 + ph * 6) * this.S;
+        ctx.fillRect(Math.round(x - r), Math.round(y1 - ph * 18 * this.S - r), Math.round(r * 2), Math.round(r));
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // 雨・台風の前景（画面全体、安い線と粒だけ）
+  drawWeather() {
+    const storm = this.storm;
+    if (storm <= 0) return;
+    const ctx = this.ctx, cw = this.canvas.width, ch = this.canvas.height, ms = this.nowMs, dpr = this.dpr;
+    const typh = this.weather.kind === 'typhoon';
+    // 画面を少し暗く
+    ctx.globalAlpha = 0.12 * storm; ctx.fillStyle = '#1a2028'; ctx.fillRect(0, 0, cw, ch); ctx.globalAlpha = 1;
+    const n = Math.min(240, Math.round(60 + 180 * storm));
+    const slant = typh ? 0.55 : 0.18;
+    const len = (typh ? 26 : 18) * dpr, vy = (typh ? 2.2 : 1.6) * dpr;
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      const y = ((hash2(i, 31) * (ch + len) + ms * vy) % (ch + len)) - len;
+      const x = ((hash2(i, 32) * (cw + 200 * dpr) + ms * vy * slant) % (cw + 200 * dpr)) - 100 * dpr;
+      ctx.moveTo(x, y); ctx.lineTo(x + len * slant, y + len);
+    }
+    ctx.strokeStyle = typh ? 'rgba(200,215,230,0.55)' : 'rgba(190,210,230,0.45)';
+    ctx.lineWidth = Math.max(1, dpr * 0.9);
+    ctx.stroke();
+    // 飛ばされる葉やごみ（台風のみ、最大 16）
+    if (typh) {
+      for (let i = 0; i < 16; i++) {
+        const x = ((hash2(i, 41) * cw + ms * (0.6 + hash2(i, 42)) * dpr) % (cw + 40)) - 20;
+        const y = hash2(i, 43) * ch + Math.sin(ms / 300 + i) * 20 * dpr;
+        const s = (2 + (i % 3)) * dpr;
+        ctx.fillStyle = i % 3 === 0 ? '#5a8a3a' : i % 3 === 1 ? '#8a6a3a' : '#c8c0b0';
+        ctx.fillRect(Math.round(x), Math.round(y), Math.round(s * (1 + ((ms / 120 + i) | 0) % 2)), Math.round(s));
+      }
+    }
   }
 
   // 飛行機（時刻を種にして決定的に、ときどき空を横切る。画面に固定した遠景）
@@ -308,6 +447,7 @@ export class Renderer {
   // ---------------- 地面 ----------------
   drawGround(wx0, wy0, wx1, wy1) {
     const ctx = this.ctx;
+    if (this.seaside) { this.drawBeachGround(wx0, wy0, wx1, wy1); return; }
     if (wy1 <= 0) { this.drawTrees(wx0, wx1); return; }
     const st = strataSprite();
     const yTop = Math.max(0, wy0);
@@ -323,6 +463,31 @@ export class Renderer {
     }
     this.drawTrees(wx0, wx1);
   }
+  // 砂浜と砂の地層。minFloor より下は掘れない水と岩盤
+  drawBeachGround(wx0, wy0, wx1, wy1) {
+    const ctx = this.ctx;
+    const minF = Math.max(MIN_F, Math.min(-1, num(this.sim && this.sim.minFloor, -2)));
+    const depth = -minF * FH;
+    if (wy1 > 0) {
+      const st = sandStrata(depth);
+      const yTop = Math.max(0, wy0), yEnd = Math.min(wy1, st.height);
+      if (yEnd > yTop) {
+        for (let x = Math.floor(wx0 / 64) * 64; x < wx1; x += 64) this.imgPart(st, 0, yTop, 64, yEnd - yTop, x, yTop, 64, yEnd - yTop);
+      }
+      if (wy1 > st.height) {
+        const y = Math.max(0, this.Y(st.height));
+        let pat = this._deepPat;
+        if (!pat) { pat = this._deepPat = ctx.createPattern(deepTile(), 'repeat'); }
+        try {
+          if (pat.setTransform && typeof DOMMatrix !== 'undefined') pat.setTransform(new DOMMatrix([this.S, 0, 0, this.S, this.X(0), this.Y(st.height)]));
+          ctx.fillStyle = pat;
+        } catch (e) { ctx.fillStyle = '#24323e'; }
+        ctx.fillRect(0, y, this.canvas.width, this.canvas.height - y);
+      }
+    }
+    this.drawTrees(wx0, wx1);
+  }
+
   drawTrees(wx0, wx1) {
     if (this.vb[1] > 0 || this.vb[3] < -40) return;
     const row = this.sim && this.sim.grid ? this.sim.grid[0] : null;
@@ -334,6 +499,14 @@ export class Renderer {
           if (cx >= 0 && cx < W && row[cx]) { blocked = true; break; }
         }
         if (blocked) continue;
+      }
+      if (this.seaside) {
+        // ヤシ（台風では風になびく）
+        const st = this.storm;
+        const lean = st > 0.3 ? (Math.sin(this.nowMs / (260 - st * 120) + t.alt) > -0.3 ? 1 : 0) : 0;
+        const pm = palmSprite(t.alt % 2, lean);
+        this.img(pm, t.x - 6, -pm.height + 1, pm.width, pm.height);
+        continue;
       }
       let spr = this.tiles.get('tree' + (t.alt % 4));
       if (!spr) { spr = treeSprite(t.alt % 4); this.tiles.set('tree' + (t.alt % 4), spr); }
@@ -1908,7 +2081,8 @@ export class Renderer {
     const fs = Math.round(Math.max(8, Math.min(11, fhCss * 0.42)) * dpr);
     ctx.font = `600 ${fs}px system-ui, -apple-system, "Hiragino Sans", sans-serif`;
     ctx.textBaseline = 'middle';
-    const fLo = Math.max(MIN_F, Math.floor(-this.vb[3] / FH)), fHi = Math.min(MAX_F, Math.floor(-this.vb[1] / FH));
+    const minF = this.sim && typeof this.sim.minFloor === 'number' ? Math.max(MIN_F, this.sim.minFloor) : MIN_F;
+    const fLo = Math.max(minF, Math.floor(-this.vb[3] / FH)), fHi = Math.min(MAX_F, Math.floor(-this.vb[1] / FH));
     const padX = Math.round(3 * dpr), ph = Math.round(fs * 1.3), x0 = Math.round(2 * dpr);
     for (let f = fLo; f <= fHi; f++) {
       const n = f >= 0 ? f + 1 : -f;

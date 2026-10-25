@@ -140,10 +140,11 @@ export class AutoPlayer {
   act() {
     const s = this.s;
     let built = 0;
-    const reserve = 80000;
+    const pace = this.pace || {};
+    const reserve = pace.reserve ?? 80000;
     // 上へ伸ばす（空室が多いうちは控える）
     const vacant = s.byType.office.filter((o) => !o.occupied).length + s.byType.condo.filter((o) => !o.occupied).length;
-    while (built < 3 && vacant < 30 && this.money() > reserve + 300000 && this.top < 85) {
+    while (built < (pace.floorsPerDay ?? 3) && vacant < 30 && this.money() > reserve + 300000 && this.top < 85) {
       const f = this.top + 1;
       if (!this.buildFloor(f)) break;
       this.top = f;

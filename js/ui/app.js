@@ -9,7 +9,8 @@ import { Panel } from './panel.js';
 import { Toasts } from './toast.js';
 import { Dialogs } from './dialogs.js';
 import { Sound } from './audio.js';
-import { saveGame, loadCandidates, peekSave, storage } from './save.js';
+import { saveGame, loadCandidates, peekSave, storage, slotKey, loadRecords, saveRecord } from './save.js';
+import { Goals } from './goals.js';
 import { Guide } from './guide.js';
 import { CopyTool } from './copytool.js';
 import { ElevatorResize } from './resize.js';
@@ -26,7 +27,8 @@ const MAX_FRAME_SEC = 0.1; // 1フレームで進める実時間の上限（ス�
 const isTouchDevice = () => matchMedia('(hover: none) and (pointer: coarse)').matches;
 
 export class App {
-  constructor({ Tower, Renderer }) {
+  constructor({ Tower, Renderer, SCENARIOS = [] }) {
+    this.SCENARIOS = Array.isArray(SCENARIOS) ? SCENARIOS : [];
     this.Tower = Tower;
     this.Renderer = Renderer;
     this.root = document.getElementById('app');
@@ -63,6 +65,7 @@ export class App {
     this.panel = new Panel(this);
     this.input = new Input(this);
     this.guide = new Guide(this);
+    this.goals = new Goals(this);
     this.copy = new CopyTool(this);
     this.resize = new ElevatorResize(this);
     this.minimap = new Minimap(this);
@@ -97,12 +100,19 @@ export class App {
     sim.on('message', mine((m) => { if (m.kind === 'event' && !this.restoring) this.calmSpeed(); if (this.toasts) this.toasts.show(m); }));
     sim.on('prompt', mine((p) => { if (!this.restoring) { this.calmSpeed(); this.dialogs.enqueue({ type: 'prompt', data: p }); } }));
     sim.on('star', mine((s) => { if (!this.restoring && this.started) this.dialogs.enqueue({ type: 'star', star: s.star }); }));
+    sim.on('scenario', mine((d) => {
+      if (this.restoring || !this.started) return;
+      if (d.kind === 'clear' || d.kind === 'fail') this.calmSpeed();
+      this.dialogs.enqueue({ type: 'scenario', data: d });
+    }));
     sim.on('tower', mine(() => { if (!this.restoring && this.started) this.dialogs.enqueue({ type: 'tower' }); }));
     sim.on('sound', mine((s) => { this.soundFlag = true; if (!this.restoring) this.sound.play(s.name); }));
   }
 
   setSim(sim) {
     this.sim = sim;
+    this.cam.minFloor = Number.isFinite(sim.minFloor) ? sim.minFloor : null;
+    this.cam.clamp();
     this.renderer.setSim(sim);
     this.lastDay = sim.day;
     this.panel.close();
@@ -225,6 +235,7 @@ export class App {
       this.recheckGhosts();
     }
     if (now - (this.guideTimer || 0) > 1500) { this.guideTimer = now; this.guide.update(); }
+    if (now - (this.goalsTimer || 0) > 700) { this.goalsTimer = now; this.goals.update(); }
     // 遊んでいない（タイトル・一時停止）ときは AudioContext を止める
     this.sound.idle(!this.started || (spd === 0 && !this.dialogs.count));
     if (now - this.ambTimer > 200) {
@@ -1026,7 +1037,7 @@ export class App {
     const now = performance.now();
     if (now - (this.lastSaveT || -1e9) < 1000) return;
     this.lastSaveT = now;
-    const r = saveGame(this.sim, this.uiState());
+    const r = saveGame(this.sim, this.uiState(), slotKey(this.scnId));
     if (!r.ok) console.warn(r.error);
     if (r.ok && !r.persisted && !this.warnedStorage) {
       this.warnedStorage = true;
@@ -1040,7 +1051,7 @@ export class App {
       if (!silent) this.toasts.show({ text: 'エラー発生後のため保存しません（書き出しは使えます）', kind: 'bad' });
       return;
     }
-    const r = saveGame(this.sim, this.uiState());
+    const r = saveGame(this.sim, this.uiState(), slotKey(this.scnId));
     if (silent) return;
     if (!r.ok) { this.toasts.show({ text: r.error || 'セーブに失敗しました', kind: 'bad' }); this.sound.play('error'); return; }
     if (!r.persisted) { this.toasts.show({ text: 'ブラウザに保存できません（プライベートモード等）。メニューの「書き出し」を使ってください', kind: 'bad' }); return; }
@@ -1049,8 +1060,12 @@ export class App {
   }
 
   /** セーブ候補（本体→バックアップ）を順に試す */
-  loadLatest() {
-    const cands = loadCandidates();
+  /** 今のモードのセーブの場所（フリープレイは null） */
+  get scnId() { return (this.sim && this.started && this.sim.scenario && this.sim.scenario.id) || this.pendingScn || null; }
+
+  loadLatest(scnId = null) {
+    this.pendingScn = scnId;
+    const cands = loadCandidates(slotKey(scnId));
     for (const c of cands) {
       if (this.loadFromObject(c.obj, false, c.backup)) return true;
     }
@@ -1062,7 +1077,9 @@ export class App {
   loadFromObject(obj, imported, isBackup) {
     let sim;
     try {
-      sim = new this.Tower();
+      // シナリオのセーブはシナリオとして作ってから読み込む
+      const sid = (obj.meta && obj.meta.scenario) || (obj.data && obj.data.scenario && obj.data.scenario.id) || null;
+      sim = sid ? new this.Tower({ scenario: sid }) : new this.Tower();
       this.restoring = true;
       this.attachSim(sim);
       sim.restore(obj.data);
@@ -1089,46 +1106,64 @@ export class App {
   }
 
   async askLoadBackup() {
-    const c = loadCandidates().find((x) => x.backup);
+    const c = loadCandidates(slotKey(this.scnId)).find((x) => x.backup);
     if (!c) { this.toasts.show({ text: 'バックアップはありません', kind: 'info' }); return; }
     const m = c.obj.meta || {};
     const ok = await this.dialogs.confirm('バックアップから読み込みますか？', { text: `1つ前のセーブ（${m.day != null ? m.day + 1 + '日目' : '日付不明'}${m.pop != null ? '・人口 ' + m.pop : ''}）に戻します。今の進行は失われます。`, okLabel: '読み込む' });
     if (ok && !this.loadFromObject(c.obj, false, true)) { this.toasts.show({ text: 'バックアップを読み込めませんでした', kind: 'bad' }); this.sound.play('error'); }
   }
 
-  newGame() {
+  newGame(scnId = null) {
     let sim;
-    try { sim = new this.Tower(); } catch (e) { this.reportError(e, 'new Tower'); return; }
+    try { sim = scnId ? new this.Tower({ scenario: scnId }) : new this.Tower(); } catch (e) { this.reportError(e, 'new Tower'); return; }
+    this.pendingScn = scnId;
     this.attachSim(sim);
     this.setSim(sim);
     this.simFailed = false;
     this.enterGame();
     this.cam.home();
     this.setSpeed(SPEED_ONE);
-    this.toasts.show({ text: 'ようこそ！ まずは「基本」→「ロビー」を1Fに横長に置きましょう', kind: 'info' });
+    if (!scnId) this.toasts.show({ text: 'ようこそ！ まずは「基本」→「ロビー」を1Fに横長に置きましょう', kind: 'info' });
     this.firstBuildTip = undefined;
     this.autosave();
   }
 
   async askNewGame() {
-    if (this.started || peekSave()) {
+    if ((this.started && !this.scnId) || peekSave()) {
       const ok = await this.dialogs.confirm('新しく建て始めますか？', { text: 'すぐに新しいビルで保存し直します。今のセーブはバックアップとして残り、次の自動保存（ゲーム内で1日後）まではメニューの「バックアップから読み込む」で戻せます。', okLabel: '新しく建てる', danger: true });
       if (!ok) return;
     }
     this.newGame();
   }
 
+  /** シナリオを始める（fresh: 最初から） */
+  async startScenario(id, fresh) {
+    const key = slotKey(id);
+    if (!fresh && peekSave(key)) { this.loadLatest(id); return; }
+    if (peekSave(key)) {
+      const ok = await this.dialogs.confirm('このシナリオを最初からやり直しますか？', { text: '今の進行はバックアップとして1つ残ります。フリープレイのセーブには影響しません。', okLabel: '最初から', danger: true });
+      if (!ok) return;
+    }
+    this.newGame(id);
+  }
+
+  /** シナリオの成績を記録（最高記録なら true） */
+  recordScenario(id, grade, day) {
+    if (!id || !grade) return false;
+    return saveRecord(id, grade, day);
+  }
+
   async askLoad() {
-    if (!peekSave()) { this.toasts.show({ text: 'セーブデータがありません', kind: 'info' }); return; }
+    if (!peekSave(slotKey(this.scnId))) { this.toasts.show({ text: 'セーブデータがありません', kind: 'info' }); return; }
     const ok = await this.dialogs.confirm('最後のセーブを読み込みますか？', { text: 'セーブ後の進行は失われます。', okLabel: '読み込む' });
-    if (ok) this.loadLatest();
+    if (ok) this.loadLatest(this.scnId);
   }
 
   // ---------------- タイトル ----------------
   setupTitle() {
     const $ = (id) => document.getElementById(id);
     $('t-new').addEventListener('click', () => { this.userGesture(); this.sound.play('click'); this.askNewGame(); });
-    $('t-continue').addEventListener('click', () => { this.userGesture(); this.sound.play('click'); this.loadLatest(); });
+    $('t-continue').addEventListener('click', () => { this.userGesture(); this.sound.play('click'); this.loadLatest(null); });
     $('t-help').addEventListener('click', () => { this.userGesture(); this.dialogs.help(); });
     $('t-import').addEventListener('click', () => { this.userGesture(); this.dialogs.saveIO(true); });
   }
@@ -1136,12 +1171,58 @@ export class App {
   showTitle() {
     this.started = false;
     this.root.classList.add('is-title');
-    const info = this.dialogs.saveInfoText();
+    this.pendingScn = null;
+    const info = this.dialogs.saveInfoText(slotKey(null));
     const cont = document.getElementById('t-continue');
     cont.disabled = !info;
     document.getElementById('t-saveinfo').textContent = info || (storage.available ? 'セーブデータはありません' : 'このブラウザでは自動保存が使えません');
-    (info ? cont : document.getElementById('t-new')).focus?.({ preventScroll: true });
+    this.renderScenarioList();
+    if (!('ontouchstart' in window)) (info ? cont : document.getElementById('t-new')).focus?.({ preventScroll: true });
     this.layoutNow && this.layoutNow();
+  }
+
+  /** タイトルのシナリオ一覧（説明・最高成績・続きから／最初から） */
+  renderScenarioList() {
+    const box = document.getElementById('t-scenarios');
+    if (!box) return;
+    box.textContent = '';
+    const list = this.SCENARIOS;
+    if (!list.length) {
+      const p = document.createElement('p');
+      p.className = 't-mode-desc';
+      p.textContent = 'シナリオはまだありません。';
+      box.append(p);
+      return;
+    }
+    const rec = loadRecords();
+    for (const sc of list) {
+      const card = document.createElement('div');
+      card.className = `t-scn theme-${sc.theme || 'default'}`;
+      const best = rec[sc.id] && rec[sc.id].grade ? rec[sc.id].grade : 0;
+      const save = peekSave(slotKey(sc.id));
+      const head = document.createElement('div');
+      head.className = 't-scn-head';
+      const name = document.createElement('b'); name.textContent = sc.name;
+      const stars = document.createElement('span'); stars.className = 't-scn-stars';
+      stars.innerHTML = best ? '★'.repeat(best) + `<span class="dim">${'★'.repeat(3 - best)}</span>` : '<span class="dim">未クリア</span>';
+      stars.title = best ? `最高成績 ★${best}` : 'まだクリアしていません';
+      head.append(name, stars);
+      const sub = document.createElement('div'); sub.className = 't-scn-sub'; sub.textContent = sc.subtitle || '';
+      const desc = document.createElement('p'); desc.className = 't-scn-desc'; desc.textContent = sc.desc || '';
+      const btns = document.createElement('div'); btns.className = 't-scn-btns';
+      const go = (fresh) => () => { this.userGesture(); this.sound.play('click'); this.startScenario(sc.id, fresh); };
+      if (save) {
+        const c = document.createElement('button'); c.className = 'btn btn-primary'; c.textContent = '続きから'; c.addEventListener('click', go(false));
+        const m = save.meta || {};
+        c.title = `${m.day != null ? m.day + 1 + '日目' : ''}`;
+        btns.append(c);
+      }
+      const n = document.createElement('button'); n.className = 'btn' + (save ? '' : ' btn-primary'); n.textContent = save ? '最初から' : 'はじめる'; n.addEventListener('click', go(true));
+      btns.append(n);
+      const info = document.createElement('div'); info.className = 't-saveinfo'; info.textContent = save ? this.dialogs.saveInfoText(slotKey(sc.id)) : '';
+      card.append(head, sub, desc, btns, info);
+      box.append(card);
+    }
   }
 
   enterGame() {

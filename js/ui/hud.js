@@ -60,7 +60,10 @@ export class Hud {
     const wd = WEEK[((sim.weekday ?? sim.day % 7) + 7) % 7] || '';
     this.set('day', this.el.day, `${(sim.day | 0) + 1}日目`);
     const hh = String(sim.hour | 0).padStart(2, '0'), mm = String(sim.minute | 0).padStart(2, '0');
-    this.set('time', this.el.time, `${wd} ${hh}:${mm}`);
+    const w = sim.weather;
+    const wx = w ? (w.kind === 'typhoon' ? ' 🌀' : ' ☂') : '';
+    this.set('time', this.el.time, `${wd} ${hh}:${mm}${wx}`);
+    this.el.time.title = w ? (w.kind === 'typhoon' ? '台風が来ています' : '雨') : '';
     const cur = app.speedIdx;
     this.speedBtns.forEach((b, i) => b.classList.toggle('is-on', i === cur));
     this.el.badge.hidden = !(cur === 0 && !app.blocked());

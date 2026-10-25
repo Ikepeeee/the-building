@@ -1,7 +1,6 @@
 // セーブ／ロード。localStorage が使えない環境（プライベートモード等）でも落ちないようにする。
 import { SAVE_KEY } from '../sim/constants.js';
 
-const BAK_KEY = SAVE_KEY + '.bak';
 const memory = new Map(); // localStorage が使えないときの代替（そのページの間だけ有効）
 
 let lsOk = null;
@@ -48,13 +47,20 @@ export function makeSaveObject(sim, ui) {
     app: 'thebuilding',
     v: 1,
     savedAt: Date.now(),
-    meta: { star: sim.star, tower: !!sim.tower, pop: sim.pop, day: sim.day, money: sim.money, ...(ui ? { ui } : {}) },
+    meta: {
+      star: sim.star, tower: !!sim.tower, pop: sim.pop, day: sim.day, money: sim.money, ...(ui ? { ui } : {}),
+      ...(sim.scenario ? { scenario: sim.scenario.id, scnState: sim.scenario.state, grade: sim.scenario.grade } : {}),
+    },
     data: sim.serialize(),
   };
 }
 
+// ---- セーブの置き場所（モードごとに別）: フリープレイは SAVE_KEY、シナリオは SAVE_KEY + '.scn.' + id ----
+export const slotKey = (scenarioId) => (scenarioId ? `${SAVE_KEY}.scn.${scenarioId}` : SAVE_KEY);
+const bakKey = (key) => key + '.bak';
+
 /** @returns {{ok:boolean, persisted:boolean, error?:string}} */
-export function saveGame(sim, ui) {
+export function saveGame(sim, ui, key = slotKey(sim && sim.scenario && sim.scenario.id)) {
   let json;
   try {
     json = JSON.stringify(makeSaveObject(sim, ui));
@@ -62,10 +68,10 @@ export function saveGame(sim, ui) {
     return { ok: false, persisted: false, error: 'セーブデータを作れませんでした: ' + (e && e.message) };
   }
   try {
-    const prev = storage.get(SAVE_KEY);
-    if (prev && validate(safeParse(prev))) storage.set(BAK_KEY, prev);
+    const prev = storage.get(key);
+    if (prev && validate(safeParse(prev))) storage.set(bakKey(key), prev);
   } catch { /* バックアップ失敗は無視 */ }
-  const persisted = storage.set(SAVE_KEY, json);
+  const persisted = storage.set(key, json);
   return { ok: true, persisted };
 }
 
@@ -78,22 +84,38 @@ function validate(o) {
 }
 
 /** 読み込み候補（本体→バックアップの順）。壊れているものは飛ばす。 [{obj, backup}] */
-export function loadCandidates() {
+export function loadCandidates(key = SAVE_KEY) {
   const out = [];
-  for (const k of [SAVE_KEY, BAK_KEY]) {
+  for (const k of [key, bakKey(key)]) {
     const o = safeParse(storage.get(k));
-    if (validate(o)) out.push({ obj: o, backup: k === BAK_KEY });
+    if (validate(o)) out.push({ obj: o, backup: k !== key });
   }
   return out;
 }
 
-export function peekSave() {
-  const c = loadCandidates();
+export function peekSave(key = SAVE_KEY) {
+  const c = loadCandidates(key);
   return c.length ? c[0].obj : null;
 }
 
-export function clearSave() {
-  storage.remove(SAVE_KEY);
+export function clearSave(key = SAVE_KEY) {
+  storage.remove(key);
+}
+
+// ---- シナリオの最高成績 ----
+const REC_KEY = SAVE_KEY + '.records';
+export function loadRecords() {
+  const o = safeParse(storage.get(REC_KEY));
+  return o && typeof o === 'object' ? o : {};
+}
+/** 成績を記録する（前より良ければ）。更新したら true */
+export function saveRecord(id, grade, day) {
+  const r = loadRecords();
+  const prev = r[id];
+  if (prev && prev.grade >= grade) return false;
+  r[id] = { grade, day, at: Date.now() };
+  storage.set(REC_KEY, JSON.stringify(r));
+  return true;
 }
 
 export function exportText(sim, ui) {

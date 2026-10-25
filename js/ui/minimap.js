@@ -44,7 +44,8 @@ export class Minimap {
   /** 表示するフロアの範囲（建物の高さに合わせて縦を詰める） */
   range() {
     const top = Math.max(15, Math.min(MAX_F, (this.maxF ?? 0) + 6));
-    const bot = Math.min(-2, Math.max(MIN_F, (this.minF ?? 0) - 2));
+    const floorMin = this.app.sim && Number.isFinite(this.app.sim.minFloor) ? Math.max(MIN_F, this.app.sim.minFloor) : MIN_F;
+    const bot = Math.min(-1, Math.max(floorMin - 1, (this.minF ?? 0) - 2));
     return [bot, top];
   }
 

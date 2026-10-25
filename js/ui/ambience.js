@@ -5,6 +5,7 @@
 // - ロビー: 人の量に応じたざわめき
 // - 消防ヘリ: ローター音（sim.heli があるとき）
 // - 工事中の施設: トンカチとドリル
+// - 雨・台風: 雨音と風の音（sim.weather）
 // - ごみ・リサイクルセンター: 収集車のエンジン・バック警告音・積み込みの油圧音／駐車場: ドアの音・エンジン始動
 import { TILE_W, FLOOR_H, SAVE_KEY } from '../sim/constants.js';
 import { storage } from './save.js';
@@ -70,7 +71,18 @@ export class Ambience {
     const tLfo = c.createOscillator(); tLfo.frequency.value = 9; const tLfoG = gain(0.25); tLfo.connect(tLfoG); tLfoG.connect(tAm.gain); tLfo.start();
     const truck = gain(0);
     tOsc.connect(tLp); tLp.connect(tAm); tAm.connect(truck); truck.connect(out); tOsc.start();
-    this.n = { out, murmur, mBp, sizzle, motor, motorOsc, motorOsc2, motorLp, rotor, rLfo, truck, tOsc };
+    // 雨（高域のザー）と風（帯域を揺らすヒュー）: 天気のときだけ音量を上げる。ノードは作りっぱなしで再利用
+    const rainHp = c.createBiquadFilter(); rainHp.type = 'highpass'; rainHp.frequency.value = 1400;
+    const rainLp = c.createBiquadFilter(); rainLp.type = 'lowpass'; rainLp.frequency.value = 7000;
+    const rain = gain(0);
+    noise().connect(rainHp); rainHp.connect(rainLp); rainLp.connect(rain); rain.connect(out);
+    const windBp = c.createBiquadFilter(); windBp.type = 'bandpass'; windBp.frequency.value = 500; windBp.Q.value = 3;
+    const wLfo = c.createOscillator(); wLfo.frequency.value = 0.23; const wLfoG = gain(260); wLfo.connect(wLfoG); wLfoG.connect(windBp.frequency); wLfo.start();
+    const wAm = gain(0.6);
+    const wLfo2 = c.createOscillator(); wLfo2.frequency.value = 0.37; const wLfo2G = gain(0.35); wLfo2.connect(wLfo2G); wLfo2G.connect(wAm.gain); wLfo2.start();
+    const wind = gain(0);
+    noise().connect(windBp); windBp.connect(wAm); wAm.connect(wind); wind.connect(out);
+    this.n = { out, murmur, mBp, sizzle, motor, motorOsc, motorOsc2, motorLp, rotor, rLfo, truck, tOsc, rain, wind };
     return true;
   }
 
@@ -81,7 +93,7 @@ export class Ambience {
   silence() {
     const n = this.n;
     if (!n) return;
-    for (const k of ['murmur', 'sizzle', 'motor', 'rotor', 'truck']) this.set(n[k].gain, 0, 0.15);
+    for (const k of ['murmur', 'sizzle', 'motor', 'rotor', 'truck', 'rain', 'wind']) this.set(n[k].gain, 0, 0.15);
   }
 
   /** app から 8Hz ほどで呼ぶ */
@@ -168,6 +180,11 @@ export class Ambience {
     if (office > 0 && Math.random() < Math.min(0.05, office * 0.0015)) this.phone(near);
     if (food > 0 && Math.random() < Math.min(0.5, food * 0.04)) this.voice(near);
     if (crowd > 0 && Math.random() < Math.min(0.4, crowd * 0.01)) this.voice(near * 0.8);
+    // 天気: 雨と風（台風は強く）。画面のどこにいても聞こえる
+    const w = sim.weather;
+    const wi = w ? Math.max(0, Math.min(1, w.intensity ?? 0.5)) : 0;
+    this.set(n.rain.gain, w ? 0.05 + 0.12 * wi : 0, 0.8);
+    this.set(n.wind.gain, w && w.kind === 'typhoon' ? 0.06 + 0.16 * wi : w ? 0.02 : 0, 0.8);
     // ごみ収集車: エンジン、バックの警告音（入ってくるとき）、積み込みの油圧音
     this.set(n.truck.gain, truck ? 0.09 * near : 0, 0.3);
     if (truck) {
