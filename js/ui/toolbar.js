@@ -90,12 +90,44 @@ export class Toolbar {
     return b;
   }
 
+  /**
+   * その型をツールバーに出すか・建てられるか。sim.canBuildType があればそれに従う（シナリオ・★・unlock を sim が判定）。
+   * 無ければ ★ で判定。シナリオ専用の型は、そのシナリオ以外では出さない。
+   */
+  availability(key) {
+    const t = TYPES[key];
+    const sim = this.app.sim;
+    if (!t || !sim) return { show: true, ok: true, reason: '' };
+    const scn = sim.scenario && sim.scenario.id;
+    if (t.scenario && t.scenario !== scn) return { show: false, ok: false, reason: 'このシナリオでは使えません' };
+    if (typeof sim.canBuildType === 'function') {
+      try {
+        const r = sim.canBuildType(key) || {};
+        return { show: !r.hidden, ok: !!r.ok, reason: r.reason || '', star: r.star ?? t.star };
+      } catch (e) { console.error(e); }
+    }
+    return { show: true, ok: sim.star >= t.star, reason: `★${t.star}で解放`, star: t.star };
+  }
+
+  /** 表示できる型が1つも無いタブは隠す（「リゾート」はシナリオのときだけ） */
+  refreshTabs() {
+    let curOk = false;
+    for (const [id, tab] of this.tabs) {
+      const any = Object.entries(TYPES).some(([k, t]) => t.cat === id && this.availability(k).show);
+      tab.hidden = !any;
+      if (any && id === this.cat) curOk = true;
+    }
+    this.scnSig = this.app.sim && this.app.sim.scenario ? this.app.sim.scenario.id : '';
+    if (!curOk) this.showCat('basic');
+    else this.showCat(this.cat);
+  }
+
   showCat(cat) {
     this.cat = cat;
     for (const [id, t] of this.tabs) t.classList.toggle('is-on', id === cat);
     for (const [k, b] of this.buttons) if (!b.classList.contains('fixed')) b.remove();
     for (const [key, t] of Object.entries(TYPES)) {
-      if (t.cat !== cat) continue;
+      if (t.cat !== cat || !this.availability(key).show) continue;
       let b = this.buttons.get(key);
       if (!b) b = this.makeButton(key, t.name, costLabel(key), '');
       this.itemsEl.append(b);
@@ -123,8 +155,9 @@ export class Toolbar {
     else {
       const t = TYPES[key];
       const sim = this.app.sim;
-      const lock = sim && sim.star < t.star ? `<div class="tt-lock">★${t.star}で解放</div>` : '';
-      tip.innerHTML = `<b></b> <span class="tt-cost"></span>${lock}<div class="tt-desc"></div><div class="tt-meta"></div>`;
+      const av = this.availability(key);
+      tip.innerHTML = `<b></b> <span class="tt-cost"></span>${av.ok ? '' : '<div class="tt-lock"></div>'}<div class="tt-desc"></div><div class="tt-meta"></div>`;
+      if (!av.ok) tip.querySelector('.tt-lock').textContent = av.reason || `★${t.star}で解放`;
       tip.querySelector('b').textContent = t.name;
       tip.querySelector('.tt-cost').textContent = costLabel(key) + (t.carCost ? `（カゴ追加 ${fmtMoney(t.carCost)}）` : '');
       tip.querySelector('.tt-desc').textContent = t.desc || '';
@@ -144,6 +177,8 @@ export class Toolbar {
   update(force) {
     const sim = this.app.sim;
     if (!sim) return;
+    const scnSig = sim.scenario ? sim.scenario.id : '';
+    if (scnSig !== this.scnSig) { this.refreshTabs(); return; }
     if (sim.star > this.seenStar) {
       for (const [k, t] of Object.entries(TYPES)) if (t.star > this.seenStar && t.star <= sim.star && t.cat !== this.cat) this.newKeys.add(k);
       this.seenStar = sim.star;
@@ -152,9 +187,12 @@ export class Toolbar {
     }
     const tool = this.app.tool;
     let sig = `${sim.star}|${tool}|${this.app.overlay}|${[...this.newKeys].join()}|`;
+    const avs = new Map();
     for (const [key, b] of this.buttons) {
       if (!TYPES[key] || !b.isConnected) continue;
-      sig += sim.money >= toolCost(key) ? '1' : '0';
+      const av = this.availability(key);
+      avs.set(key, av);
+      sig += (sim.money >= toolCost(key) ? '1' : '0') + (av.ok ? 'o' : 'x');
     }
     if (!force && sig === this.state) return;
     this.state = sig;
@@ -162,12 +200,14 @@ export class Toolbar {
       b.classList.toggle('is-on', key === 'eval' ? this.app.overlay === 'eval' : key === tool);
       const t = TYPES[key];
       if (!t) continue;
-      const locked = sim.star < t.star;
+      const av = avs.get(key) || this.availability(key);
+      const locked = !av.ok;
       b.classList.toggle('locked', locked);
       b.classList.toggle('no-money', !locked && sim.money < toolCost(key));
       let lk = b.querySelector('.t-lock');
-      if (locked && !lk) { lk = document.createElement('span'); lk.className = 't-lock'; lk.textContent = `★${t.star}`; b.append(lk); }
-      if (!locked && lk) lk.remove();
+      if (locked && !lk) { lk = document.createElement('span'); lk.className = 't-lock'; b.append(lk); }
+      if (locked) { const m = /★\s*(\d)/.exec(av.reason || ''); lk.textContent = m ? `★${m[1]}` : '🔒'; b.title = av.reason || ''; }
+      if (!locked && lk) { lk.remove(); b.title = ''; }
       b.setAttribute('aria-disabled', locked ? 'true' : 'false');
     }
     for (const [id, tab] of this.tabs) {

@@ -29,6 +29,7 @@ const REVIEW_TEXT = {
   roach: ['ゴキブリが出ました……。', '虫が出て最悪でした。'],
   garbage: ['ごみの臭いが気になりました。'],
   parking: ['車を停める場所がありませんでした。'],
+  onsen: ['温泉が最高でした！', '温泉でゆっくり疲れがとれました。', '湯上がりに海を眺めるのが最高。'],
 };
 
 export const PeopleMixin = {
@@ -209,11 +210,15 @@ export const PeopleMixin = {
     if (o.infested) { stars -= 2; causes.push('roach'); }
     if (o.garbageBad) { stars -= 1; causes.push('garbage'); }
     if (o.parkingShort > 0) { stars -= 1; causes.push('parking'); }
+    // 温泉があると評判が上がる（シナリオ）
+    let onsen = false;
+    const ob = this.scenarioDef && this.scenarioDef.onsenReview;
+    if (ob && (this.byType.onsen || []).length && this.r() < ob) { stars += 1; onsen = true; }
     stars = Math.max(1, Math.min(5, stars));
     // いちばん大きな原因（ゴキブリ > 騒音 > 待ち > 移動 > ごみ > 駐車場）
     const order = ['roach', 'noisy', 'wait', 'stress', 'garbage', 'parking'];
     const main = order.find((c) => causes.includes(c));
-    const pool = main ? REVIEW_TEXT[main] : stars >= 5 ? REVIEW_TEXT.great : REVIEW_TEXT.good;
+    const pool = main && !(onsen && stars >= 4) ? REVIEW_TEXT[main] : onsen ? REVIEW_TEXT.onsen : stars >= 5 ? REVIEW_TEXT.great : REVIEW_TEXT.good;
     const text = pool[Math.floor(this.r() * pool.length)];
     o.reviews = o.reviews || [];
     o.reviews.push({ stars, text, day: this.day, name: o.stayName || '宿泊客' });

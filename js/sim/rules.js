@@ -9,7 +9,9 @@ export const LOBBY_SET = new Set(LOBBY_FLOORS);
 export const TRANSPORT = new Set(['stairs', 'escalator', 'elevator', 'express']);
 export const ELEV = new Set(['elevator', 'express']);
 export const HOTEL = new Set(['hotelSingle', 'hotelTwin', 'hotelSuite']);
-export const COMMERCE = new Set(['fastfood', 'restaurant', 'shop', 'cinema', 'partyHall']);
+export const COMMERCE = new Set(['fastfood', 'restaurant', 'shop', 'cinema', 'partyHall', 'umiNoIe', 'onsen', 'aquarium']);
+// シナリオ専用の集客施設（その利用者も「来訪者」に数える）
+export const RESORT = new Set(['umiNoIe', 'onsen', 'aquarium']);
 export const NOISY = new Set(['fastfood', 'restaurant', 'cinema', 'partyHall']);
 export const TENANT = new Set(['office', 'condo']);
 export const TRANSIENT = new Set(['visitor', 'vip', 'bride', 'groom', 'weddingGuest']);
@@ -75,9 +77,9 @@ export const SIM = {
 };
 
 // 商業施設: 滞在時間 [最小, 幅]、来客率、1時間あたりの上限
-export const STAY = { fastfood: [20, 25], restaurant: [40, 40], shop: [20, 30], cinema: [110, 20], partyHall: [120, 30] };
-export const VISIT_RATE = { fastfood: 1, restaurant: 0.8, shop: 0.8, cinema: 1.2, partyHall: 0.8 };
-export const VISIT_CAP = { fastfood: 14, restaurant: 12, shop: 10, cinema: 25, partyHall: 14 };
+export const STAY = { fastfood: [20, 25], restaurant: [40, 40], shop: [20, 30], cinema: [110, 20], partyHall: [120, 30], umiNoIe: [30, 40], onsen: [50, 40], aquarium: [70, 50] };
+export const VISIT_RATE = { fastfood: 1, restaurant: 0.8, shop: 0.8, cinema: 1.2, partyHall: 0.8, umiNoIe: 1, onsen: 0.6, aquarium: 1 };
+export const VISIT_CAP = { fastfood: 14, restaurant: 12, shop: 10, cinema: 25, partyHall: 14, umiNoIe: 16, onsen: 12, aquarium: 24 };
 
 export const KIND_NAME = {
   worker: '会社員', resident: '住人', guest: '宿泊客', visitor: '来客', guard: '警備員',

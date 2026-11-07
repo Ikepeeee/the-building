@@ -795,7 +795,7 @@ export function carSprite(w, express, n, open) {
 }
 
 // ---- 施設スプライトの生成 ----
-export const SPRITE_TOP = { cathedral: 88 };
+export const SPRITE_TOP = { cathedral: 88, seaChapel: 28 };
 
 export function makeFacilitySprite(type, wTiles, hFloors, v) {
   // 異常な大きさでも巨大なキャンバスを作らない
@@ -1064,3 +1064,154 @@ export function bridgeTile(kind, par, night) {
   if (kind === 2) { p.r(6, 0, 2, 24, dk); p.r(6, 1, 1, 22, steel); }
   return p.c;
 }
+
+// ================= 海辺のリゾート専用施設（オリジナルの絵） =================
+// 海の家（w16 = 128x24）。v.open = 夏の営業中。閉店中はシャッター
+DRAW.umiNoIe = (p, v) => {
+  const W = p.w;
+  const fy = shell(p, '#d8b884', '#e8d4a0', {});
+  // 板張りの壁と屋根の葦簀
+  for (let x = 3; x < W - 1; x += 6) p.r(x, 1, 1, 20, '#c4a070');
+  for (let x = 1; x < W - 1; x++) p.r(x, 1, 1, 5 + ((x * 7) % 3 === 0 ? 1 : 0), (x % 2) ? '#c8a860' : '#b89448');
+  p.r(1, 6, W - 2, 1, '#8a6a30');
+  if (!v.open) {
+    // シャッター（冬）
+    p.r(1, 7, W - 2, 14, '#9aa0a6');
+    for (let y = 8; y < 21; y += 2) p.r(1, y, W - 2, 1, '#7a8086');
+    p.r(1, 20, W - 2, 1, '#5a6066');
+    p.sign('CLOSED', W / 2, 10, '#3a3a3a', '#f0f0e8');
+    p.c.sign = null;
+    return;
+  }
+  // かき氷の旗（文字なし: 白地に赤い波）
+  p.r(44, 7, 1, 10, '#5a4a3a');
+  p.box(45, 7, 9, 7, '#ffffff'); for (let x = 46; x < 53; x++) p.p(x, 10 + ((x >> 1) & 1), '#e03040'); p.r(46, 12, 7, 1, '#3a6ad0');
+  // カウンター: 焼きそばの鉄板とかき氷機
+  p.box(4, 13, 38, 8, '#b08050'); p.r(3, 12, 40, 1, '#7a5a30');
+  p.box(6, 10, 14, 2, '#2a2a2a'); for (let i = 0; i < 6; i++) p.p(8 + i * 2, 9 + (i & 1), '#b0702a');
+  p.r(9, 8, 1, 1, '#f0f0f0'); p.r(14, 7, 1, 1, '#f0f0f0');
+  p.box(26, 6, 6, 6, '#e8e8f0'); p.r(28, 4, 2, 2, '#9a9aa0');
+  for (let i = 0; i < 3; i++) { const x = 34 + i * 3; p.r(x, 9, 2, 3, '#ffffff'); p.p(x, 8, ['#e03040', '#3a8ad0', '#40b040'][i]); p.p(x + 1, 8, '#ffffff'); }
+  if (v.n > 0) hatFig(p, 14, 19, '#ffffff', 1);
+  // 浮き輪とビーチボール
+  for (const [x, c] of [[58, '#e04040'], [70, '#f0c020'], [82, '#40a0e0']]) { p.disc(x, 10, 4, c); p.disc(x, 10, 2, '#d8b884'); p.p(x - 3, 8, '#ffffff'); p.p(x + 3, 12, '#ffffff'); }
+  for (const x of [96, 112]) { p.disc(x, 18, 3, '#ffffff'); p.r(x - 3, 17, 3, 3, '#e04040'); p.r(x + 1, 15, 2, 3, '#3a6ad0'); p.p(x, 18, '#f0c020'); }
+  // 座敷とちゃぶ台
+  for (const x of [56, 80]) { p.r(x, 19, 18, 2, '#c8b878'); p.r(x + 5, 16, 8, 1, '#8a5a30'); p.r(x + 6, 17, 1, 2, '#6a4020'); p.r(x + 11, 17, 1, 2, '#6a4020'); p.p(x + 8, 15, '#e03040'); }
+  const pos = [[55, 'k'], [70, 'k'], [79, 'k'], [94, 'k'], [104, 's'], [118, 's'], [48, 's']];
+  for (let i = 0; i < Math.min(v.n, pos.length); i++) {
+    const [x, k] = pos[i];
+    if (k === 'k') { p.r(x + 1, 12, 2, 2, FIG); p.r(x, 14, 3, 5, FIG); p.r(x - 1, 19, 4, 1, FIG); }
+    else standFig(p, x, fy - 1, FIG, i % 2, i % 2);
+  }
+};
+
+// 温泉（w24 = 192x24）。内湯と岩風呂、湯気、のれん、木のロッカー
+DRAW.onsen = (p, v) => {
+  const W = p.w;
+  const fy = shell(p, '#d4b88a', '#8a6a48', {});
+  for (let x = 2; x < W - 1; x += 8) p.r(x, 1, 1, 20, '#c4a676');
+  // のれん（温泉の湯気マーク）
+  p.r(2, 1, 22, 1, '#5a3a1a');
+  for (let i = 0; i < 3; i++) { const x = 3 + i * 7; p.r(x, 2, 6, 8, '#1a3a7a'); }
+  p.r(9, 7, 6, 2, '#ffffff'); p.p(8, 6, '#ffffff'); p.p(15, 6, '#ffffff');
+  for (let i = 0; i < 3; i++) { p.p(9 + i * 2, 4, '#ffffff'); p.p(10 + i * 2, 3, '#ffffff'); p.p(9 + i * 2, 2, '#ffffff'); }
+  // 木のロッカー
+  p.box(26, 4, 22, 17, '#a07a48');
+  for (let y = 5; y < 20; y += 5) for (let x = 27; x < 47; x += 5) { p.box(x, y, 5, 5, '#b88a54', '#7a5a30'); p.p(x + 3, y + 2, '#e8d080'); }
+  // 内湯（タイル）
+  const b0 = 54, b1 = 118;
+  p.r(b0, 2, b1 - b0, 12, '#c8dce4'); for (let x = b0; x < b1; x += 4) p.r(x, 2, 1, 12, '#b0c8d4'); for (let y = 5; y < 14; y += 4) p.r(b0, y, b1 - b0, 1, '#b0c8d4');
+  p.box(b0, 14, b1 - b0, 7, '#7ab8d8', '#5a7a8a'); p.r(b0 + 1, 15, b1 - b0 - 2, 1, '#a8d8f0');
+  p.box(b0 + 2, 6, 8, 6, '#9a9aa0'); p.r(b0 + 4, 8, 4, 1, '#5a8aaa');
+  // 岩風呂（竹垣と岩）
+  const r0 = 124;
+  p.r(r0, 1, W - r0 - 1, 13, '#7a9a50'); for (let x = r0; x < W - 1; x += 3) p.r(x, 1, 1, 13, '#5a7a38'); p.r(r0, 5, W - r0 - 1, 1, '#4a6a2a'); p.r(r0, 10, W - r0 - 1, 1, '#4a6a2a');
+  p.disc(r0 + 52, 6, 5, '#2f7a3a'); p.r(r0 + 52, 10, 1, 4, '#6a4a2a');
+  p.box(r0 + 4, 15, W - r0 - 10, 6, '#5aa8c8', '#3a6a7a'); p.r(r0 + 5, 16, W - r0 - 12, 1, '#8ad0e8');
+  const rk = ['#7a7a74', '#8a8a82', '#6a6a64'];
+  for (let i = 0; i < 9; i++) { const x = r0 + 1 + i * 7; p.box(x, 12 + (i % 2), 6, 4, rk[i % 3], '#3a3a36'); }
+  // 入浴している人（頭だけ）
+  const heads = [[b0 + 14, 13], [b0 + 26, 13], [b0 + 40, 13], [r0 + 14, 14], [r0 + 30, 14], [r0 + 44, 14], [b0 + 52, 13], [r0 + 22, 14]];
+  for (let i = 0; i < Math.min(v.n, heads.length); i++) { const [x, y] = heads[i]; p.r(x, y, 3, 2, FIG); p.r(x, y + 2, 3, 1, '#e8c8a8'); if (i % 3 === 0) p.r(x, y - 1, 3, 1, '#ffffff'); }
+  // 湯気
+  if (v.open) for (let i = 0; i < 14; i++) { const x = b0 + 4 + ((i * 37) % (W - b0 - 10)), y = 4 + ((i * 5) % 8); p.p(x, y, '#ffffff'); p.p(x + 1, y - 1, '#f0f4f8'); }
+  if (v.n > 0) standFig(p, 50, fy - 1, '#2a4a8a', 0, 0);
+};
+
+// 水族館（w32 h2 = 256x48）。大水槽と魚の群れ、ジンベエザメ風の大きな魚、クラゲの水槽、トンネル
+DRAW.aquarium = (p, v) => {
+  const W = p.w, fy = p.h - 3;
+  shell(p, '#14244a', '#1a2a40', {});
+  // 入口とチケット
+  p.r(1, 1, 34, fy - 1, '#22385e');
+  p.box(4, 6, 12, 16, '#2a6ab0'); for (let i = 0; i < 4; i++) p.r(6 + (i % 2) * 4, 9 + i * 3, 3, 1, '#f0c040'); p.disc(10, 18, 2, '#ffffff');
+  p.box(18, 30, 16, 15, '#3a5a8a'); p.r(20, 32, 12, 4, '#8ad0f0');
+  p.r(36, 1, 2, fy - 1, '#0a1428');
+  // 大水槽
+  const tx0 = 40, tx1 = 204, ty0 = 3, ty1 = 42;
+  for (let y = ty0; y < ty1; y++) p.r(tx0, y, tx1 - tx0, 1, shade('#2a7ac0', -((y - ty0) / (ty1 - ty0)) * 0.55));
+  for (let i = 0; i < 6; i++) p.line(tx0 + 10 + i * 26, ty0, tx0 + 4 + i * 26, ty0 + 14, '#5aa0e0');
+  p.r(tx0, ty1 - 4, tx1 - tx0, 4, '#c8b080');
+  const r = rng(808);
+  for (let x = tx0 + 2; x < tx1 - 2; x += 5) { const h = 3 + ((r() * 8) | 0); for (let y = 0; y < h; y++) p.p(x + ((y >> 1) & 1), ty1 - 4 - y, '#2a8a4a'); }
+  // ジンベエザメ風の大きな魚（白い水玉）
+  const sx = 70, sy = 14;
+  for (let i = 0; i < 52; i++) { const t = i / 52; const hh = Math.round(Math.sin(Math.PI * Math.min(1, t * 1.25)) * 6) + 1; p.r(sx + i, sy - (hh >> 1), 1, hh, '#3a4a6a'); }
+  p.r(sx + 52, sy - 4, 2, 3, '#3a4a6a'); p.r(sx + 52, sy + 1, 2, 3, '#3a4a6a'); p.r(sx + 54, sy - 6, 2, 4, '#3a4a6a'); p.r(sx + 54, sy + 2, 2, 4, '#3a4a6a');
+  p.r(sx + 22, sy - 7, 3, 3, '#3a4a6a'); p.r(sx + 16, sy + 3, 5, 2, '#3a4a6a');
+  for (let i = 0; i < 18; i++) p.p(sx + 4 + ((i * 11) % 44), sy - 2 + ((i * 5) % 5), '#e8f0f8');
+  p.r(sx, sy, 3, 1, '#1a2a3a');
+  // 魚の群れ
+  const school = (cx, cy, c, n) => { for (let i = 0; i < n; i++) { const x = cx + ((i * 7) % 18) - 9, y = cy + ((i * 3) % 7) - 3; p.r(x, y, 2, 1, c); p.p(x + 2, y, shade(c, -0.3)); } };
+  school(150, 10, '#f0c040', 14); school(178, 24, '#c0d8f0', 16); school(60, 30, '#f07040', 10); school(125, 32, '#80e0d0', 12);
+  // エイ
+  p.r(160, 18, 9, 1, '#5a6a7a'); p.r(162, 17, 5, 1, '#5a6a7a'); p.r(163, 19, 3, 1, '#5a6a7a'); p.r(169, 18, 4, 1, '#4a5a6a');
+  // トンネル（水槽の下をくぐる）
+  for (let x = 96; x < 150; x++) { const t = (x - 96) / 54; const h = Math.round(Math.sin(Math.PI * t) * 12); p.r(x, ty1 - h, 1, h, '#0e1a30'); p.p(x, ty1 - h, '#a8d8f0'); }
+  p.r(tx0, ty1, tx1 - tx0, 2, '#5a6a8a'); p.r(tx0 - 1, ty0 - 1, tx1 - tx0 + 2, 1, '#8aa0c0'); p.r(tx0 - 1, ty0, 1, ty1 - ty0, '#8aa0c0'); p.r(tx1, ty0, 1, ty1 - ty0, '#8aa0c0');
+  // クラゲの水槽
+  const jx = 214;
+  p.box(jx, 6, 34, 34, '#1a1030', '#6a7aa0');
+  for (let y = 7; y < 39; y++) p.r(jx + 1, y, 32, 1, shade('#3a2a6a', -((y - 7) / 32) * 0.4));
+  for (const [x, y, c] of [[220, 12, '#f0a0d0'], [232, 18, '#e8e8ff'], [224, 27, '#f0a0d0'], [238, 30, '#a0e0ff'], [240, 11, '#e8e8ff']]) {
+    p.r(x, y, 5, 2, c); p.r(x + 1, y - 1, 3, 1, c); for (let k = 0; k < 4; k++) p.r(x + k + (k > 1 ? 1 : 0), y + 2, 1, 3 + (k & 1), shade(c, -0.2));
+  }
+  // 見物客（影）
+  const pos = [44, 60, 76, 100, 112, 124, 138, 160, 176, 190, 218, 232];
+  for (let i = 0; i < Math.min(v.n, pos.length); i++) standFig(p, pos[i], fy - 1, '#0a0a14', i % 2, i % 2);
+};
+
+// 海のチャペル（w24 = 192x24、屋根の上に鐘楼）。白いガラスの礼拝堂、海の見える大きな窓
+DRAW.seaChapel = (p, v) => {
+  const W = p.w, oy = p.oy;
+  // 屋根と鐘楼
+  for (let y = 0; y < 10; y++) { const half = Math.round(30 + y * 6.5); p.r(W / 2 - half, oy - 10 + y, half * 2, 1, y === 0 ? '#3a6ab0' : '#f4f6f8'); }
+  p.r(W / 2 - 96, oy - 1, W, 1, '#3a6ab0');
+  p.box(W / 2 - 8, oy - 26, 16, 17, '#f8f8f8', '#8a9aa8');
+  p.r(W / 2 - 6, oy - 23, 12, 8, '#dce8f0'); p.disc(W / 2, oy - 18, 3, '#e8c040'); p.r(W / 2 - 1, oy - 15, 2, 1, '#a07a20');
+  p.r(W / 2 - 9, oy - 27, 18, 2, '#3a6ab0'); p.r(W / 2 - 1, oy - 28, 2, 1, '#e8c040');
+  // 室内
+  const fy = shell(p, '#fbfbf8', '#e8e0d4', {});
+  p.r(1, fy, W - 2, 1, '#e0d0c0'); p.r(W / 2 - 40, fy, 80, 1, '#4a8ac8');
+  // 海が見える大きな窓
+  for (let i = 0; i < 6; i++) {
+    const x = 6 + i * 31;
+    if (x + 24 > W - 2) break;
+    if (i === 3 || i === 2) continue;
+    p.box(x, oy + 2, 24, 13, '#9ad0f0', '#c0ccd8');
+    p.r(x + 1, oy + 9, 22, 5, '#2f78b0'); p.r(x + 1, oy + 9, 22, 1, '#e8f4ff');
+    p.p(x + 6, oy + 11, '#ffffff'); p.p(x + 15, oy + 12, '#ffffff');
+    p.r(x + 12, oy + 2, 1, 13, '#c0ccd8');
+  }
+  // 祭壇と花のアーチ
+  const cx = W / 2;
+  for (let a = 0; a <= 16; a++) { const t = (a / 16) * Math.PI; p.r(Math.round(cx - Math.cos(t) * 14), Math.round(oy + 16 - Math.sin(t) * 14), 2, 2, a % 2 ? '#f8a0c0' : '#ffffff'); }
+  p.box(cx - 8, oy + 14, 16, 7, '#ffffff', '#c0c8d0'); p.r(cx - 7, oy + 15, 14, 1, '#e8c040');
+  // 長椅子
+  for (let x = 12; x < W - 12; x += 14) {
+    if (Math.abs(x + 4 - cx) < 22) continue;
+    p.r(x, oy + 13, 1, 8, '#d8d8d8'); p.r(x, oy + 17, 9, 2, '#f4f4f4'); p.r(x + 8, oy + 18, 1, 3, '#d8d8d8');
+  }
+  for (let i = 0; i < Math.min(v.n, 10); i++) { const x = 14 + (i % 5) * 14 + (i >= 5 ? 112 : 0); sitFig(p, x + 1, oy + 17, FIG, i < 5 ? 1 : 0); }
+};

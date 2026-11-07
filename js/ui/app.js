@@ -102,10 +102,12 @@ export class App {
     sim.on('star', mine((s) => { if (!this.restoring && this.started) this.dialogs.enqueue({ type: 'star', star: s.star }); }));
     sim.on('scenario', mine((d) => {
       if (this.restoring || !this.started) return;
-      if (d.kind === 'clear' || d.kind === 'fail') this.calmSpeed();
+      if (d.kind === 'clear' || d.kind === 'fail' || d.kind === 'legend') this.calmSpeed();
+      // 伝説のリゾート（TOWER 相当）は 'tower' と同じ枠で1回だけ出す
+      if (d.kind === 'legend') { this.dialogs.enqueue({ type: 'tower', data: d }); return; }
       this.dialogs.enqueue({ type: 'scenario', data: d });
     }));
-    sim.on('tower', mine(() => { if (!this.restoring && this.started) this.dialogs.enqueue({ type: 'tower' }); }));
+    sim.on('tower', mine((d) => { if (!this.restoring && this.started) { this.calmSpeed(); this.dialogs.enqueue({ type: 'tower', data: d }); } }));
     sim.on('sound', mine((s) => { this.soundFlag = true; if (!this.restoring) this.sound.play(s.name); }));
   }
 
@@ -123,7 +125,7 @@ export class App {
     this.toasts.clear();
     this.toolbar.seenStar = sim.star;
     this.toolbar.newKeys.clear();
-    this.toolbar.update(true);
+    this.toolbar.refreshTabs();
     this.updateConfirmBar();
   }
 
@@ -236,6 +238,7 @@ export class App {
     }
     if (now - (this.guideTimer || 0) > 1500) { this.guideTimer = now; this.guide.update(); }
     if (now - (this.goalsTimer || 0) > 700) { this.goalsTimer = now; this.goals.update(); }
+    if (now - (this.wdTimer || 0) > 500) { this.wdTimer = now; this.dialogs.watchdog(now); }
     // 遊んでいない（タイトル・一時停止）ときは AudioContext を止める
     this.sound.idle(!this.started || (spd === 0 && !this.dialogs.count));
     if (now - this.ambTimer > 200) {
@@ -335,8 +338,10 @@ export class App {
     if (key !== 'inspect' && key !== 'bulldoze' && key !== 'copy') {
       const t = TYPES[key];
       if (!t) return;
-      if (this.sim && this.sim.star < t.star) {
-        this.toasts.show({ text: `${t.name}は★${t.star}で解放されます`, kind: 'info' });
+      const av = this.toolbar.availability(key);
+      if (!av.show) return;
+      if (!av.ok) {
+        this.toasts.show({ text: `${t.name}: ${av.reason || `★${t.star}で解放されます`}`, kind: 'info' });
         this.sound.play('error');
         return;
       }

@@ -782,3 +782,4 @@ html.standalone, html.standalone body { background: #0d1030; }
 .scn-end .end-talk .talk-face { width: 56px; height: 56px; }
 .scn-end .end-talk p { margin: 4px 0 0; }
 .menu-mode { display: flex; justify-content: space-between; gap: 8px; padding: 4px 8px; border: 2px solid var(--lo); background: #fff8e4; font-size: 13px; }
+.ending.legend { background: linear-gradient(#0b2a5a, #c0507a 50%, #f7b05a 78%, #2a7ad8 80%); }

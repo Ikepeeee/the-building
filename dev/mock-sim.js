@@ -27,6 +27,19 @@ export class MockTower {
     this.theme = opt.theme || 'default';
     this.weather = opt.weather ? { kind: opt.weather, intensity: opt.intensity != null ? opt.intensity : 0.85, until: 1e12 } : null;
     this.minFloor = opt.minFloor != null ? opt.minFloor : (this.theme === 'seaside' ? -2 : MIN_F);
+    this.winter = !!opt.winter;
+    if (this.theme === 'seaside') {
+      // §17: 海辺専用の施設（重なる施設は取り除いてから置く）
+      const place = (type, f, x, extra) => {
+        const T = TYPES[type]; const w = T.w, h = T.h || 1;
+        for (let ff = f; ff < f + h; ff++) for (let xx = x; xx < x + w; xx++) { const id = this.grid[ff][xx]; if (id > 0) { const o = this.objs.get(id); if (o) { for (let a = o.f; a < o.f + (o.h || 1); a++) for (let b = o.x; b < o.x + o.w; b++) if (this.grid[a][b] === id) this.grid[a][b] = -1; this.objs.delete(id); } } }
+        return this.add(type, f, x, extra);
+      };
+      place('umiNoIe', 0, 132, { inCount: 6 });
+      place('onsen', 13, 260, { inCount: 7 }); this.floor(13, 260, 283);
+      place('aquarium', 13, 290, { inCount: 10 }); this.floor(13, 290, 321); this.floor(14, 290, 321);
+      place('seaChapel', 31, 20, { inCount: 8 });
+    }
     if (this.minFloor > MIN_F) {
       // 掘れない階のものは取り除く
       for (const [id, o] of [...this.objs]) {
@@ -343,6 +356,7 @@ export class MockTower {
   }
   isOpen(o) {
     const T = TYPES[o.type];
+    if (o.type === 'umiNoIe' && this.winter) return false;
     if (!T || !T.open) return true;
     const h = this.hour + this.minute / 60;
     return h >= T.open[0] && h < T.open[1];

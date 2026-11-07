@@ -46,10 +46,12 @@ export class Hud {
     const app = this.app, sim = app.sim;
     if (!sim) return;
     const star = Math.max(1, Math.min(5, sim.star | 0));
-    const starHtml = sim.tower ? 'TOWER' : '★'.repeat(star) + `<span class="dim">${'★'.repeat(5 - star)}</span>`;
+    // 最高ランクの称号: フリープレイは TOWER、海辺は LEGEND（sim が titleText を持てばそれ）
+    const topTitle = sim.legend || (sim.scenario && sim.tower) ? (sim.titleText || 'LEGEND') : sim.tower ? 'TOWER' : '';
+    const starHtml = topTitle || '★'.repeat(star) + `<span class="dim">${'★'.repeat(5 - star)}</span>`;
     this.set('stars', this.el.stars, starHtml, 'innerHTML');
-    this.el.star.classList.toggle('is-tower', !!sim.tower);
-    this.el.star.title = sim.tower ? 'TOWER 達成！' : `★${star}（クリックで進捗）`;
+    this.el.star.classList.toggle('is-tower', !!topTitle);
+    this.el.star.title = topTitle ? `${topTitle} 達成！` : `★${star}（クリックで進捗）`;
     this.set('money', this.el.money, fmtMoney(sim.money));
     this.el.money.classList.toggle('neg', sim.money < 0);
     const lg = sim.ledger || { income: 0, expense: 0 };

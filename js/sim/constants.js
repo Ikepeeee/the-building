@@ -57,6 +57,11 @@ export const TYPES = {
   medical:     { name: '医療センター', cat: 'service', w: 24, cost: 500000, star: 3, desc: '★4の条件' },
   metro:       { name: '地下鉄駅', cat: 'special', w: 30, h: 3, cost: 1000000, star: 4, only: 'basement', desc: '地下3フロア分。第2の出入口。★5の条件' },
   cathedral:   { name: '大聖堂', cat: 'special', w: 30, cost: 3000000, star: 5, only: 'top', desc: '100Fのみ。結婚式が挙がればタワー達成' },
+  // ---- シナリオ専用（scenario が一致するときだけ使える） ----
+  umiNoIe:     { name: '海の家', cat: 'resort', w: 16, cost: 60000, price: 40, open: [9, 18], star: 1, only: 'ground', scenario: 'seaside', desc: '1Fのみ。夏（7〜9月）だけ営業する浜辺の店' },
+  onsen:       { name: '温泉', cat: 'resort', w: 24, cost: 300000, price: 120, open: [6, 24], star: 2, scenario: 'seaside', desc: '宿泊客・住人・観光客が入りに来る。ホテルの評価が上がる' },
+  aquarium:    { name: '水族館', cat: 'resort', w: 32, h: 2, cost: 800000, price: 150, open: [9, 20], star: 3, scenario: 'seaside', desc: '2フロア分。季節を問わず観光客を呼ぶ目玉施設' },
+  seaChapel:   { name: '海のチャペル', cat: 'resort', w: 24, cost: 1500000, star: 5, only: 'high', minF: 29, scenario: 'seaside', desc: '30F以上に建てる。夕日の結婚式が挙がれば「伝説のリゾート」' },
 };
 
 export const TOOL_CATS = [
@@ -68,6 +73,7 @@ export const TOOL_CATS = [
   { id: 'commerce', name: '商業' },
   { id: 'service', name: 'サービス' },
   { id: 'special', name: '特別' },
+  { id: 'resort', name: 'リゾート' },   // シナリオ専用の施設があるときだけ表示
 ];
 
 // ---- テナントのバリエーション（v2） ----

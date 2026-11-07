@@ -90,9 +90,21 @@ export const BuildMixin = {
     else if (TRANSPORT.has(tool)) r = this._planStairs(tool, T, p);
     else r = this._planFacility(tool, T, p);
     if (r.ok && r.ghost && (r.ghost.lo ?? r.ghost.f) < this.minFloor) return { ...r, ok: false, reason: `地下水位が高く、${floorName(this.minFloor)}より下は掘れません` };
-    if (r.ok && T.star > this.star) return { ...r, ok: false, reason: `★${T.star}で解放されます` };
+    if (r.ok) { const cb = this.canBuildType(tool); if (!cb.ok) return { ...r, ok: false, reason: cb.reason }; }
     if (r.ok && r.cost > this.money) return { ...r, ok: false, reason: `資金が足りません（${fmtMoney(r.cost)}）` };
     return r;
+  },
+
+  // その型を今建てられるか（シナリオの専用施設・使わない施設・★の解放の上書きを1か所で判定）
+  canBuildType(type) {
+    const T = TYPES[type];
+    if (!T) return { ok: false, reason: '不明なツールです' };
+    const def = this.scenarioDef;
+    if (T.scenario && (!def || def.id !== T.scenario)) return { ok: false, reason: 'このシナリオでは建てられません', hidden: true };
+    if (def && def.disabled && def.disabled.includes(type)) return { ok: false, reason: 'このシナリオでは使いません', hidden: true };
+    const need = def && def.unlock && def.unlock[type] !== undefined ? def.unlock[type] : T.star;
+    if (need > this.star) return { ok: false, reason: `★${need}で解放されます`, star: need };
+    return { ok: true, reason: '', star: need };
   },
 
   _planHoriz(tool, T, p) {
@@ -157,6 +169,8 @@ export const BuildMixin = {
     if (T.only === 'basement' && top >= 0) return fail('地下にのみ建設できます');
     if (T.only === 'aboveGround' && f < 0) return fail('地上にのみ建設できます');
     if (T.only === 'lobbyFloor' && !LOBBY_SET.has(f)) return fail('ロビー階にのみ建設できます');
+    if (T.only === 'ground' && f !== 0) return fail('1Fにのみ建設できます');
+    if (T.only === 'high' && f < (T.minF ?? 29)) return fail(`${floorName(T.minF ?? 29)}以上にのみ建設できます`);
     let fresh = 0;
     for (let r = 0; r < h; r++) {
       for (let xi = x; xi < x + w; xi++) {

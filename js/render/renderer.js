@@ -21,11 +21,12 @@ const LOBBY_SET = new Set(LOBBY_FLOORS);
 const VIS_CAP = {
   office: 6, condo: 4, hotelSingle: 1, hotelTwin: 2, hotelSuite: 3, fastfood: 9, restaurant: 8, shop: 5,
   cinema: 10, partyHall: 14, security: 6, housekeeping: 6, medical: 6, metro: 14, cathedral: 12,
+  umiNoIe: 7, onsen: 8, aquarium: 12, seaChapel: 10,
 };
-const COMMERCE = new Set(['fastfood', 'restaurant', 'shop', 'cinema', 'partyHall']);
+const COMMERCE = new Set(['fastfood', 'restaurant', 'shop', 'cinema', 'partyHall', 'umiNoIe', 'onsen', 'aquarium']);
 const ROOMS = new Set(['office', 'condo', 'hotelSingle', 'hotelTwin', 'hotelSuite']);
 const SERVICE = new Set(['security', 'housekeeping', 'medical']);
-const EVAL_TYPES = new Set(['office', 'condo', 'hotelSingle', 'hotelTwin', 'hotelSuite', 'fastfood', 'restaurant', 'shop', 'cinema', 'partyHall']);
+const EVAL_TYPES = new Set(['office', 'condo', 'hotelSingle', 'hotelTwin', 'hotelSuite', 'fastfood', 'restaurant', 'shop', 'cinema', 'partyHall', 'umiNoIe', 'onsen', 'aquarium']);
 const EVAL_COL = { good: '#38d8ff', fair: '#f4d020', bad: '#f03030' };
 
 const isElev = (t) => t === 'elevator' || t === 'express';
@@ -54,7 +55,7 @@ export class Renderer {
     this.dpr = 1;
     this.cssW = canvas.clientWidth || canvas.width || 300;
     this.cssH = canvas.clientHeight || canvas.height || 150;
-    this.opts = { cache: true, lod: true, caps: true };
+    this.opts = { cache: true, lod: true, caps: true, bgCache: true };
     // キャンバスのメモリ予算（iOS Safari はキャンバスの合計メモリに上限があり、超えるとタブが落ちる）
     const nav = typeof navigator !== 'undefined' ? navigator : null;
     const ua = nav && nav.userAgent || '';
@@ -137,8 +138,11 @@ export class Renderer {
     this.weather = wx && typeof wx === 'object' && (wx.kind === 'typhoon' || wx.kind === 'rain') ? wx : null;
     this.storm = this.weather ? Math.max(0, Math.min(1, num(this.weather.intensity, 0.7))) * (this.weather.kind === 'typhoon' ? 1 : 0.6) : 0;
 
-    this.drawSky(hour, night, wx0, wy0, wx1, wy1);
-    this.drawGround(wx0, wy0, wx1, wy1);
+    if (this.opts.bgCache) this.drawBackgroundCached(hour, night, wx0, wy0, wx1, wy1);
+    else {
+      this.drawSky(hour, night, wx0, wy0, wx1, wy1);
+      this.drawGround(wx0, wy0, wx1, wy1);
+    }
 
     if (sim) {
       const fHi = Math.min(MAX_F, Math.floor(-wy0 / FH));
@@ -278,6 +282,34 @@ export class Renderer {
     if (this.seaside) this.drawSea(hour, night, wx0, wy0, wx1, wy1);
   }
 
+  // 背景（空・星・雲・飛行機・地層・木。海辺では海・波・島・船・ヤシも）を画面サイズの 1 枚にまとめ、
+  // カメラが止まっている間は最大 10fps でだけ描き直す（毎フレームは 1 回の転送だけ）
+  drawBackgroundCached(hour, night, wx0, wy0, wx1, wy1) {
+    const cw = this.canvas.width, ch = this.canvas.height;
+    let bg = this._bg;
+    if (!bg || bg.width !== cw || bg.height !== ch) {
+      if (bg) freeCanvas(bg);
+      bg = this._bg = makeCanvasLike(cw, ch);
+      this._bgKey = null;
+      this._bgPx = cw * ch;
+    }
+    const tick = Math.floor(this.nowMs / 100);
+    const key = Math.round(this.cx * this.S) + '|' + Math.round(this.cy * this.S) + '|' + this.S + '|' + tick;
+    if (key !== this._bgKey) {
+      const main = this.ctx;
+      const g = bg.getContext('2d', { alpha: false });
+      g.setTransform(1, 0, 0, 1, 0, 0); g.imageSmoothingEnabled = false; g.globalAlpha = 1;
+      this.ctx = g;
+      try {
+        this.drawSky(hour, night, wx0, wy0, wx1, wy1);
+        this.drawGround(wx0, wy0, wx1, wy1);
+      } finally { this.ctx = main; }
+      this._bgKey = key;
+      this.stats.bgRedraw = (this.stats.bgRedraw || 0) + 1;
+    }
+    this.ctx.drawImage(bg, 0, 0);
+  }
+
   // ---------------- 海辺（seaside）の遠景: 海・波・島・灯台・船・カモメ ----------------
   drawSea(hour, night, wx0, wy0, wx1, wy1) {
     const ctx = this.ctx, cw = this.canvas.width, ms = this.nowMs, storm = this.storm;
@@ -377,7 +409,6 @@ export class Renderer {
     const ctx = this.ctx, cw = this.canvas.width, ch = this.canvas.height, ms = this.nowMs, dpr = this.dpr;
     const typh = this.weather.kind === 'typhoon';
     // 画面を少し暗く
-    ctx.globalAlpha = 0.12 * storm; ctx.fillStyle = '#1a2028'; ctx.fillRect(0, 0, cw, ch); ctx.globalAlpha = 1;
     const n = Math.min(240, Math.round(60 + 180 * storm));
     const slant = typh ? 0.55 : 0.18;
     const len = (typh ? 26 : 18) * dpr, vy = (typh ? 2.2 : 1.6) * dpr;
@@ -543,7 +574,7 @@ export class Renderer {
     for (const c of this.tiles.values()) tiles += (c.width || 0) * (c.height || 0);
     let pool = 0;
     for (const c of this.pool) pool += c.width * c.height;
-    const main = this.canvas.width * this.canvas.height;
+    const main = this.canvas.width * this.canvas.height + (this._bg ? this._bg.width * this._bg.height : 0);
     const mb = (px) => +(px * 4 / 1048576).toFixed(2);
     const totalPx = (this._spritePx || 0) + (this._chunkPx || 0) + tiles + pool + main;
     return { spritesMB: mb(this._spritePx || 0), chunksMB: mb(this._chunkPx || 0), poolMB: mb(pool), tilesMB: mb(tiles), mainMB: mb(main), totalMB: mb(totalPx), sprites: this.cache.size, chunks: this.chunks ? this.chunks.size : 0, created: this._created || 0 };
@@ -788,7 +819,8 @@ export class Renderer {
       }
     }
     // 古いチャンクを捨てる（予算まで）。キャンバスはプールに戻して使い回し、あふれた分はサイズ 0 にして解放
-    while (this._chunkPx > this.budget.chunkPx && cache.size > 4) {
+    // 背景キャンバスの分だけチャンクの予算を減らす（合計を予算内に保つ）
+    while (this._chunkPx > this.budget.chunkPx - (this._bgPx || 0) && cache.size > 4) {
       const k = cache.keys().next().value;
       const c = cache.get(k).c;
       this._chunkPx -= c.width * c.height;
@@ -1483,6 +1515,11 @@ export class Renderer {
         if (c) { this.rect(x + 2, y + 2, 4, 3, '#000'); this.rect(x + 3, y + 2, 2, 2, c); }
       }
       if (o.brand && zc >= 1.9) this.drawBrand(o, x, y, tw * TW);
+      if (type === 'seaChapel' && this.hour >= 16.3 && this.hour < 18.8) {
+        // 夕日のグロー（窓と室内をオレンジに）
+        const k = 1 - Math.abs(this.hour - 17.5) / 1.3;
+        this.ctx.globalAlpha = Math.max(0, 0.32 * k); this.rect(x + 1, y, tw * TW - 2, FH - 3, '#ff9a40'); this.ctx.globalAlpha = 1;
+      }
     }
     // 爆弾捜索
     const bomb = sim.bomb;

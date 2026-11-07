@@ -70,6 +70,8 @@ export class Dialogs {
         box.append(foot);
       }
       wrap.append(box);
+      // 後から開いたモーダルは、★の演出やエンディングなどの全画面の上に重ねる（裏に隠れて操作できなくならないように）
+      wrap.style.zIndex = String(85 + this.stack.length);
       if (entry.closable) {
         // 背景の押下と離しの両方が背景上のときだけ閉じる（タッチのゴーストクリックが下のボタンに届かないように）
         let downOnBackdrop = false;
@@ -131,7 +133,7 @@ export class Dialogs {
     try {
       if (item.type === 'prompt') this.showPrompt(item.data, done);
       else if (item.type === 'star') this.showStar(item.star, done);
-      else if (item.type === 'tower') this.showEnding(done);
+      else if (item.type === 'tower') this.showEnding(done, item.data);
       else if (item.type === 'scenario') this.showScenario(item.data, done);
       else done();
     } catch (e) {
@@ -141,6 +143,33 @@ export class Dialogs {
   }
 
   clearQueue() { this.queue = []; this.seen = new Set(); }
+
+  /** 見えている全画面の演出（★昇格・エンディング・シナリオのクリア／失敗） */
+  visibleOverlay() {
+    for (const el of document.querySelectorAll('#app > .celebrate, #app > .ending')) if (el.getClientRects().length) return el;
+    return null;
+  }
+
+  /**
+   * 見張り: モーダルのせいで止まっているのに、見える（答えられる）ものが何も無い状態が 2 秒続いたら解除する。
+   * 待ち行列も必ず流す。app のループから 0.5 秒ごとに呼ぶ。
+   */
+  watchdog(now) {
+    this.stack = this.stack.filter((e) => e.wrap.isConnected);
+    const visible = this.stack.some((e) => e.wrap.getClientRects().length) || !!this.visibleOverlay();
+    if (this.count > 0 && !visible) {
+      if (!this.wdSince) this.wdSince = now;
+      else if (now - this.wdSince > 2000) {
+        console.warn('[watchdog] 表示中のダイアログが無いのに一時停止していたので解除しました', { busy: this.busy, stack: this.stack.length, queue: this.queue.length });
+        this.busy = false;
+        this.escHandler = null;
+        this.wdSince = 0;
+        this.app.onModalChange();
+        this.pump();
+      }
+    } else this.wdSince = 0;
+    if (!this.busy && this.queue.length) this.pump();
+  }
 
   showPrompt(p, done) {
     const app = this.app;
@@ -166,7 +195,8 @@ export class Dialogs {
   showStar(star, done) {
     const app = this.app;
     app.sound.play('fanfare');
-    const unlocked = Object.entries(TYPES).filter(([, t]) => t.star === star);
+    // 新しく建てられるもの（シナリオでは sim.canBuildType の判定に従う）
+    const unlocked = Object.entries(TYPES).filter(([k]) => { const av = app.toolbar.availability(k); return av.show && av.ok && av.star === star; });
     const el = h('div', { class: 'celebrate', role: 'dialog', 'aria-label': `★${star}` });
     el.append(this.confetti(60));
     el.append(h('div', { class: 'c-star', text: '★' }));
@@ -206,14 +236,16 @@ export class Dialogs {
     return box;
   }
 
-  showEnding(done) {
+  showEnding(done, d) {
     const app = this.app;
     const sim = app.sim;
+    // 海辺のシナリオでは「伝説のリゾート」（TOWER 相当）
+    const legend = !!(sim.scenario || (d && d.kind === 'legend'));
     app.sound.play('bells');
     setTimeout(() => app.sound.play('fanfare'), 1800);
     let shops = 0, tenants = 0;
     for (const o of sim.objs.values()) { if (TYPES[o.type]?.cat === 'commerce') shops++; if (o.occupied) tenants++; }
-    const el = h('div', { class: 'ending', role: 'dialog', 'aria-label': 'TOWER 達成' });
+    const el = h('div', { class: 'ending' + (legend ? ' legend' : ''), role: 'dialog', 'aria-label': legend ? '伝説のリゾート' : 'TOWER 達成' });
     el.append(this.confetti(90));
     const fin = h('table', { class: 'fin' },
       h('tr', {}, h('th', { text: '達成までの日数' }), h('td', { text: `${sim.day + 1}日` })),
@@ -222,11 +254,16 @@ export class Dialogs {
       h('tr', {}, h('th', { text: '施設の数' }), h('td', { text: `${sim.objs.size}` })),
       h('tr', {}, h('th', { text: '商業施設' }), h('td', { text: `${shops}` })),
       h('tr', {}, h('th', { text: '稼働中の施設' }), h('td', { text: `${tenants}` })));
+    const talk = legend && d && d.text
+      ? h('div', { class: 'talk end-talk' }, h('img', { class: 'talk-face', src: portraitURL(d.speaker || '町長'), alt: '' }),
+        h('div', {}, h('b', { text: d.speaker || '町長' }), h('p', { text: d.text })))
+      : null;
     const box = h('div', { class: 'e-box' },
-      h('p', { text: '100Fの大聖堂で、結婚式が無事に挙がりました。' }),
-      h('h1', { class: 'e-tower', text: 'TOWER' }),
-      h('h2', { text: 'おめでとうございます！ 最高ランク「TOWER」に認定されました' }),
-      h('p', { text: 'ロビーから始まった小さなビルは、街いちばんの超高層タワーになりました。' }),
+      h('p', { text: legend ? '海のチャペルで、夕日の結婚式が無事に挙がりました。' : '100Fの大聖堂で、結婚式が無事に挙がりました。' }),
+      h('h1', { class: 'e-tower', text: legend ? (sim.titleText || 'LEGEND') : 'TOWER' }),
+      h('h2', { text: legend ? 'おめでとうございます！「伝説のリゾート」になりました' : 'おめでとうございます！ 最高ランク「TOWER」に認定されました' }),
+      h('p', { text: legend ? '寂れた浜は、誰もが憧れる伝説のリゾートとしてよみがえりました。' : 'ロビーから始まった小さなビルは、街いちばんの超高層タワーになりました。' }),
+      talk,
       fin,
       h('div', { class: 'e-btns' },
         h('button', { class: 'btn btn-big btn-primary', text: 'このまま続けて遊ぶ', onclick: () => { app.sound.play('click'); close(); } }),
@@ -489,7 +526,7 @@ export class Dialogs {
     if (!sim) return;
     const body = h('div');
     const star = Math.max(1, Math.min(5, sim.star | 0));
-    body.append(h('div', { class: 'big-stars', html: sim.tower ? 'TOWER' : '★'.repeat(star) + `<span class="dim">${'★'.repeat(5 - star)}</span>` }));
+    body.append(h('div', { class: 'big-stars', html: (sim.legend || (sim.scenario && sim.tower)) ? (sim.titleText || 'LEGEND') : sim.tower ? 'TOWER' : '★'.repeat(star) + `<span class="dim">${'★'.repeat(5 - star)}</span>` }));
     let prog = null;
     try { prog = sim.starProgress(); } catch (e) { console.error(e); }
     if (prog) {
@@ -527,7 +564,8 @@ export class Dialogs {
       <p>1Fにロビーを作り、オフィス・マンション・ホテル・お店を建ててビルに人を呼び込みましょう。人口が増えると★が上がり、新しい施設が建てられるようになります。★5で100Fに大聖堂を建て、結婚式が成功すれば最高ランク「TOWER」達成です。</p>
       <h3>フリープレイとシナリオ</h3>
       <p><b>フリープレイ</b>は期限なしで TOWER を目指す遊び方。<b>シナリオ</b>は目標と期限のある物語つきのステージで、シナリオごとに別に保存され、クリアすると成績（★1〜3）が残ります。シナリオ中は左下の「🎯 目標」パネルで進み具合と残り日数が見られます。</p>
-      <p>「海辺のリゾート」: 120日以内に、ホテルの客室40室・平均レビュー★4.0（直近30日）・人口1,500人を同時に達成。夏は観光客が倍増、浜からの客は 1F・2F の店に多く来ます。秋の台風に注意（警備室があると被害が減ります）。</p>
+      <p>「海辺のリゾート」: 120日以内に、ホテルの客室40室・平均レビュー★4.0（直近30日）・1日の来訪者1,500人を同時に達成。★は人口ではなく「1日の来訪者」で上がります（HUD の★で条件を確認）。夏は観光客が倍増、浜からの客は 1F・2F の店に多く来ます。秋の台風に注意（警備室があると被害が減ります）。</p>
+      <p>「リゾート」タブの専用施設: <b>海の家</b>（1F・夏だけ）、<b>温泉</b>（ホテルの評判が上がる）、<b>水族館</b>（2フロア・季節を問わず人を呼ぶ）、<b>海のチャペル</b>（30F以上・★5）。★5 で海のチャペルの結婚式が成功すると「伝説のリゾート」（LEGEND）達成。</p>
       <h3>はじめの一歩</h3>
       <ul>
         <li>「基本」の<b>ロビー</b>を1Fに横長に置く（人の出入口）</li>

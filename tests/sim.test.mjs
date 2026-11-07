@@ -5,7 +5,7 @@ import { Tower, TYPES, DAY, W, LOBBY_FLOORS, AutoPlayer, autoPlay, buildMegaTowe
 import { VARIANTS } from '../js/sim/constants.js';
 import { SCENARIOS } from '../js/sim/scenarios.js';
 import { runStrategy } from './balance.mjs';
-import { runSeaside } from './scenario.mjs';
+import { runSeaside, SeasidePlayer } from './scenario.mjs';
 import { SIM } from '../js/sim/rules.js';
 import { MIN_F, MAX_F, START_MONEY } from '../js/sim/constants.js';
 
@@ -2000,7 +2000,7 @@ test('§16 海辺のリゾート: 開始時の状態と最初の会話', () => {
   const s = new Tower({ seed: 151, scenario: 'seaside' });
   assert.equal(s.theme, 'seaside');
   assert.equal(s.money, 1500000);
-  assert.equal(s.star, 2, '★2 から始まる');
+  assert.equal(s.star, 1, '★1 から始まる（§17）');
   assert.deepEqual(s.date, { month: 7, day: 1 });
   assert.equal(s.minFloor, -2);
   assert.deepEqual(s.scenario, { id: 'seaside', name: '海辺のリゾート', startDay: 0, deadlineDay: 120, state: 'playing', grade: 0 });
@@ -2031,11 +2031,13 @@ test('§16 海辺のリゾート: 開始時の状態と最初の会話', () => {
 
 test('§16 目標・成績・クリア（★3/★2/★1）と、クリア後も続けられる', () => {
   const s = new Tower({ seed: 152, scenario: 'seaside' });
-  buildWideTower(s, 8);
-  s.star = 3;
-  for (let f = 8; f <= 9; f++) mustBuild(s, 'floor', { f, x: 0, x2: 200 });
-  for (let x = 0; x + 4 <= 200; x += 4) s.build('hotelSingle', { f: 9, x });
+  s.money = 1e9;
+  mustBuild(s, 'lobby', { f: 0, x: 0, x2: 200 });
+  mustBuild(s, 'floor', { f: 1, x: 0, x2: 200 });
+  for (let x = 0; x + 4 <= 200; x += 4) s.build('hotelSingle', { f: 1, x });
   assert.ok(s.hotels.length >= 40);
+  assert.equal(s.scenarioProgress().goals[2].label.includes('来訪者'), true, '人口ではなく来訪者');
+  s.visitHist = [1600, 1600, 1600]; s.visitorsPerDay = 1600;
   const ev = []; s.on('scenario', (e) => ev.push(e));
   s.step(60);
   assert.equal(s.scenario.state, 'playing', 'レビューがまだ無い');
@@ -2110,7 +2112,7 @@ test('§16 台風: 予告 → 上陸（来客停止・キャンセル・最上�
   // 被害は警備室で減る（修理費の比較）
   const dmg = (sec) => {
     const t = new Tower({ seed: 157, scenario: 'seaside' });
-    t.money = 1e9;
+    t.money = 1e9; t.star = 2;
     mustBuild(t, 'lobby', { f: 0, x: 0, x2: 200 });
     for (let f = 1; f <= 3; f++) { mustBuild(t, 'floor', { f, x: 0, x2: 200 }); for (let x = 0; x + 10 <= 200; x += 10) t.build('office', { f, x }); }
     if (sec) {
@@ -2160,6 +2162,164 @@ test('§16 バランス: 上手なプレイは60〜90日、普通のプレイは
   assert.equal(a.state, 'cleared'); assert.ok(a.clearDay >= 55 && a.clearDay <= 90, `上手 ${a.clearDay}`);
   assert.equal(b.state, 'cleared'); assert.ok(b.clearDay > a.clearDay && b.clearDay <= 120, `普通 ${b.clearDay}`);
   assert.ok(a.story.some((x) => x[1] === 'clear'));
+});
+
+// ====================================================================
+// §17 海辺の改訂
+// ====================================================================
+test('§17 専用施設: canBuildType（シナリオ・使わない型・★の上書き）と only の新しい規則', () => {
+  const free = new Tower({ seed: 160 });
+  for (const t of ['umiNoIe', 'onsen', 'aquarium', 'seaChapel']) {
+    const c = free.canBuildType(t);
+    assert.equal(c.ok, false); assert.equal(c.hidden, true, 'フリープレイでは表示しない');
+  }
+  assert.ok(free.canBuildType('cathedral').ok === false && !free.canBuildType('cathedral').hidden, 'フリープレイの大聖堂は★5 のロック');
+  assert.equal(free.canBuildType('hotelSingle').ok, false, 'フリープレイのホテルは★2');
+  smallTower(free, 2);
+  free.star = 5;
+  assert.match(free.check('umiNoIe', { f: 0, x: 0 }).reason, /シナリオ/);
+  const s = new Tower({ seed: 161, scenario: 'seaside' });
+  assert.ok(s.canBuildType('hotelSingle').ok && s.canBuildType('restaurant').ok && s.canBuildType('escalator').ok && s.canBuildType('housekeeping').ok, '★1 で解放');
+  assert.ok(s.canBuildType('umiNoIe').ok);
+  assert.match(s.canBuildType('onsen').reason, /★2/);
+  assert.match(s.canBuildType('aquarium').reason, /★3/);
+  assert.equal(s.canBuildType('cathedral').hidden, true, '海辺では大聖堂を使わない');
+  s.money = 1e9;
+  mustBuild(s, 'lobby', { f: 0, x: 0, x2: 60 });
+  mustBuild(s, 'floor', { f: 0, x: 61, x2: 140 });
+  for (let f = 1; f <= 30; f++) mustBuild(s, 'floor', { f, x: 0, x2: 60 });
+  assert.ok(s.check('umiNoIe', { f: 0, x: 70 }).ok);
+  assert.match(s.check('umiNoIe', { f: 1, x: 0 }).reason, /1F/, '海の家は1Fだけ');
+  s.star = 5;
+  assert.match(s.check('seaChapel', { f: 20, x: 0 }).reason, /30F以上/);
+  assert.ok(s.check('seaChapel', { f: 29, x: 0 }).ok);
+  assert.ok(s.check('aquarium', { f: 5, x: 0 }).ok);
+});
+
+test('§17 海の家は7〜9月だけ、温泉は騒音にならず評判を上げる、水族館は季節を問わず人を呼ぶ', () => {
+  const s = new Tower({ seed: 162, scenario: 'seaside' });
+  s.money = 1e9; s.star = 3;
+  mustBuild(s, 'lobby', { f: 0, x: 0, x2: 60 });
+  mustBuild(s, 'floor', { f: 0, x: 61, x2: 140 });
+  for (let f = 1; f <= 4; f++) mustBuild(s, 'floor', { f, x: 0, x2: 140 });
+  mustBuild(s, 'elevator', { f: 0, f2: 4, x: 60 });
+  mustBuild(s, 'umiNoIe', { f: 0, x: 80 });
+  mustBuild(s, 'onsen', { f: 1, x: 70 });
+  for (let x = 0; x + 4 <= 60; x += 4) s.build('hotelSingle', { f: 1, x });
+  mustBuild(s, 'aquarium', { f: 3, x: 0 });
+  const umi = s.objAt(0, 80), onsen = s.objAt(1, 70);
+  assert.equal(s.isOpen(umi, 12), true, '7月の昼は営業');
+  assert.equal(s.isOpen(umi, 20), false, '夜は閉店');
+  assert.ok(s.hotels.every((h) => !h.noisy), '温泉は騒音源にならない');
+  const ev = []; s.on('scenario', (e) => ev.push(e.title));
+  stepTo(s, 1, 0);
+  assert.ok(['海の家', '温泉', '水族館'].every((t) => ev.includes(t)), '最初の専用施設の会話');
+  assert.ok(s.visitorsPerDay > 0 && s.visitHist.length === 1, '1日の来訪者を数える');
+  // 温泉があると、レビューに「温泉」が出て★が上がる
+  const h = s.hotels[0];
+  let onsenTexts = 0;
+  for (let i = 0; i < 40; i++) { h.stayStress = 20; h.stayWait = 0; h.stayName = 'x'; s.addReview(h); if (/温泉/.test(h.reviews[h.reviews.length - 1].text)) onsenTexts++; }
+  assert.ok(onsenTexts > 5, `温泉のレビュー ${onsenTexts}`);
+  // 10月になると海の家は閉まり、水族館は開いている
+  s.time = (92 + 1) * DAY + 12 * 60;
+  assert.equal(s.date.month, 10);
+  assert.equal(s.isOpen(umi, 12), false, '秋は海の家を閉める');
+  assert.equal(s.isOpen(s.byType.aquarium[0], 12), true);
+  assert.equal(s.isOpen(onsen, 12), true);
+});
+
+test('§17 ★の条件はシナリオ独自（1日の来訪者・専用施設）、starProgress も', () => {
+  const s = new Tower({ seed: 163, scenario: 'seaside' });
+  let sp = s.starProgress();
+  assert.equal(sp.next, 2);
+  assert.match(sp.reqs[0].label, /1日の来訪者 300人/);
+  s.visitorsPerDay = 350; s.checkStar();
+  assert.equal(s.star, 2);
+  sp = s.starProgress();
+  assert.deepEqual(sp.reqs.map((r) => r.label.split('（')[0]), ['1日の来訪者 800人', '海の家', '警備室']);
+  s.visitorsPerDay = 900; s.checkStar();
+  assert.equal(s.star, 2, '海の家と警備室が必要');
+  s.money = 1e9;
+  mustBuild(s, 'lobby', { f: 0, x: 0, x2: 60 });
+  mustBuild(s, 'floor', { f: 0, x: 61, x2: 140 });
+  mustBuild(s, 'umiNoIe', { f: 0, x: 80 });
+  mustBuild(s, 'floor', { f: 1, x: 0, x2: 60 });
+  mustBuild(s, 'security', { f: 1, x: 0 });
+  assert.equal(s.star, 3);
+  assert.ok(s.starProgress().reqs.some((r) => r.label === 'VIPの高評価'));
+  assert.ok(s.starProgress().reqs.some((r) => r.label === '温泉') && s.starProgress().reqs.some((r) => r.label === '水族館'));
+  s.star = 4;
+  assert.ok(s.starProgress().reqs.some((r) => /レビュー★4\.5/.test(r.label)));
+  s.star = 5;
+  assert.equal(s.starProgress().next, 'TOWER');
+  assert.deepEqual(s.starProgress().reqs.map((r) => r.label), ['30F以上の海のチャペル', '夕日の結婚式']);
+});
+
+test('§17 海のチャペルで夕日の結婚式 → 伝説のリゾート（tower 通知 {kind:"legend"}）', () => {
+  const s = new Tower({ seed: 164, scenario: 'seaside' });
+  s.money = 1e9; s.star = 5;
+  mustBuild(s, 'lobby', { f: 0, x: 0, x2: 60 });
+  for (let f = 1; f <= 29; f++) mustBuild(s, 'floor', { f, x: 0, x2: 60 });
+  mustBuild(s, 'elevator', { f: 0, f2: 29, x: 50 });
+  s.act(s.transportAt(1, 50), 'addCar');
+  mustBuild(s, 'seaChapel', { f: 29, x: 0 });
+  const tw = []; s.on('tower', (e) => tw.push(e));
+  const pr = []; s.on('prompt', (p) => { pr.push(p); s.answer(p.id, 'ok'); });
+  const ev = []; s.on('scenario', (e) => ev.push(e));
+  stepTo(s, 5, 16);
+  assert.equal(tw.length, 0, 'まだ');
+  stepTo(s, 5, 19);
+  assert.ok(pr.some((p) => p.kind === 'wedding' && /海のチャペル/.test(p.title)), '夕方に海のチャペルで');
+  assert.deepEqual(tw, [{ kind: 'legend', scenario: 'seaside' }]);
+  assert.equal(s.legend, true); assert.equal(s.tower, true);
+  assert.ok(ev.some((e) => e.title === '伝説のリゾート'));
+  assert.deepEqual(s.starProgress(), { star: 5, next: null, reqs: [] });
+  const r = new Tower(); r.restore(JSON.parse(JSON.stringify(s.serialize())));
+  assert.equal(r.legend, true);
+});
+
+test('§17 旧い海辺のセーブ（★2 開始・人口の目標）も読み込める', () => {
+  const s = new Tower({ seed: 165, scenario: 'seaside' });
+  smallTower(s, 3);
+  s.star = 2;
+  const d = JSON.parse(JSON.stringify(s.serialize()));
+  delete d.visitHist; delete d.visitorsToday; delete d.legend;
+  d.scenario.scn.story = { intro: 0, firstHotel: 3 };
+  const r = new Tower(); r.restore(d);
+  assert.equal(r.star, 2, '★は下げない');
+  assert.equal(r.visitorsPerDay, 0);
+  const g = r.scenarioProgress();
+  assert.deepEqual(g.goals.map((x) => x.id), ['rooms', 'review', 'visitors']);
+  r.step(DAY * 2);
+  assert.ok(r.visitHist.length >= 1);
+});
+
+test('§17 海辺の長期ストレス（台風・季節・通知・浜の客）: step(1) が 200ms を超えない', () => {
+  const s = new Tower({ seed: 166, scenario: 'seaside', construction: true });
+  s.on('prompt', (p) => s.answer(p.id, p.kind === 'bomb' ? 'refuse' : p.choices[p.choices.length - 1].value));
+  let scn = 0; s.on('scenario', () => scn++);
+  const ap = new SeasidePlayer(s, 'competent');
+  ap.setup();
+  let worst = 0, typhoons = 0, maxQ = 0;
+  const days = 140;
+  for (let d = 0; d < days; d++) {
+    if (d === 40 || d === 70) s.announceTyphoon();
+    for (let m = 0; m < DAY; m++) {
+      const t0 = performance.now();
+      s.step(1);
+      const ms = performance.now() - t0;
+      if (ms > worst) worst = ms;
+      if (s.weather && s.weather.kind === 'typhoon' && m === 0) typhoons++;
+      maxQ = Math.max(maxQ, s._scnQueue.length);
+    }
+    ap.act();
+  }
+  console.log(`    ${days}日: step(1) の最悪 ${worst.toFixed(1)}ms、台風 ${typhoons}日、会話 ${scn}件、予定の最大 ${s.events.size}`);
+  assert.ok(worst < 200, `最悪 ${worst}ms`);
+  assert.ok(typhoons >= 2);
+  assert.ok(scn < 40 && maxQ < 10, '会話が溜まらない');
+  assert.ok(s.events.size < 100000);
+  checkInvariants(s);
 });
 
 test('性能: 横幅480・30フロア・人口6000超の横長ビルで 1 ゲーム日', () => {

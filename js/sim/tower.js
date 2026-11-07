@@ -4,7 +4,7 @@ import { W, MIN_F, MAX_F, DAY, START_MONEY, STAR_POP, TYPES, VARIANTS, floorName
 import { Heap, makeRng } from './util.js';
 import {
   SAVE_VERSION, NF, FI, LOBBY_SET, TRANSPORT, ELEV, HOTEL, COMMERCE, NOISY, TENANT, TRANSIENT,
-  STAFF_KIND, SIM, STAY, VISIT_RATE, VISIT_CAP,
+  STAFF_KIND, SIM, STAY, VISIT_RATE, VISIT_CAP, RESORT,
 } from './rules.js';
 import { EventsMixin } from './events.js';
 import { PanelMixin } from './panel.js';
@@ -22,7 +22,7 @@ const dk = (d) => (d > 0 ? 'up' : 'down');
 const legTo = (p) => p.legs[p.li].to;
 const LUNCH = ['fastfood', 'restaurant'];
 const DINNER = ['restaurant', 'fastfood'];
-const LEISURE = ['shop', 'restaurant', 'fastfood', 'cinema'];
+const LEISURE = ['shop', 'restaurant', 'fastfood', 'cinema', 'onsen', 'aquarium'];
 // 'sound' 通知の最小間隔（ゲーム分）
 const SOUND_GAP = { cash: 30, ding: 5, complaint: 30, roach: 30, built: 2 };
 const NO_VISIT = new Set(['metro', 'garbage', 'parking']);
@@ -46,6 +46,7 @@ export class Tower {
     // シナリオ（フリープレイでは null・既定値）
     this.scenario = null; this.scenarioDef = null; this.scn = null; this.theme = 'default';
     this.minFloor = MIN_F; this.weather = null; this.dateOffset = 0; this._scnQueue = [];
+    this.legend = false; this.visitorsToday = 0; this.visitorsPerDay = 0; this.visitHist = [];
     this.time = 6 * 60;
     this.money = START_MONEY;
     this.star = 1;
@@ -168,6 +169,9 @@ export class Tower {
   isOpen(o, h = this.hour) {
     const T = TYPES[o.type];
     if (!T || !T.open) return true;
+    // シナリオで季節営業の店（海の家は7〜9月だけ）
+    const om = this.scenarioDef && this.scenarioDef.openMonths && this.scenarioDef.openMonths[o.type];
+    if (om && !om.includes(this.date.month)) return false;
     return h >= T.open[0] && h < T.open[1];
   }
 
@@ -310,6 +314,7 @@ export class Tower {
   }
 
   starReqs(n) {
+    if (this.scenarioDef && this.scenarioDef.stars) return this.scenarioStarReqs(n);
     const c = (t) => this.byType[t].length > 0;
     const popReq = (k) => ({ label: `人口 ${STAR_POP[k].toLocaleString('en-US')}人（現在 ${this.pop.toLocaleString('en-US')}人）`, done: this.pop >= STAR_POP[k] });
     switch (n) {
@@ -744,7 +749,7 @@ export class Tower {
     this.recordEval(h, p);
     if (HOTEL.has(h.type)) this.noteStay(h, p);
     this.settle(p, h);
-    if (HOTEL.has(h.type) && !p.checked) { p.checked = true; h.checkedIn++; }
+    if (HOTEL.has(h.type) && !p.checked) { p.checked = true; h.checkedIn++; this.visitorsToday++; }
   }
 
   leaveBuilding(p, onExit = null, tries = 0) {
@@ -816,6 +821,8 @@ export class Tower {
     if (o.dead || o.destroyed) { this.goBack(p); return; }
     this.settle(p, o);
     if (this.isOpen(o)) {
+      // 1日の来訪者: 外からの客と、シナリオの集客施設の利用者
+      if (p.kind === 'visitor' || RESORT.has(o.type)) this.visitorsToday++;
       const pr = TYPES[o.type].price;
       this.earn(pr);
       this.dayLog.shop += pr;
@@ -960,6 +967,11 @@ export class Tower {
       const names = left.slice(0, 4).map((o) => `${floorName(o.f)}の${TYPES[o.type].name}`).join('、');
       this.msg(`評価が悪いため ${names}${left.length > 4 ? ` ほか${left.length - 4}件` : ''} が退去しました`, 'bad', left[0].f, left[0].x + left[0].w / 2);
     }
+    // 1日の来訪者（直近3日の平均）
+    this.visitHist.push(this.visitorsToday);
+    if (this.visitHist.length > 3) this.visitHist.shift();
+    this.visitorsPerDay = this.visitHist.reduce((a, b) => a + b, 0) / this.visitHist.length;
+    this.visitorsToday = 0;
     this.yesterday = { ...this.ledger, maintenance: cost };
     this.dailySummary(this.dayLog, cost);
     this.dayLog = this.newDayLog();
@@ -1144,6 +1156,7 @@ export class Tower {
         o.members.push(p);
         this.later(this.rand(240), () => this.enterBuilding(p));
         if (this.r() < 0.35) this.at(d * DAY + 1140 + this.rand(120), () => this.outing(p, DINNER));
+        if (this.byType.onsen.length && this.r() < 0.4) this.at(d * DAY + 1260 + this.rand(90), () => this.outing(p, ['onsen']));
         this.at((d + 1) * DAY + 420 + this.rand(180), () => this.checkout(p));
       }
     }
@@ -1244,6 +1257,7 @@ export class Tower {
       v: SAVE_VERSION, w: W, seed: this.seed, time: this.time, money: this.money, star: this.star, tower: this.tower,
       nextId: this.nextId, ledger: { ...this.ledger }, yesterday: this.yesterday ? { ...this.yesterday } : null,
       scenario: this.serializeScenario(), weather: this.weather ? { ...this.weather } : null,
+      visitHist: [...this.visitHist], visitorsToday: this.visitorsToday, legend: this.legend,
       dayLog: { ...this.dayLog }, rows, objs, flags: { ...this.flags }, garbageBags: +this.garbageBags.toFixed(2), moveSeqN: this.moveSeqN,
       bomb: this.bomb ? { f: this.bomb.f, x: this.bomb.x, deadline: this.bomb.deadline, searched: [...this.bomb.searched], found: this.bomb.found } : null,
       fire: this.fire ? { start: this.fire.start, nextSpread: this.fire.nextSpread, heli: this.fire.heli, burned: this.fire.burned, saved: this.fire.saved, burning: [...this.fire.burning].map((o) => o.id) } : null,
@@ -1280,6 +1294,10 @@ export class Tower {
     this.money = num(d.money, START_MONEY);
     this.star = Math.max(1, Math.min(5, num(d.star, 1) | 0));
     this.tower = !!d.tower;
+    this.legend = !!d.legend;
+    if (Array.isArray(d.visitHist)) this.visitHist = d.visitHist.filter((v) => typeof v === 'number').slice(-3);
+    this.visitorsToday = num(d.visitorsToday, 0);
+    this.visitorsPerDay = this.visitHist.length ? this.visitHist.reduce((a, b) => a + b, 0) / this.visitHist.length : 0;
     if (d.ledger) this.ledger = { income: num(d.ledger.income, 0), expense: num(d.ledger.expense, 0) };
     this.yesterday = d.yesterday && typeof d.yesterday === 'object' ? { ...d.yesterday } : null;
     if (d.dayLog && typeof d.dayLog === 'object') for (const k in this.dayLog) this.dayLog[k] = num(d.dayLog[k], 0);

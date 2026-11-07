@@ -60,7 +60,9 @@ export const EventsMixin = {
   hourlyEvents(h) {
     if (h === 9 || h === 13 || h === 18) this.complaints(false);
     if (h === 9) this.vipAnnounce(false);
-    if (h === 11) this.weddingStart(false);
+    // 結婚式: フリープレイは土日11時に大聖堂、シナリオは定義の時刻と会場（海辺は17時の海のチャペル）
+    const wd = this.scenarioDef && this.scenarioDef.wedding;
+    if (h === (wd ? wd.hour : 11)) this.weddingStart(false);
     if (h === 18 && this.isXmasEve()) {
       this.msg('メリークリスマス！ 今夜はサンタクロースがビルの上空を飛んでいます', 'event', this.topBuiltFloor() + 2, W / 2);
       this.sound('bells');
@@ -528,7 +530,10 @@ export const EventsMixin = {
     if (this.vip) return false;
     if (!force) {
       if (this.star !== 3 || this.flags.vipOk || this.day < this.flags.vipNext) return false;
-      if (this.pop < STAR_POP[4] || !this.byType.medical.length || !this.garbageOk()) return false;
+      if (this.scenarioDef && this.scenarioDef.stars) {
+        // シナリオ: ★4 の VIP 以外の条件（来訪者と施設）がそろったら来る
+        if (!this.scenarioStarReqs(4).filter((r) => !r.vip).every((r) => r.done)) return false;
+      } else if (this.pop < STAR_POP[4] || !this.byType.medical.length || !this.garbageOk()) return false;
     }
     if (!this.byType.hotelSuite.length) return false;
     const arrive = force ? this.time + 30 : (this.day + 1) * DAY + 17 * 60 + this.rand(60);
@@ -613,20 +618,25 @@ export const EventsMixin = {
   weddingStart(force) {
     if (this.wedding) return false;
     if (!force && (this.tower || this.star < 5 || !this.isWeekend() || this.day < this.flags.weddingNext)) return false;
-    const cath = this.byType.cathedral[0];
+    const wd = this.scenarioDef && this.scenarioDef.wedding;
+    const venue = wd ? wd.venue : 'cathedral', vname = TYPES[venue].name;
+    const cath = (this.byType[venue] || [])[0];
     if (!cath) return false;
     const ent = this.lobbyEntrance();
     if (!ent || this.dist(ent.f, cath.f, ent.x0, cath.x + cath.w / 2) === Infinity) {
       if (!force) {
         this.flags.weddingNext = this.day + 1;
-        this.msg('ロビーから大聖堂までの経路がないため、結婚式は延期されました', 'bad', cath.f, cath.x + cath.w / 2);
+        this.msg(`ロビーから${vname}までの経路がないため、結婚式は延期されました`, 'bad', cath.f, cath.x + cath.w / 2);
       }
       return false;
     }
-    const w = { deadline: force ? this.time + 180 : this.day * DAY + 14 * 60, people: [], arrived: 0, worst: 0, done: false, cath };
+    const span = wd ? wd.minutes : 180;
+    const w = { deadline: force ? this.time + span : this.day * DAY + (wd ? wd.hour * 60 + wd.minutes : 14 * 60), people: [], arrived: 0, worst: 0, done: false, cath, legend: !!(wd && wd.ending === 'legend') };
     this.wedding = w;
-    this.ask('wedding', '大聖堂で結婚式',
-      '新郎新婦と招待客10人が、ロビーから100Fの大聖堂へ向かいます。\n14時までに、疲れずに到着できれば式は成功です。',
+    const endH = Math.floor((w.deadline % DAY) / 60);
+    this.ask('wedding', `${vname}で結婚式`,
+      wd ? `夕日の時間です。新郎新婦と招待客10人が、ロビーから${floorName(cath.f)}の${vname}へ向かいます。\n${endH}時までに、疲れずに到着できれば式は成功です。`
+        : '新郎新婦と招待客10人が、ロビーから100Fの大聖堂へ向かいます。\n14時までに、疲れずに到着できれば式は成功です。',
       [{ label: 'OK', value: 'ok' }]);
     this.sound('bells');
     const kinds = ['bride', 'groom'];
@@ -640,7 +650,7 @@ export const EventsMixin = {
         if (!this.startTrip(p, cath.f, this.spotIn(cath), (pp) => this.weddingArrive(pp, w))) this.leave(p);
       });
     });
-    this.at(w.deadline, () => { if (!w.done) this.weddingEnd(w, false, '新郎新婦が14時までに到着できませんでした'); });
+    this.at(w.deadline, () => { if (!w.done) this.weddingEnd(w, false, `新郎新婦が${endH}時までに到着できませんでした`); });
     return true;
   },
 
@@ -666,8 +676,16 @@ export const EventsMixin = {
       this.effect('fireworks', c.f + 1, c.x + c.w / 2, 180);
       this.sound('bells');
       this.sound('fanfare');
-      this.msg('大聖堂で結婚式が挙げられました！ あなたのビルは「タワー」に認定されました！', 'star', c.f, c.x + c.w / 2);
-      this.emit('tower', {});
+      if (w.legend) {
+        // 海辺版の TOWER: 「伝説のリゾート」
+        this.legend = true;
+        this.msg('海のチャペルで夕日の結婚式が挙げられました！ この浜は「伝説のリゾート」になりました！', 'star', c.f, c.x + c.w / 2);
+        this.storyOnce('legend');
+        this.emit('tower', { kind: 'legend', scenario: this.scenario ? this.scenario.id : null });
+      } else {
+        this.msg('大聖堂で結婚式が挙げられました！ あなたのビルは「タワー」に認定されました！', 'star', c.f, c.x + c.w / 2);
+        this.emit('tower', {});
+      }
     } else {
       this.flags.weddingNext = this.day - this.weekday + 7;
       this.msg(`結婚式は失敗しました（${reason}）。来週もう一度挙げられます`, 'bad', c.f, c.x + c.w / 2);

@@ -46,6 +46,22 @@ export const ScenarioMixin = {
     this.queueScenario({ kind: 'story', ...s });
   },
 
+  // シナリオ独自の★の条件。6 は伝説のリゾート
+  scenarioStarReqs(n) {
+    const def = this.scenarioDef, R = def.stars[n];
+    if (!R) return [];
+    const out = [];
+    if (R.visitors) out.push({ label: `1日の来訪者 ${R.visitors.toLocaleString('en-US')}人（直近3日の平均 ${Math.round(this.visitorsPerDay).toLocaleString('en-US')}人）`, done: this.visitorsPerDay >= R.visitors });
+    for (const t of R.types || []) out.push({ label: t === 'seaChapel' ? `${floorName(TYPES.seaChapel.minF)}以上の${TYPES[t].name}` : TYPES[t].name, done: (this.byType[t] || []).length > 0 });
+    if (R.vip) out.push({ label: 'VIPの高評価', done: this.flags.vipOk, vip: true });
+    if (R.review) {
+      const v = GOAL_METRICS.hotelReviewAll(this);
+      out.push({ label: `ホテルの平均レビュー★${R.review.toFixed(1)}（現在 ${v === null ? '—' : '★' + v.toFixed(1)}）`, done: v !== null && v >= R.review });
+    }
+    if (R.wedding) out.push({ label: '夕日の結婚式', done: this.legend });
+    return out;
+  },
+
   // ---- 需要・季節・天気の倍率（フリープレイでは 1） ----
   demandMul(type) {
     const def = this.scenarioDef;
@@ -68,6 +84,16 @@ export const ScenarioMixin = {
   beachVisitors(h) {
     const def = this.scenarioDef;
     if (!def || !def.beach || this.isTyphoon()) return;
+    // 目玉施設（水族館・海の家・温泉）は人口に関係なく観光客を呼ぶ
+    for (const [t, A] of Object.entries(def.attractions || {})) {
+      for (const o of this.byType[t] || []) {
+        if (o.burning || !this.isOpen(o, h)) continue;
+        if (this.entranceDist(o.f, o.x + o.w / 2) === Infinity) continue;
+        const lam = A.rate * (A.season ? this.seasonMul() : 1) * this.weatherVisitorMul() * this.evalFactor(o);
+        const n = Math.floor(lam * (0.5 + this.r()));
+        for (let i = 0; i < n; i++) this.later(this.rand(55), () => this.visit(o));
+      }
+    }
     const B = def.beach, mul = this.seasonMul() * this.weatherVisitorMul();
     for (const t of B.types) {
       for (const o of this.byType[t] || []) {
@@ -116,6 +142,9 @@ export const ScenarioMixin = {
       }
     }
     if (this.hotels.length) this.storyOnce('firstHotel');
+    if ((this.byType.umiNoIe || []).length) this.storyOnce('firstUmiNoIe');
+    if ((this.byType.onsen || []).length) this.storyOnce('firstOnsen');
+    if ((this.byType.aquarium || []).length) this.storyOnce('firstAquarium');
     if (sc.state === 'playing' && this.scenarioGoals().every((g) => g.done)) this.clearScenario();
   },
 
