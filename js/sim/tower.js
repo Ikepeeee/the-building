@@ -4,7 +4,7 @@ import { W, MIN_F, MAX_F, DAY, START_MONEY, STAR_POP, TYPES, VARIANTS, floorName
 import { Heap, makeRng } from './util.js';
 import {
   SAVE_VERSION, NF, FI, LOBBY_SET, TRANSPORT, ELEV, HOTEL, COMMERCE, NOISY, TENANT, TRANSIENT,
-  STAFF_KIND, SIM, STAY, VISIT_RATE, VISIT_CAP, RESORT,
+  STAFF_KIND, SIM, STAY, VISIT_RATE, VISIT_CAP, RESORT, PARTY_MIX, CAPACITY, OUTDOOR_WEATHER,
 } from './rules.js';
 import { EventsMixin } from './events.js';
 import { PanelMixin } from './panel.js';
@@ -308,7 +308,7 @@ export class Tower {
     let pop = 0;
     for (const o of this.byType.office) if (o.occupied) pop += TYPES.office.cap;
     for (const o of this.byType.condo) if (o.occupied) pop += TYPES.condo.cap;
-    for (const o of this.hotels) if (o.occupied) pop += o.members.length;
+    for (const o of this.hotels) if (o.occupied) for (const p of o.members) pop += this.partySize(p);
     this.pop = pop;
     this.checkStar();
   }
@@ -334,6 +334,7 @@ export class Tower {
       const unlocked = Object.values(TYPES).filter((t) => t.star === this.star).map((t) => t.name);
       this.msg(`★${this.star} に昇格しました！${unlocked.length ? ` ${unlocked.join('・')}が解放されます` : ''}`, 'star');
       this.emit('star', { star: this.star });
+      this.onStarUp(this.star);
       this.sound('fanfare');
       if (this.star === 2) {
         const d = this.day;
@@ -749,7 +750,7 @@ export class Tower {
     this.recordEval(h, p);
     if (HOTEL.has(h.type)) this.noteStay(h, p);
     this.settle(p, h);
-    if (HOTEL.has(h.type) && !p.checked) { p.checked = true; h.checkedIn++; this.visitorsToday++; }
+    if (HOTEL.has(h.type) && !p.checked) { p.checked = true; h.checkedIn++; this.visitorsToday += this.scenarioDef ? this.partySize(p) : 1; }
   }
 
   leaveBuilding(p, onExit = null, tries = 0) {
@@ -796,7 +797,7 @@ export class Tower {
     let best = null, bc = Infinity;
     for (const t of types) {
       for (const o of this.byType[t]) {
-        if (o.burning || !this.isOpen(o)) continue;
+        if (o.burning || !this.isOpen(o) || this.isFull(o)) continue;
         const d = this.dist(p.f, o.f, p.x, o.x + o.w / 2);
         if (d === Infinity) continue;
         const c = d + this.rand(6) + Math.abs(o.x - p.x) * 0.02;
@@ -808,11 +809,29 @@ export class Tower {
     this.startTrip(p, o.f, this.spotIn(o), (pp) => this.atShop(pp, o));
   }
 
+  // 連れ（1人の人オブジェクトがグループを代表する）。別の乱数を使うので、ゲームの乱数の並びは変わらない
+  rollParty(p, type, force) {
+    const rng = makeRng((p.id * 2246822519) ^ (this.seed + 77));
+    let kind = force;
+    if (!kind) {
+      const m = PARTY_MIX[type] || PARTY_MIX.default, r = rng();
+      kind = r < m[0] ? 'solo' : r < m[0] + m[1] ? 'couple' : 'family';
+    }
+    p.party = { type: kind, size: kind === 'solo' ? 1 : kind === 'couple' ? 2 : 3 + Math.floor(rng() * 2) };
+    return p.party;
+  }
+  partySize(p) { return p && p.party ? p.party.size : 1; }
+  // 中の人数の上限（スーパー銭湯など）
+  isFull(o) { const c = CAPACITY[o.type]; return !!c && o.inCount >= c; }
+  // 屋外施設は雨・台風で客が減る
+  outdoorMul(o) { return TYPES[o.type].outdoor && this.weather ? OUTDOOR_WEATHER[this.weather.kind] ?? 1 : 1; }
+
   visit(o) {
-    if (o.dead || o.destroyed || !this.isOpen(o) || o.burning || this.isTyphoon()) return;
+    if (o.dead || o.destroyed || !this.isOpen(o) || o.burning || this.isTyphoon() || this.isFull(o)) return;
     const ent = this.pickVisitorEntrance(o.f, o.x + o.w / 2);
     if (!ent) return;
     const p = this.newPerson('visitor', null);
+    this.rollParty(p, o.type);
     this.spawnAt(p, ent, this.doorAim(ent, o.f, o.x + o.w / 2));
     if (!this.startTrip(p, o.f, this.spotIn(o), (pp) => this.atShop(pp, o))) this.leave(p);
   }
@@ -821,9 +840,10 @@ export class Tower {
     if (o.dead || o.destroyed) { this.goBack(p); return; }
     this.settle(p, o);
     if (this.isOpen(o)) {
-      // 1日の来訪者: 外からの客と、シナリオの集客施設の利用者
-      if (p.kind === 'visitor' || RESORT.has(o.type)) this.visitorsToday++;
-      const pr = TYPES[o.type].price;
+      // 1日の来訪者: 外からの客と、シナリオの集客施設の利用者。シナリオでは連れの人数で数え、売上も人数分
+      const size = this.scenarioDef ? this.partySize(p) : 1;
+      if (p.kind === 'visitor' || RESORT.has(o.type)) this.visitorsToday += size;
+      const pr = TYPES[o.type].price * size;
       this.earn(pr);
       this.dayLog.shop += pr;
       o.salesToday += pr; o.custToday++;
@@ -847,6 +867,7 @@ export class Tower {
       for (const pr of l) this.emit('prompt', pr);
     }
     this.flushScenario();
+    if (this._loadNotes && this._loadNotes.length) { const l = this._loadNotes; this._loadNotes = []; for (const t of l) this.msg(t, 'info'); }
     this.backlog += Math.max(0, +minutes || 0);
     const budget = budgetMs > 0 ? budgetMs : 0;
     if (budget && this.backlog > SIM.MAX_BACKLOG) this.backlog = SIM.MAX_BACKLOG; // 追いつけない分は捨てる（ゲームが遅く進む）
@@ -1150,9 +1171,12 @@ export class Tower {
       o.occupied = true; o.checkedIn = 0; o.members = [];
       if (o.type === 'hotelSuite') this.rollParking(o);
       const T = TYPES[o.type];
-      const n = T.cap > 1 && this.r() < 0.3 ? 1 : T.cap;
+      // ファミリールームは家族1組（3〜4人）を1人で代表する
+      const fam = o.type === 'hotelFamily';
+      const n = fam ? 1 : T.cap > 1 && this.r() < 0.3 ? 1 : T.cap;
       for (let i = 0; i < n; i++) {
         const p = this.newPerson('guest', o);
+        this.rollParty(p, o.type, fam ? 'family' : 'solo');
         o.members.push(p);
         this.later(this.rand(240), () => this.enterBuilding(p));
         if (this.r() < 0.35) this.at(d * DAY + 1140 + this.rand(120), () => this.outing(p, DINNER));
@@ -1196,7 +1220,7 @@ export class Tower {
         if (o.burning || !this.isOpen(o, h)) continue;
         if (t === 'partyHall' && h !== 12 && h !== 18) continue;
         if (this.entranceDist(o.f, o.x + o.w / 2) === Infinity) continue;
-        const lam = base * VISIT_RATE[t] * this.evalFactor(o) * this.demandMul(t);
+        const lam = base * VISIT_RATE[t] * this.evalFactor(o) * this.demandMul(t) * this.outdoorMul(o);
         const n = Math.min(VISIT_CAP[t], Math.floor(lam * (0.5 + this.r())));
         for (let i = 0; i < n; i++) this.later(this.rand(55), () => this.visit(o));
       }
@@ -1278,6 +1302,7 @@ export class Tower {
     this.reset();
     // シナリオの状態は保存したものを使う（開始時の会話や初期資金は付け直さない）
     this._scnQueue = [];
+    this._loadNotes = [];
     if (this._scnId) {
       const sc = d.scenario;
       Object.assign(this.scenario, {
@@ -1356,7 +1381,15 @@ export class Tower {
         }
         // 旧い幅の garbage（w16）は、置けなければ地下の空きへ移す
         if (s.type === 'garbage' && !fits(s.f, s.f + h - 1, sx, w)) { oldGarbage.push(s); continue; }
-        if (!fits(s.f, s.f + h - 1, sx, w)) continue;
+        if (!fits(s.f, s.f + h - 1, sx, w)) {
+          // 旧い温泉（w24・h1）が新しいスーパー銭湯（w32・h2）として入らなければ、代金を返す
+          if (s.type === 'onsen') {
+            const refund = SIM.OLD_ONSEN_COST;
+            this.money += refund;
+            this._loadNotes.push(`${floorName(s.f)}の温泉はスーパー銭湯に建て替えられなかったため撤去し、代金 ${fmtMoney(refund)} を払い戻しました`);
+          }
+          continue;
+        }
         s = { ...s, x: sx };
         const o = this.makeObj(s.type, s.f, s.x, w, h, s.id);
         for (let r = 0; r < h; r++) for (let xi = o.x; xi < o.x + w; xi++) this.grid[o.f + r][xi] = o.id;

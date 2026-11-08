@@ -35,10 +35,20 @@ export class MockTower {
         for (let ff = f; ff < f + h; ff++) for (let xx = x; xx < x + w; xx++) { const id = this.grid[ff][xx]; if (id > 0) { const o = this.objs.get(id); if (o) { for (let a = o.f; a < o.f + (o.h || 1); a++) for (let b = o.x; b < o.x + o.w; b++) if (this.grid[a][b] === id) this.grid[a][b] = -1; this.objs.delete(id); } } }
         return this.add(type, f, x, extra);
       };
-      place('umiNoIe', 0, 132, { inCount: 6 });
-      place('onsen', 13, 260, { inCount: 7 }); this.floor(13, 260, 283);
+      place('umiNoIe', 0, 132, { inCount: 6, variant: 0, brand: '浜焼きそば 潮' });
+      place('umiNoIe', 0, 442, { inCount: 5, variant: 1, brand: 'かき氷 白波' });
+      place('umiNoIe', 0, 458, { inCount: 4, variant: 2, brand: 'バー サンセット' });
+      place('onsen', 13, 250, { inCount: 14 }); this.floor(13, 250, 281); this.floor(14, 250, 281);
       place('aquarium', 13, 290, { inCount: 10 }); this.floor(13, 290, 321); this.floor(14, 290, 321);
+      place('beerGarden', 15, 290, { inCount: 10 });
+      place('amusement', 16, 150, { inCount: 10 });
+      place('terraceCafe', 16, 200, { inCount: 5 });
       place('seaChapel', 31, 20, { inCount: 8 });
+      const hfs = [{ inCount: 4 }, { inCount: 2 }, { occupied: true, inCount: 0 }, { dirty: true, occupied: false }, { inCount: 3 }, { occupied: false }];
+      for (let i = 0; i < 6; i++) place('hotelFamily', 11, 150 + i * 8, { variant: i % 3, ...hfs[i] });
+      // 浜の家（ラムネ屋・サーフショップ）を本館の右の棟に
+      place('umiNoIe', 1, 380, { inCount: 3, variant: 3, brand: 'サーフ 波乗り' });
+      place('umiNoIe', 1, 396, { inCount: 4, variant: 4, brand: 'ラムネ堂' });
     }
     if (this.minFloor > MIN_F) {
       // 掘れない階のものは取り除く
@@ -49,6 +59,8 @@ export class MockTower {
       }
       for (let f = MIN_F; f < this.minFloor; f++) { this.grid[f].fill(0); this.tgrid[f].fill(0); }
       for (const p of this.walkers) if (p.f < this.minFloor) p.f = 0;
+      let wi = 0;
+      for (const p of this.walkers) { const k = wi++ % 3; if (k === 0) p.party = { type: 'family', size: 3 + (wi % 2) }; else if (k === 1) p.party = { type: 'couple', size: 2 }; }
     }
     this.updateClock();
   }

@@ -6,7 +6,7 @@ export class SeasidePlayer extends AutoPlayer {
   constructor(sim, skill = 'competent') {
     super(sim);
     this.skill = skill;
-    if (skill === 'average') this.pace = { floorsPerDay: 1, reserve: 250000 };
+    if (skill === 'average') this.pace = { floorsPerDay: 1, reserve: 400000 };
   }
 
   setup() {
@@ -15,6 +15,7 @@ export class SeasidePlayer extends AutoPlayer {
     s.build('restaurant', { f: 0, x: 90 });
     s.build('floor', { f: 0, x: 114, x2: 160 });
     s.build('umiNoIe', { f: 0, x: 120 });
+    s.build('umiNoIe', { f: 0, x: 136 }); // 海の家は並べて（デザイン違い）
     this.buildFloor(1);
     s.build('elevator', { f: 0, f2: 1, x: this.shaftX[0][0] });
     this.top = 1;
@@ -24,14 +25,16 @@ export class SeasidePlayer extends AutoPlayer {
   roomPlan(f) {
     const s = this.s, sp = this.special;
     if (!sp.hk && f >= 2) return 'service';
+    // ファミリールーム（★2 から、★4 の条件は10室）
+    if (s.star >= 2 && s.byType.hotelFamily.length < 10 && this.money() > (this.skill === 'average' ? 800000 : 500000)) return 'family';
     if (s.hotels.length < 48 && f % 2 === 1 && ((sp.hotelFloors || 0) < 4 || s.hotels.length < 44)) return 'hotel';
-    if (!sp.onsen && s.star >= 2 && this.money() > (this.skill === 'average' ? 900000 : 500000)) return 'onsen';
+    if (!sp.onsen && s.star >= 2 && this.money() > (this.skill === 'average' ? 1200000 : 500000)) return 'onsen';
     const avg = this.skill === 'average';
-    if (!sp.aquarium && s.star >= 3 && this.money() > (avg ? 2200000 : 900000)) return 'aquarium';
+    if (!sp.aquarium && s.star >= 3 && this.money() > (avg ? 2600000 : 900000)) return 'aquarium';
     // 上手なプレイヤーは、資金に余裕があればさらに人を呼ぶ（水族館・店のフロア）
     if (avg && sp.aquarium && s.byType.aquarium.length < 2 && this.money() > 3500000) return 'aquarium';
     // 普通のプレイヤーも、かなり余裕ができたら店のフロアを足す
-    if (avg && sp.aquarium && this.money() > 3000000 && f % 3 === 1) return 'commerce';
+    if (avg && sp.aquarium && this.money() > 3500000 && f % 3 === 1) return 'commerce';
     if (!avg && this.money() > 1500000) {
       if (sp.aquarium && s.byType.aquarium.length < 3 && f % 3 === 0) return 'aquarium';
       if (f % 3 === 1) return 'commerce';
@@ -50,6 +53,12 @@ export class SeasidePlayer extends AutoPlayer {
       return true;
     }
     const plan = this.roomPlan(f);
+    if (plan === 'family') {
+      if (!s.build('floor', { f, x: this.X0, x2: this.X1 }).ok && s.cell(f, this.X0) === 0) return false;
+      for (const seg of this.segs) this.place('hotelFamily', f, seg);
+      this.log.push(`d${s.day} ${f + 1}F family`);
+      return true;
+    }
     if (plan === 'service' || plan === 'onsen' || plan === 'aquarium') {
       const r = s.build('floor', { f, x: this.X0, x2: this.X1 });
       if (!r.ok && s.cell(f, this.X0) === 0) return false;
@@ -77,6 +86,9 @@ export class SeasidePlayer extends AutoPlayer {
         s.build(type, { f, x });
       }
     }
+    // 浜辺の屋外施設: テラスカフェ（★2）と遊園地（★4）
+    if (s.star >= 2 && !s.byType.terraceCafe.length && this.money() > (this.skill === 'average' ? 600000 : 250000)) s.build('terraceCafe', { f: 0, x: 161 });
+    if (s.star >= 4 && !s.byType.amusement.length && this.money() > (this.skill === 'average' ? 3500000 : 2300000)) s.build('amusement', { f: 0, x: 180 });
     // ★2 で警備室（台風と★3 の条件）
     if (s.star >= 2 && !s.byType.security.length && this.money() > 200000) {
       for (let f = 2; f <= this.top; f++) if (s.build('security', { f, x: 74 }).ok || s.build('security', { f, x: 98 }).ok) break;

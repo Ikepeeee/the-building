@@ -2047,8 +2047,10 @@ test('§16 目標・成績・クリア（★3/★2/★1）と、クリア後も�
   s.step(60);
   assert.equal(s.scenario.state, 'cleared');
   assert.equal(s.scenario.grade, 2);
-  const c = ev.find((e) => e.kind === 'clear');
-  assert.ok(c && c.grade === 2 && c.speaker === '町長');
+  const c = ev.find((e) => e.kind === 'clear' && e.grade === 2);
+  assert.ok(c, '成績つきのクリア通知');
+  assert.ok(ev.some((e) => e.kind === 'clear' && e.speaker === '町長'));
+  assert.ok(ev.some((e) => e.kind === 'clear' && /これから/.test(e.text)), '物語は続く');
   s.step(DAY);
   assert.equal(s.scenario.state, 'cleared', 'そのまま続けられる');
   // 成績の区切り
@@ -2108,7 +2110,7 @@ test('§16 台風: 予告 → 上陸（来客停止・キャンセル・最上�
   assert.equal(s.weatherVisitorMul(), 0);
   stepTo(s, 3, 6);
   assert.equal(s.weather, null, '去る');
-  assert.ok(ev.some((e) => e.title === '台風一過'));
+  assert.ok(ev.some((e) => e.title === '台風の夜' && e.speaker === '航'));
   // 被害は警備室で減る（修理費の比較）
   const dmg = (sec) => {
     const t = new Tower({ seed: 157, scenario: 'seaside' });
@@ -2213,7 +2215,7 @@ test('§17 海の家は7〜9月だけ、温泉は騒音にならず評判を上�
   assert.ok(s.hotels.every((h) => !h.noisy), '温泉は騒音源にならない');
   const ev = []; s.on('scenario', (e) => ev.push(e.title));
   stepTo(s, 1, 0);
-  assert.ok(['海の家', '温泉', '水族館'].every((t) => ev.includes(t)), '最初の専用施設の会話');
+  assert.ok(['浜のライフガード', 'スーパー銭湯', '水族館の飼育員'].every((t) => ev.includes(t)), '最初の専用施設の会話');
   assert.ok(s.visitorsPerDay > 0 && s.visitHist.length === 1, '1日の来訪者を数える');
   // 温泉があると、レビューに「温泉」が出て★が上がる
   const h = s.hotels[0];
@@ -2228,31 +2230,152 @@ test('§17 海の家は7〜9月だけ、温泉は騒音にならず評判を上�
   assert.equal(s.isOpen(onsen, 12), true);
 });
 
-test('§17 ★の条件はシナリオ独自（1日の来訪者・専用施設）、starProgress も', () => {
+test('§18 ★の条件（海の家・警備室・スーパー銭湯・屋外レストラン・水族館・ファミリールーム10室・遊園地）と starProgress', () => {
   const s = new Tower({ seed: 163, scenario: 'seaside' });
-  let sp = s.starProgress();
-  assert.equal(sp.next, 2);
-  assert.match(sp.reqs[0].label, /1日の来訪者 300人/);
-  s.visitorsPerDay = 350; s.checkStar();
-  assert.equal(s.star, 2);
-  sp = s.starProgress();
-  assert.deepEqual(sp.reqs.map((r) => r.label.split('（')[0]), ['1日の来訪者 800人', '海の家', '警備室']);
-  s.visitorsPerDay = 900; s.checkStar();
-  assert.equal(s.star, 2, '海の家と警備室が必要');
   s.money = 1e9;
+  const labels = () => s.starProgress().reqs.map((r) => r.label.split('（')[0]);
+  assert.deepEqual(labels(), ['1日の来訪者 300人', '海の家']);
+  s.visitorsPerDay = 350; s.checkStar();
+  assert.equal(s.star, 1, '海の家が必要');
   mustBuild(s, 'lobby', { f: 0, x: 0, x2: 60 });
-  mustBuild(s, 'floor', { f: 0, x: 61, x2: 140 });
+  mustBuild(s, 'floor', { f: 0, x: 61, x2: 300 });
   mustBuild(s, 'umiNoIe', { f: 0, x: 80 });
-  mustBuild(s, 'floor', { f: 1, x: 0, x2: 60 });
+  assert.equal(s.star, 2);
+  assert.deepEqual(labels(), ['1日の来訪者 800人', '警備室', 'スーパー銭湯', '屋外レストラン']);
+  s.visitorsPerDay = 900;
+  for (let f = 1; f <= 4; f++) mustBuild(s, 'floor', { f, x: 0, x2: 60 });
   mustBuild(s, 'security', { f: 1, x: 0 });
+  mustBuild(s, 'onsen', { f: 2, x: 0 });
+  assert.equal(s.star, 2, '屋外レストランが必要');
+  mustBuild(s, 'beerGarden', { f: 0, x: 100 });
   assert.equal(s.star, 3);
-  assert.ok(s.starProgress().reqs.some((r) => r.label === 'VIPの高評価'));
-  assert.ok(s.starProgress().reqs.some((r) => r.label === '温泉') && s.starProgress().reqs.some((r) => r.label === '水族館'));
+  assert.deepEqual(labels(), ['1日の来訪者 1,500人', '水族館', 'ファミリールーム 10室', 'VIPの高評価']);
   s.star = 4;
-  assert.ok(s.starProgress().reqs.some((r) => /レビュー★4\.5/.test(r.label)));
+  assert.deepEqual(labels(), ['1日の来訪者 2,500人', '遊園地', 'ホテルの平均レビュー★4.5']);
   s.star = 5;
   assert.equal(s.starProgress().next, 'TOWER');
   assert.deepEqual(s.starProgress().reqs.map((r) => r.label), ['30F以上の海のチャペル', '夕日の結婚式']);
+});
+
+test('§18 屋外施設: 真上が空いていること・建てた後は真上に何も建てられない・地下は不可・雨で客が減る', () => {
+  const s = new Tower({ seed: 170 });
+  s.money = 1e9; s.star = 3;
+  mustBuild(s, 'lobby', { f: 0, x: 0, x2: 60 });
+  for (let f = 1; f <= 3; f++) mustBuild(s, 'floor', { f, x: 0, x2: 60 });
+  mustBuild(s, 'floor', { f: 0, x: 61, x2: 200 });
+  for (const f of [-1, -2]) mustBuild(s, 'floor', { f, x: 100, x2: 160 });
+  // 空き地（f=0）・屋上はOK、上に構造があるところ・地下は不可
+  assert.ok(s.check('terraceCafe', { f: 0, x: 100 }).ok, '浜の空き地');
+  assert.ok(s.check('beerGarden', { f: 4, x: 10 }).ok, '屋上');
+  assert.match(s.check('terraceCafe', { f: 2, x: 10 }).reason, /真上/, '上に3Fのフロアがある');
+  assert.match(s.check('terraceCafe', { f: -2, x: 100 }).reason, /地下/);
+  mustBuild(s, 'terraceCafe', { f: 0, x: 100 });
+  const cafe = s.objAt(0, 100);
+  const R = /屋外施設の上には建てられません/;
+  assert.match(s.check('floor', { f: 1, x: 100, x2: 115 }).reason, R, 'フロア');
+  assert.ok(s.check('floor', { f: 1, x: 61, x2: 120 }).ok, '空いているマスだけ張れる');
+  assert.match(s.check('office', { f: 1, x: 100 }).reason, R, '施設');
+  assert.match(s.check('bridge', { f: 1, x: 61, x2: 115 }).reason, R, '連絡通路');
+  assert.match(s.check('elevator', { f: 0, f2: 3, x: 105 }).reason, R, 'エレベーター');
+  assert.match(s.check('stairs', { f: 0, x: 96 }).reason, R, '階段（上の段が屋外施設の上）');
+  // 隣のエレベーターの機械室も真上に入れない
+  mustBuild(s, 'floor', { f: 1, x: 120, x2: 130 }); mustBuild(s, 'floor', { f: 2, x: 120, x2: 130 });
+  assert.ok(s.check('elevator', { f: 0, f2: 2, x: 122 }).ok);
+  // 撤去すれば建てられる
+  s.act(cafe, 'remove');
+  assert.ok(s.check('office', { f: 1, x: 100 }).ok);
+  // 雨の日は客が大きく減る（シナリオの天気）
+  const t = new Tower({ seed: 171, scenario: 'seaside' });
+  t.money = 1e9; t.star = 3;
+  mustBuild(t, 'lobby', { f: 0, x: 0, x2: 40 });
+  mustBuild(t, 'terraceCafe', { f: 0, x: 60 });
+  const tc = t.objAt(0, 60);
+  assert.equal(t.outdoorMul(tc), 1);
+  t.weather = { kind: 'rain', intensity: 0.5, until: t.time + 600 };
+  assert.ok(t.outdoorMul(tc) <= 0.2);
+  t.weather = { kind: 'typhoon', intensity: 1, until: t.time + 600, start: t.time };
+  assert.equal(t.outdoorMul(tc), 0);
+});
+
+test('§18 連れ（ひとり・カップル・家族）: 来訪者の数と売上は人数分、ファミリールームは家族', () => {
+  const s = new Tower({ seed: 172, scenario: 'seaside' });
+  s.money = 1e9; s.star = 4;
+  mustBuild(s, 'lobby', { f: 0, x: 0, x2: 60 });
+  mustBuild(s, 'floor', { f: 0, x: 61, x2: 200 });
+  for (let f = 1; f <= 4; f++) mustBuild(s, 'floor', { f, x: 0, x2: 200 });
+  mustBuild(s, 'elevator', { f: 0, f2: 4, x: 30 });
+  mustBuild(s, 'aquarium', { f: 1, x: 40 });
+  mustBuild(s, 'restaurant', { f: 3, x: 40 });
+  mustBuild(s, 'housekeeping', { f: 3, x: 0 });
+  for (let x = 80; x + 8 <= 200; x += 8) s.build('hotelFamily', { f: 4, x });
+  const aq = s.objAt(1, 40), rs = s.objAt(3, 40);
+  const kinds = (o) => { const c = { solo: 0, couple: 0, family: 0 }; for (let i = 0; i < 300; i++) { const p = s.newPerson('visitor', null); s.rollParty(p, o.type); c[p.party.type]++; } return c; };
+  const a = kinds(aq), r = kinds(rs);
+  assert.ok(a.family > a.couple && a.family > a.solo, `水族館は家族連れ ${JSON.stringify(a)}`);
+  assert.ok(r.couple > r.family && r.couple > r.solo, `レストランはカップル ${JSON.stringify(r)}`);
+  // 売上と来訪者は人数分
+  stepTo(s, 0, 10);
+  const p = s.newPerson('visitor', null);
+  s.rollParty(p, 'aquarium', 'family');
+  const size = p.party.size, m = s.money, v = s.visitorsToday;
+  p.f = 1; p.x = 50; s.atShop(p, aq);
+  assert.ok(size >= 3 && size <= 4);
+  assert.equal(s.money - m, TYPES.aquarium.price * size);
+  assert.equal(s.visitorsToday - v, size);
+  // ファミリールームの宿泊客は家族1組（人口は人数分）
+  stepTo(s, 0, 23);
+  const fam = s.byType.hotelFamily.filter((o) => o.occupied);
+  assert.ok(fam.length > 0);
+  for (const o of fam) { assert.equal(o.members.length, 1); assert.equal(o.members[0].party.type, 'family'); }
+  assert.ok(s.pop >= fam.reduce((n, o) => n + o.members[0].party.size, 0));
+  // フリープレイの売上は今まで通り1人分
+  const f = new Tower({ seed: 173 });
+  smallTower(f, 2); f.star = 2;
+  mustBuild(f, 'shop', { f: 1, x: 40 });
+  const q = f.newPerson('visitor', null); f.rollParty(q, 'shop', 'family');
+  const m2 = f.money; q.f = 1; q.x = 45; f.atShop(q, f.objAt(1, 40));
+  if (f.isOpen(f.objAt(1, 40))) assert.equal(f.money - m2, TYPES.shop.price);
+});
+
+test('§18 物語: 14の節目は1回だけ・保存される・nextBeat・渚と航の結婚式', () => {
+  const def = SCENARIOS.find((x) => x.id === 'seaside');
+  const keys = ['intro', 'firstHotel', 'firstUmiNoIe', 'star2', 'firstOutdoor', 'firstOnsen', 'star3', 'typhoonSurvived', 'firstAquarium', 'star4', 'firstAmusement', 'star5', 'chapelBuilt', 'legend'];
+  for (const k of keys) {
+    const b = def.story[k];
+    assert.ok(b && b.title && b.lines.length >= 1 && b.lines.length <= 4, k);
+    for (const l of b.lines) assert.ok(['町長', '民宿のおかみさん', '渚', '航'].includes(l.speaker) && l.text.length > 5, `${k} の話し手`);
+  }
+  assert.ok(keys.some((k) => def.story[k].lines.some((l) => l.speaker === '渚')) && keys.some((k) => def.story[k].lines.some((l) => l.speaker === '航')));
+  const s = new Tower({ seed: 174, scenario: 'seaside' });
+  const ev = []; s.on('scenario', (e) => ev.push(e));
+  assert.deepEqual(s.scenarioProgress().nextBeat.key, 'firstHotel');
+  s.step(1);
+  assert.ok(ev.length >= 2 && ev.every((e) => e.kind === 'intro'));
+  s.money = 1e9;
+  mustBuild(s, 'lobby', { f: 0, x: 0, x2: 60 });
+  mustBuild(s, 'floor', { f: 0, x: 61, x2: 200 });
+  mustBuild(s, 'floor', { f: 1, x: 0, x2: 60 });
+  mustBuild(s, 'hotelSingle', { f: 1, x: 0 });
+  mustBuild(s, 'umiNoIe', { f: 0, x: 80 });
+  s.step(60);
+  assert.ok(ev.some((e) => e.beat === 'firstHotel' && e.speaker === '渚'));
+  assert.ok(ev.some((e) => e.beat === 'firstUmiNoIe' && e.speaker === '航'));
+  s.visitorsPerDay = 400; s.checkStar();
+  s.step(1);
+  assert.ok(ev.some((e) => e.beat === 'star2'));
+  assert.equal(s.scenarioProgress().nextBeat.key, 'firstOutdoor');
+  assert.match(s.scenarioProgress().nextBeat.hint, /テラスカフェ|ビアガーデン/);
+  const n = ev.length;
+  mustBuild(s, 'hotelSingle', { f: 1, x: 4 });
+  s.step(120);
+  assert.equal(ev.filter((e) => e.beat === 'firstHotel').length, 2, '同じ節目は二度出ない（2行の会話が1回だけ）');
+  assert.equal(ev.length, n);
+  // 保存・読み込みで節目を繰り返さない
+  const r = new Tower(); r.restore(JSON.parse(JSON.stringify(s.serialize())));
+  const ev2 = []; r.on('scenario', (e) => ev2.push(e));
+  r.step(60);
+  assert.equal(ev2.length, 0);
+  assert.equal(r.scenarioProgress().nextBeat.key, 'firstOutdoor');
 });
 
 test('§17 海のチャペルで夕日の結婚式 → 伝説のリゾート（tower 通知 {kind:"legend"}）', () => {
@@ -2271,8 +2394,13 @@ test('§17 海のチャペルで夕日の結婚式 → 伝説のリゾート（t
   stepTo(s, 5, 19);
   assert.ok(pr.some((p) => p.kind === 'wedding' && /海のチャペル/.test(p.title)), '夕方に海のチャペルで');
   assert.deepEqual(tw, [{ kind: 'legend', scenario: 'seaside' }]);
+  const w = s.wedding;
+  if (w) { assert.equal(w.people.find((p) => p.kind === 'bride').name, '渚'); assert.equal(w.people.find((p) => p.kind === 'groom').name, '航'); }
+  assert.ok(ev.some((e) => e.beat === 'chapelBuilt'), 'チャペル完成の会話');
+  assert.ok(ev.filter((e) => e.beat === 'legend').map((e) => e.speaker).join() === '渚,航,民宿のおかみさん,町長');
   assert.equal(s.legend, true); assert.equal(s.tower, true);
   assert.ok(ev.some((e) => e.title === '伝説のリゾート'));
+  assert.equal(s.scenarioProgress().nextBeat, null, '物語の最後まで');
   assert.deepEqual(s.starProgress(), { star: 5, next: null, reqs: [] });
   const r = new Tower(); r.restore(JSON.parse(JSON.stringify(s.serialize())));
   assert.equal(r.legend, true);
@@ -2320,6 +2448,25 @@ test('§17 海辺の長期ストレス（台風・季節・通知・浜の客）
   assert.ok(scn < 40 && maxQ < 10, '会話が溜まらない');
   assert.ok(s.events.size < 100000);
   checkInvariants(s);
+});
+
+test('§18 移行: 旧い温泉（w24・h1）はスーパー銭湯（w32・h2）に置き直し、入らなければ代金を返す', () => {
+  const row = (a, b) => { let t = ''; for (let x = 0; x < 200; x++) t += x >= a && x <= b ? '1' : '0'; return t; };
+  const rows = { 0: row(0, 199), 1: row(0, 199), 2: row(0, 199), 3: row(0, 199) };
+  const base = { v: 3, seed: 1, time: 700, money: 1000000, star: 2, rows, nextId: 20, scenario: { id: 'seaside', startDay: 0, deadlineDay: 120, state: 'playing', grade: 0, scn: { story: { intro: 0 } } } };
+  // 上の段が空いている → 新しい大きさで置き直す
+  const a = new Tower(); a.restore({ ...base, objs: [{ id: 1, type: 'lobby', f: 0, x: 0, w: 60, h: 1 }, { id: 2, type: 'onsen', f: 1, x: 100, w: 24, h: 1 }] });
+  const o = a.objs.get(2);
+  assert.ok(o && o.w === 32 && o.h === 2, '置き直す');
+  assert.equal(a.money, 1000000);
+  // 上の段に別の施設 → 撤去して払い戻し
+  const b = new Tower();
+  b.restore({ ...base, objs: [{ id: 1, type: 'lobby', f: 0, x: 0, w: 60, h: 1 }, { id: 3, type: 'office', f: 2, x: 100, w: 10, h: 1 }, { id: 4, type: 'office', f: 2, x: 110, w: 10, h: 1 }, { id: 5, type: 'office', f: 2, x: 120, w: 10, h: 1 }, { id: 2, type: 'onsen', f: 1, x: 100, w: 24, h: 1 }] });
+  assert.equal(b.objs.has(2), false);
+  assert.equal(b.money, 1000000 + SIM.OLD_ONSEN_COST, '代金を返す');
+  const msg = []; b.on('message', (m) => msg.push(m.text));
+  b.step(1);
+  assert.ok(msg.some((t) => /払い戻しました/.test(t)));
 });
 
 test('性能: 横幅480・30フロア・人口6000超の横長ビルで 1 ゲーム日', () => {

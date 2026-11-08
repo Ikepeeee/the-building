@@ -33,16 +33,17 @@ export const SCENARIOS = [
     disabled: ['cathedral'],
     // シナリオ独自の★の条件（6 は伝説のリゾート）
     stars: {
-      2: { visitors: 300 },
-      3: { visitors: 800, types: ['umiNoIe', 'security'] },
-      4: { visitors: 1500, types: ['onsen', 'aquarium'], vip: true },
-      5: { visitors: 2500, review: 4.5 },
+      2: { visitors: 300, types: ['umiNoIe'] },
+      3: { visitors: 800, types: ['security', 'onsen'], anyOf: [{ types: ['terraceCafe', 'beerGarden'], label: '屋外レストラン（テラスカフェかビアガーデン）' }] },
+      4: { visitors: 1500, types: ['aquarium'], counts: [{ type: 'hotelFamily', n: 10 }], vip: true },
+      5: { visitors: 2500, types: ['amusement'], review: 4.5 },
       6: { types: ['seaChapel'], wedding: true },
     },
     // 季節だけ営業する店（月）
     openMonths: { umiNoIe: [7, 8, 9] },
     // 目玉施設: 人口や季節に関係なく観光客を呼ぶ（1時間・1施設あたり）
-    attractions: { aquarium: { rate: 24, season: false }, umiNoIe: { rate: 6, season: true }, onsen: { rate: 4, season: true } },
+    // （来訪者は連れの人数で数えるので、組の数で書く。家族連れが多い施設ほど1組の人数が多い）
+    attractions: { aquarium: { rate: 10, season: false }, umiNoIe: { rate: 2.5, season: true }, onsen: { rate: 2, season: true }, amusement: { rate: 12, season: false } },
     // 温泉があるとホテルのレビューが上がる（確率）
     onsenReview: 0.5,
     // 結婚式（伝説のリゾート）: 土日の夕方、海のチャペルで
@@ -60,27 +61,102 @@ export const SCENARIOS = [
     // 季節の波（月ごと）。観光客・ホテル予約・浜からの来客にかかる
     season: { 1: 0.5, 2: 0.5, 3: 0.7, 4: 0.9, 5: 1.0, 6: 1.2, 7: 2.0, 8: 2.0, 9: 1.6, 10: 1.3, 11: 0.8, 12: 0.6 },
     // 浜からの観光客: 1F・2F の飲食店とショップに、人口に関係なく来る（1時間・1店あたり）
-    beach: { floors: [0, 1], types: ['fastfood', 'restaurant', 'shop', 'umiNoIe'], rate: 3 },
+    beach: { floors: [0, 1], types: ['fastfood', 'restaurant', 'shop', 'umiNoIe', 'terraceCafe', 'beerGarden'], rate: 1.2 },
     weather: {
       typhoon: { months: [8, 9, 10], daily: 0.05, hours: [18, 30], cancel: 0.6, damage: 0.15, topFloors: 3, repair: 0.05 },
       rain: { daily: 0.12, hours: [3, 8], visitors: 0.6 },
     },
+    // 物語の節目。lines は会話の行（1行が1つの 'scenario' 通知）。順番は storyOrder
     story: {
-      intro: [
-        { speaker: '町長', title: '海辺の町へようこそ', text: 'よく来てくれた。この浜も昔は海水浴客でにぎわったのだが、今はこの通りだ。\nもう一度、人を呼べるリゾートホテルを建ててくれないか。期限は120日だ。' },
-        { speaker: '民宿のおかみさん', title: '民宿のおかみさん', text: 'あらまあ、若い人が来てくれて嬉しいわ。夏はお客さんが多いけど、秋の台風には気をつけてね。\n浜からのお客さんは、1階と2階のお店によく寄るわよ。' },
-      ],
-      firstHotel: { speaker: '民宿のおかみさん', title: '最初の客室', text: 'ホテルの客室ができたのね！ お掃除の人がいないと、すぐ汚れちゃうから気をつけて。' },
-      firstFiveStar: { speaker: '町長', title: '★5 のレビュー', text: '聞いたかね、★5 のレビューが付いたそうだ！ この調子で評判を広めてくれ。' },
-      typhoonSurvived: { speaker: '民宿のおかみさん', title: '台風一過', text: 'ひどい風だったわねえ。でも、ちゃんと乗り越えられたじゃない。明日はきっといい天気よ。' },
-      halfway: { speaker: '町長', title: '折り返し', text: '期限の半分が過ぎた。目標の進み具合はどうかね。客室と評判、それに人口だ。' },
-      clear: { speaker: '町長', title: 'リゾートの完成', text: 'ありがとう！ 浜にまた人が戻ってきた。この町の誇りだよ。\nこのまま★5を目指して、30階より上に「海のチャペル」を建ててみないか。夕日の結婚式が挙がれば、この浜は伝説のリゾートになる。' },
-      firstUmiNoIe: { speaker: '民宿のおかみさん', title: '海の家', text: '海の家ができたのね！ 夏のあいだは浜のお客さんでいっぱいになるわよ。秋になったら閉めるの。' },
-      firstOnsen: { speaker: '民宿のおかみさん', title: '温泉', text: 'まあ、温泉！ お客さんが喜ぶわ。レビューもきっと良くなるわよ。' },
-      firstAquarium: { speaker: '町長', title: '水族館', text: '水族館とは大きく出たね。季節を問わずお客さんが来てくれるだろう。' },
-      legend: { speaker: '町長', title: '伝説のリゾート', text: '夕日の結婚式、見事だった……。この浜は、もう伝説のリゾートだ。本当にありがとう！' },
-      fail: { speaker: '町長', title: '計画の見直し', text: '残念だが、今回の計画はここまでのようだ……。それでも、続けたいなら止めはしないよ。' },
+      intro: { title: '海辺の町へようこそ', lines: [
+        { speaker: '町長', text: 'よく来てくれた。この浜も昔は海水浴客でにぎわったが、今はこの通りだ。\nもう一度、人を呼べるリゾートを建ててくれないか。まずは120日、頼んだよ。' },
+        { speaker: '民宿のおかみさん', text: 'あらまあ、若い人が来てくれて嬉しいわ。うちの民宿も手伝うからね。\n夏は浜のお客さんが多いけど、秋の台風には気をつけて。' },
+      ] },
+      firstHotel: { title: 'フロントの渚', lines: [
+        { speaker: '渚', text: '今日からフロントに立つ、渚です！ 母がいつもお世話になってます。\nお客さんを一番に迎えるのが私の仕事。お部屋はきれいにしておいてくださいね。' },
+        { speaker: '民宿のおかみさん', text: 'うちの娘よ。にぎやかでしょう？ よろしくね。' },
+      ] },
+      firstUmiNoIe: { title: '浜のライフガード', lines: [
+        { speaker: '航', text: 'あ、どうも……。この浜のライフガードの、航です。\n海の家ができたなら、泳ぐ人も増えますね。見張り、がんばります。' },
+        { speaker: '渚', text: '航くん、相変わらず声が小さいなあ。でも、浜に人が戻ってきて嬉しいね！' },
+      ] },
+      star2: { title: '★2 リゾートらしく', lines: [
+        { speaker: '町長', text: '★2だ！ 町の評判が少しずつ上がってきたよ。' },
+        { speaker: '渚', text: 'だんだんリゾートらしくなってきましたね！ フロントも忙しくなってきました。' },
+      ] },
+      firstOutdoor: { title: '夕暮れのテラス', lines: [
+        { speaker: '渚', text: '外で食べるのって気持ちいいね。海が夕焼けで真っ赤。' },
+        { speaker: '航', text: '……うん。こういう景色、ずっと見ていたいな。' },
+        { speaker: '渚', text: 'え、今なにか言った？' },
+      ] },
+      firstOnsen: { title: 'スーパー銭湯', lines: [
+        { speaker: '民宿のおかみさん', text: 'まあ、立派なお風呂！ 露天風呂から海が見えるなんて贅沢ねえ。\n泊まったお客さんの評判も、きっと良くなるわよ。' },
+      ] },
+      star3: { title: '★3 町に人が戻る', lines: [
+        { speaker: '町長', text: '★3だ！ 町を出ていった若い人たちが、少しずつ戻ってきているそうだ。\n商店街にも明かりが増えた。君のおかげだよ。' },
+      ] },
+      typhoonSurvived: { title: '台風の夜', lines: [
+        { speaker: '民宿のおかみさん', text: 'ひどい風だったわねえ。でも、みんな無事でよかった。' },
+        { speaker: '渚', text: '航くんが、浜のお客さんを一人ずつビルの中に案内してくれたんです。\n……ちょっと、かっこよかった。' },
+        { speaker: '航', text: 'い、いや。仕事だから。' },
+      ] },
+      firstAquarium: { title: '水族館の飼育員', lines: [
+        { speaker: '航', text: '水族館の飼育員になりました。海の生き物のことなら、少しは詳しいので……。' },
+        { speaker: '渚', text: 'ウミガメの前で、航くんがずっと楽しそうに説明してくれたの。\nあんなにしゃべる航くん、初めて見たかも。' },
+      ] },
+      star4: { title: '★4 VIPのお墨付き', lines: [
+        { speaker: '町長', text: 'あのVIPが、うちの浜を「また来たい」と言ってくれたそうだ！ 信じられないよ。' },
+        { speaker: '渚', text: 'フロントでお見送りしたとき、手を振ってくださったんです！' },
+      ] },
+      firstAmusement: { title: '観覧車のてっぺんで', lines: [
+        { speaker: '航', text: '観覧車のてっぺんから見ると、浜もビルも全部見えるんだね。' },
+        { speaker: '航', text: '（……決めた。次の★が上がったら、ちゃんと言おう。）' },
+      ] },
+      star5: { title: '★5 プロポーズ', lines: [
+        { speaker: '航', text: '渚さん。僕と、結婚してください。' },
+        { speaker: '渚', text: '……はい！ ねえ、式はこの浜でしたいな。30階より上の、海が全部見える場所で。' },
+        { speaker: '町長', text: 'それなら「海のチャペル」だ。ビルの30階より上に建ててくれないか。' },
+      ] },
+      chapelBuilt: { title: '海のチャペル', lines: [
+        { speaker: '民宿のおかみさん', text: 'なんてきれいなチャペル……。式は、次の土曜か日曜の夕方にしましょう。' },
+        { speaker: '渚', text: '夕日の時間に、ロビーからみんなでチャペルへ上がるの。エレベーターが混まないといいな。' },
+      ] },
+      legend: { title: '伝説のリゾート', lines: [
+        { speaker: '渚', text: '夕日がチャペルいっぱいに差し込んで……。最高の式でした！' },
+        { speaker: '航', text: 'この浜で、ずっと一緒に。ありがとう、渚。' },
+        { speaker: '民宿のおかみさん', text: 'よかったねえ、二人とも。' },
+        { speaker: '町長', text: 'この浜は、もう伝説のリゾートだ。本当にありがとう！' },
+      ] },
+      firstFiveStar: { title: '★5 のレビュー', lines: [
+        { speaker: '渚', text: '★5 のレビューが付きました！ 「フロントの笑顔がよかった」ですって。えへへ。' },
+      ] },
+      halfway: { title: '折り返し', lines: [
+        { speaker: '町長', text: '期限の半分が過ぎた。客室と評判、それに1日の来訪者。目標の進み具合はどうかね。' },
+      ] },
+      clear: { title: 'リゾートの完成', lines: [
+        { speaker: '町長', text: 'ありがとう！ 120日の約束は果たしてくれた。浜にまた人が戻ってきたよ。' },
+        { speaker: '民宿のおかみさん', text: 'でも、まだまだこれから。あの二人も、なんだかいい感じだしね。\n★5 を目指して、もっと素敵な浜にしてちょうだい。' },
+      ] },
+      fail: { title: '計画の見直し', lines: [
+        { speaker: '町長', text: '残念だが、今回の計画はここまでのようだ……。それでも、続けたいなら止めはしないよ。' },
+      ] },
     },
+    // 物語の順番と、「次の節目」のヒント
+    storyOrder: [
+      { key: 'firstHotel', label: '最初の客室', hint: 'ホテルの客室を建てると、フロントに誰かが立つ…？' },
+      { key: 'firstUmiNoIe', label: '海の家', hint: '1Fに海の家を建てると、浜で誰かに会えるかも' },
+      { key: 'star2', label: '★2', hint: '1日の来訪者 300人と海の家で★2' },
+      { key: 'firstOutdoor', label: '夕暮れのテラス', hint: 'テラスカフェかビアガーデンを建てると…？' },
+      { key: 'firstOnsen', label: 'スーパー銭湯', hint: 'スーパー銭湯を建てると、おかみさんが喜ぶ' },
+      { key: 'star3', label: '★3', hint: '来訪者 800人・警備室・スーパー銭湯・屋外レストランで★3' },
+      { key: 'typhoonSurvived', label: '台風の夜', hint: '台風を乗り越えると…？' },
+      { key: 'firstAquarium', label: '水族館', hint: '水族館を建てると、航に新しい仕事が' },
+      { key: 'star4', label: '★4', hint: '来訪者 1,500人・水族館・ファミリールーム10室・VIP の高評価で★4' },
+      { key: 'firstAmusement', label: '観覧車', hint: '遊園地を建てると、観覧車で…？' },
+      { key: 'star5', label: '★5', hint: '来訪者 2,500人・遊園地・レビュー★4.5で★5' },
+      { key: 'chapelBuilt', label: '海のチャペル', hint: '30F以上に海のチャペルを建てる' },
+      { key: 'legend', label: '結婚式', hint: '土日の夕方、ロビーからチャペルまで二人を無事に送り届ける' },
+    ],
   },
 ];
 

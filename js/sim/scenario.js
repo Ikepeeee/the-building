@@ -32,18 +32,39 @@ export const ScenarioMixin = {
     if (st.month) this.dateOffset = daysFromApril1(st.month, st.day || 1);
     this.scenario = { id: def.id, name: def.name, startDay: this.day, deadlineDay: this.day + def.deadlineDays, state: 'playing', grade: 0 };
     this.scn = { story: {}, poorDays: 0, typhoonAt: null, rainUntil: null };
-    for (const s of def.story.intro || []) this.queueScenario({ kind: 'intro', ...s });
+    this.scn.story.intro = this.day;
+    this.queueBeat('intro', 'intro');
   },
 
   queueScenario(ev) { this._scnQueue.push(ev); },
 
+  // 節目の会話を1行ずつ通知する（旧形式 {speaker, title, text} の1行も受け付ける）
+  queueBeat(key, kind, extra = {}, prefix = '') {
+    const s = this.scenarioDef.story[key];
+    if (!s) return;
+    const lines = s.lines || (Array.isArray(s) ? s : [s]);
+    lines.forEach((l, i) => this.queueScenario({ kind, title: s.title || l.title, speaker: l.speaker, text: (i === 0 && prefix ? prefix : '') + l.text, beat: key, ...(i === lines.length - 1 ? extra : {}) }));
+  },
+
   storyOnce(key) {
     const def = this.scenarioDef;
     if (!def || !this.scn || key in this.scn.story) return;
-    const s = def.story[key];
-    if (!s) return;
+    if (!def.story[key]) return;
     this.scn.story[key] = this.day;
-    this.queueScenario({ kind: 'story', ...s });
+    this.queueBeat(key, 'story');
+  },
+
+  // ★が上がったとき（checkStar から）
+  onStarUp(star) { if (this.scenarioDef) this.storyOnce(`star${star}`); },
+
+  // 物語の次の節目（UI の「次にやること」用）
+  nextBeat() {
+    const def = this.scenarioDef;
+    if (!def || !def.storyOrder || !this.scn) return null;
+    const last = def.storyOrder[def.storyOrder.length - 1];
+    if (last.key in this.scn.story) return null; // 物語は最後まで済んだ
+    const b = def.storyOrder.find((x) => !(x.key in this.scn.story));
+    return b ? { key: b.key, label: b.label, hint: b.hint } : null;
   },
 
   // シナリオ独自の★の条件。6 は伝説のリゾート
@@ -53,6 +74,11 @@ export const ScenarioMixin = {
     const out = [];
     if (R.visitors) out.push({ label: `1日の来訪者 ${R.visitors.toLocaleString('en-US')}人（直近3日の平均 ${Math.round(this.visitorsPerDay).toLocaleString('en-US')}人）`, done: this.visitorsPerDay >= R.visitors });
     for (const t of R.types || []) out.push({ label: t === 'seaChapel' ? `${floorName(TYPES.seaChapel.minF)}以上の${TYPES[t].name}` : TYPES[t].name, done: (this.byType[t] || []).length > 0 });
+    for (const a of R.anyOf || []) out.push({ label: a.label, done: a.types.some((t) => (this.byType[t] || []).length > 0) });
+    for (const c of R.counts || []) {
+      const n = (this.byType[c.type] || []).length;
+      out.push({ label: `${TYPES[c.type].name} ${c.n}室（現在 ${n}室）`, done: n >= c.n });
+    }
     if (R.vip) out.push({ label: 'VIPの高評価', done: this.flags.vipOk, vip: true });
     if (R.review) {
       const v = GOAL_METRICS.hotelReviewAll(this);
@@ -89,7 +115,7 @@ export const ScenarioMixin = {
       for (const o of this.byType[t] || []) {
         if (o.burning || !this.isOpen(o, h)) continue;
         if (this.entranceDist(o.f, o.x + o.w / 2) === Infinity) continue;
-        const lam = A.rate * (A.season ? this.seasonMul() : 1) * this.weatherVisitorMul() * this.evalFactor(o);
+        const lam = A.rate * (A.season ? this.seasonMul() : 1) * this.weatherVisitorMul() * this.evalFactor(o) * this.outdoorMul(o);
         const n = Math.floor(lam * (0.5 + this.r()));
         for (let i = 0; i < n; i++) this.later(this.rand(55), () => this.visit(o));
       }
@@ -99,7 +125,7 @@ export const ScenarioMixin = {
       for (const o of this.byType[t] || []) {
         if (!B.floors.includes(o.f) || o.burning || !this.isOpen(o, h)) continue;
         if (this.entranceDist(o.f, o.x + o.w / 2) === Infinity) continue;
-        const lam = B.rate * mul * this.demandMul(t) * this.evalFactor(o);
+        const lam = B.rate * mul * this.demandMul(t) * this.evalFactor(o) * this.outdoorMul(o);
         const n = Math.floor(lam * (0.5 + this.r()));
         for (let i = 0; i < n; i++) this.later(this.rand(55), () => this.visit(o));
       }
@@ -145,6 +171,9 @@ export const ScenarioMixin = {
     if ((this.byType.umiNoIe || []).length) this.storyOnce('firstUmiNoIe');
     if ((this.byType.onsen || []).length) this.storyOnce('firstOnsen');
     if ((this.byType.aquarium || []).length) this.storyOnce('firstAquarium');
+    if ((this.byType.terraceCafe || []).length || (this.byType.beerGarden || []).length) this.storyOnce('firstOutdoor');
+    if ((this.byType.amusement || []).length) this.storyOnce('firstAmusement');
+    if ((this.byType.seaChapel || []).length) this.storyOnce('chapelBuilt');
     if (sc.state === 'playing' && this.scenarioGoals().every((g) => g.done)) this.clearScenario();
   },
 
@@ -165,8 +194,8 @@ export const ScenarioMixin = {
     sc.state = 'cleared';
     sc.grade = grade;
     sc.clearDay = this.day;
-    const s = def.story.clear;
-    this.queueScenario({ kind: 'clear', ...s, text: `${s.text}\n（${elapsed}日でクリア・成績 ${'★'.repeat(grade)}）`, grade });
+    this.scn.story.clear = this.day;
+    this.queueBeat('clear', 'clear', { grade }, `（${elapsed}日で目標達成・成績 ${'★'.repeat(grade)}）\n`);
     this.sound('fanfare');
   },
 
@@ -176,8 +205,8 @@ export const ScenarioMixin = {
     sc.state = 'failed';
     sc.grade = 0;
     sc.failReason = reason;
-    const s = this.scenarioDef.story.fail;
-    this.queueScenario({ kind: 'fail', ...s, text: `${reason}。\n${s.text}` });
+    this.scn.story.fail = this.day;
+    this.queueBeat('fail', 'fail', {}, `${reason}。\n`);
   },
 
   // ---- 台風 ----
@@ -251,6 +280,7 @@ export const ScenarioMixin = {
       name: def.name, goals: this.scenarioGoals(),
       daysLeft: Math.max(0, sc.deadlineDay - this.day), state: sc.state, grade: sc.grade,
       gradeRule: def.gradeRule.map((r) => ({ ...r })),
+      nextBeat: this.nextBeat(),
     };
   },
 

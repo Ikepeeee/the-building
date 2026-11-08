@@ -3,11 +3,11 @@
 // v = { occ, n, open, dirty, alt, night, var, seed } 。看板の位置は p.c.sign = {x,y,w,h,bg,fg} に残す（brand を上書きするため）。
 import { VARIANTS } from '../sim/constants.js';
 import { rng, shade } from './pixel.js';
-import { standFig, childFig, sitFig } from './people.js';
+import { standFig, childFig, sitFig, groupFig } from './people.js';
 import { shell, chairR, chairL, plant, picture, lamp, bed, nightstand, hatFig, coatFig, FIG, INK } from './facilities.js';
 
 const ART = {}, SIGN = {};
-const FLIP = new Set(['office', 'condo', 'shop', 'fastfood', 'restaurant', 'hotelSingle', 'hotelTwin', 'hotelSuite']);
+const FLIP = new Set(['office', 'condo', 'shop', 'fastfood', 'restaurant', 'hotelSingle', 'hotelTwin', 'hotelSuite', 'hotelFamily', 'umiNoIe']);
 
 export function hasVariantArt(type) { return !!ART[type]; }
 
@@ -859,4 +859,148 @@ const SHOP_SIGN = {
 SIGN.shop = (p, v, name) => {
   const s = SHOP_SIGN[name] || SHOP_SIGN.fashion;
   signPlate(p, s[0], 86, 0, s[1], s[2]);
+};
+
+// ================= ファミリールーム（w8 = 64x24）: bunk / tatami / kids =================
+ART.hotelFamily = (p, v, name, r) => {
+  const W = p.w;
+  const blanket = pick(r, ['#3b6cc4', '#e07040', '#3a9a6a', '#c04a8a']);
+  const kidsC = ['#f0c030', '#40b0e0', '#e05080', '#60c060'];
+  const n = v.n;
+  if (name === 'tatami') {
+    sh(r, p, '#eadcb4', '#b8b070', {});
+    tatami(p, W);
+    for (let x = 0; x < W; x += 24) p.r(x + 23, 0, 1, 21, '#8a5a2a');
+    p.r(1, 3, W - 2, 1, '#8a5a2a');
+    shojiPanel(p, 3, 4, 12, 9);
+    p.r(18, 15, 12, 1, '#7a4a20'); p.r(19, 16, 1, 4, '#5a3010'); p.r(28, 16, 1, 4, '#5a3010'); p.p(22, 14, '#ffffff'); p.p(25, 14, '#e05050');
+    // 4枚の布団
+    const fx = [33, 41, 49, 57];
+    for (let i = 0; i < 4; i++) {
+      const x = fx[i] - (i > 1 ? 0 : 0);
+      p.r(x - 1, 19, 7, 2, '#f4f4f4');
+      if (!v.dirty) { p.r(x + 1, 18, 5, 2, i < 2 ? blanket : kidsC[i]); p.r(x - 1, 18, 2, 1, '#ffffff'); }
+      else { for (let k = 0; k < 6; k++) p.p(x + k - 1, 17 + ((k * 3 + i) % 3), i < 2 ? blanket : kidsC[i]); }
+      if (!v.dirty && i < n) p.r(x - 1, 17, 2, 2, '#1a1a1a');
+    }
+  } else if (name === 'kids') {
+    sh(r, p, '#d8ecf8', '#c8a070', {});
+    for (let i = 0; i < 8; i++) p.p(3 + ((i * 29) % (W - 6)), 2 + ((i * 7) % 8), pick(r, ['#f8e060', '#f08080', '#80c8f0']));
+    p.r(1, 12, W - 2, 1, '#f0a0c0');
+    // 大人のベッド
+    bed(p, 2, 22, blanket, n > 0, v.dirty, r);
+    // 子どものベッド（小さく、カラフル）
+    for (let i = 0; i < 2; i++) {
+      const x = 30 + i * 16;
+      p.box(x, 14, 14, 4, '#ffffff'); p.box(x + 4, 13, 10, 3, kidsC[i + (v.alt & 1)]); p.box(x - 1, 11, 2, 9, kidsC[(i + 2) % 4]);
+      p.r(x, 18, 1, 3, '#7a5a3a'); p.r(x + 13, 18, 1, 3, '#7a5a3a');
+      if (!v.dirty && n > 2 + i) p.r(x + 1, 12, 2, 2, '#1a1a1a');
+    }
+    // おもちゃ
+    p.disc(28, 19, 1, '#e04040'); p.r(60, 18, 2, 3, '#40a0e0'); p.r(59, 17, 4, 1, '#f0c030');
+  } else { // bunk
+    sh(r, p, pick(r, ['#e8e0d0', '#dde6ec']), '#7a5a48', {});
+    picture(p, 6, 3, 10, 5, (r() * 3) | 0);
+    bed(p, 2, 22, blanket, n > 0, v.dirty, r);
+    // 二段ベッド
+    const bx = 34;
+    p.r(bx, 3, 1, 18, '#8a5a2a'); p.r(bx + 26, 3, 1, 18, '#8a5a2a');
+    p.box(bx, 8, 27, 3, '#ffffff'); p.r(bx + 6, 7, 20, 2, v.dirty ? '#c0a080' : kidsC[0]);
+    p.box(bx, 16, 27, 3, '#ffffff'); p.r(bx + 6, 15, 20, 2, v.dirty ? '#c0a080' : kidsC[1]);
+    p.r(bx + 24, 4, 2, 1, '#8a5a2a'); p.r(bx + 24, 7, 2, 1, '#8a5a2a'); p.r(bx + 24, 11, 2, 1, '#8a5a2a');
+    if (!v.dirty && n > 2) p.r(bx + 2, 6, 2, 2, '#1a1a1a');
+    if (!v.dirty && n > 3) p.r(bx + 2, 14, 2, 2, '#1a1a1a');
+    p.disc(30, 19, 1, '#40b0e0');
+  }
+  if (v.dirty) { p.box(26, 18, 4, 3, '#ffffff'); p.p(31, 20, '#e0c040'); }
+  else if (v.occ && n === 0) { p.box(26, 16, 4, 5, '#b03838'); p.box(30, 17, 3, 4, '#3a5a9a'); }
+};
+
+// ================= 海の家（w16 = 128x24）: yakisoba / kakigori / beachbar / surfshop / ramune =================
+function umiShell(p, r, wall, awning1, awning2) {
+  const W = p.w;
+  const fy = sh(r, p, wall, '#e8d4a0', {});
+  for (let x = 3; x < W - 1; x += 6) p.r(x, 1, 1, 20, shade(wall, -0.08));
+  // 日よけ（ストライプ）
+  for (let x = 1; x < W - 1; x++) p.r(x, 1, 1, 5, ((x >> 2) & 1) ? awning1 : awning2);
+  for (let x = 1; x < W - 1; x += 8) p.r(x, 6, 4, 1, awning1);
+  return fy;
+}
+ART.umiNoIe = (p, v, name, r) => {
+  const W = p.w;
+  if (!v.open) {
+    umiShell(p, r, '#c8b088', '#9aa0a6', '#7a8086');
+    p.r(1, 7, W - 2, 14, '#9aa0a6'); for (let y = 8; y < 21; y += 2) p.r(1, y, W - 2, 1, '#7a8086');
+    return;
+  }
+  const n = v.n;
+  let fy;
+  const crowd = (pos) => { for (let i = 0; i < Math.min(n, pos.length); i++) { const [x, k] = pos[i]; if (k === 'g') groupFig(p, x, 20, i % 2 ? 'couple' : 'family', FIG, i % 2); else standFig(p, x, 20, FIG, i % 2, i % 2); } };
+  switch (name) {
+    case 'kakigori': {
+      fy = umiShell(p, r, '#e8f4fc', '#3a8ad0', '#ffffff');
+      p.box(4, 13, 40, 8, '#ffffff'); p.r(4, 15, 40, 2, '#3a8ad0');
+      p.box(10, 6, 9, 7, '#d8e8f4'); p.r(12, 4, 5, 2, '#8a9aa8'); p.disc(14, 10, 2, '#ffffff');
+      for (let i = 0; i < 5; i++) { const x = 22 + i * 4; p.r(x, 7, 3, 5, ['#e03040', '#3a8ad0', '#40b040', '#f0c020', '#e080c0'][i]); p.r(x, 6, 3, 1, '#ffffff'); }
+      if (n > 0) hatFig(p, 34, 19, '#3a8ad0', 1);
+      for (const x of [52, 76, 100]) { p.r(x, 14, 12, 1, '#3a8ad0'); p.r(x + 5, 15, 2, 5, '#9aa0a8'); p.r(x + 2, 12, 3, 2, '#ffffff'); p.p(x + 3, 11, '#e03040'); p.r(x + 8, 12, 3, 2, '#ffffff'); p.p(x + 9, 11, '#3a8ad0'); }
+      crowd([[46, 's'], [60, 'g'], [86, 'g'], [112, 'g'], [70, 's']]);
+      break;
+    }
+    case 'beachbar': {
+      fy = umiShell(p, r, '#5a3a24', '#d8b860', '#b89448');
+      for (let x = 2; x < W - 2; x += 5) p.r(x, 7, 3, 1, '#4a7a3a');
+      p.r(6, 8, 36, 1, '#3a2414'); for (let i = 0; i < 9; i++) p.r(8 + i * 4, 4 + 5, 2, 3, pick(r, ['#2a6a3a', '#c8a040', '#7a2a1a', '#e8e8e8']));
+      p.box(4, 13, 40, 8, '#7a4a28'); p.r(3, 12, 42, 1, '#c89a5a');
+      for (let i = 0; i < 4; i++) { const x = 10 + i * 8; p.r(x, 10, 2, 2, ['#f08040', '#e04080', '#40c0e0', '#f0e040'][i]); p.p(x + 1, 9, '#40a040'); }
+      if (n > 0) standFig(p, 22, 12, FIG, 1);
+      for (let x = 46; x < W - 2; x += 2) p.p(x, 3 + Math.round(Math.sin(x * 0.2) * 1.2), (x >> 1) % 3 === 0 ? '#ffe080' : '#3a2a1a');
+      for (const x of [52, 64, 76, 100, 112]) { p.r(x, 17, 3, 1, '#c89a5a'); p.r(x + 1, 18, 1, 3, '#7a4a28'); }
+      crowd([[50, 's'], [62, 's'], [86, 'g'], [104, 'g'], [118, 's']]);
+      break;
+    }
+    case 'surfshop': {
+      fy = umiShell(p, r, '#d8f0ec', '#20a8a0', '#f0e060');
+      const bc = ['#f05050', '#40b0e0', '#f0c030', '#60c070', '#f08ad0', '#ffffff'];
+      for (let i = 0; i < 9; i++) { const x = 4 + i * 6; const c = bc[i % bc.length]; p.r(x, 8, 4, 13, c); p.r(x + 1, 7, 2, 1, c); p.r(x + 1, 9, 2, 10, shade(c, 0.25)); p.r(x + 1, 14, 2, 1, shade(c, -0.3)); }
+      for (let i = 0; i < 4; i++) { const x = 62 + i * 7; p.r(x + 2, 7, 1, 1, '#555'); p.r(x, 8, 5, 9, i % 2 ? '#1a1a2a' : '#203a5a'); p.r(x + 1, 10, 3, 1, '#40b0e0'); }
+      p.box(94, 13, 30, 8, '#20a8a0'); p.r(93, 12, 32, 1, '#f0e060'); p.box(104, 8, 6, 4, '#333'); p.p(105, 9, '#80e080');
+      if (n > 0) standFig(p, 98, 12, FIG, 1);
+      crowd([[56, 's'], [72, 's'], [86, 'g'], [60, 'g']]);
+      break;
+    }
+    case 'ramune': {
+      fy = umiShell(p, r, '#f8f0e0', '#e03040', '#ffffff');
+      // 風鈴
+      for (const x of [20, 60, 100]) { p.r(x, 7, 1, 2, '#555'); p.box(x - 2, 9, 5, 3, '#c8e8f8'); p.r(x, 12, 1, 3, '#e03040'); }
+      // 氷水の桶とびん
+      p.box(6, 14, 30, 7, '#7a5a3a'); p.r(7, 15, 28, 2, '#a8d8f0');
+      for (let i = 0; i < 8; i++) { const x = 8 + i * 3; const c = i % 2 ? '#7ac8d0' : '#4aa8b8'; p.r(x, 10, 2, 5, c); p.p(x, 9, '#e8f4f8'); p.p(x + 1, 12, '#ffffff'); }
+      p.box(40, 9, 16, 12, '#b07a4a'); for (let y = 10; y < 20; y += 3) for (let x = 41; x < 55; x += 3) p.r(x, y, 2, 2, pick(r, ['#7ac8d0', '#e03040', '#f0c030']));
+      if (n > 0) hatFig(p, 30, 19, '#e03040', 0);
+      for (const x of [64, 88, 108]) { p.r(x, 18, 14, 1, '#c8a070'); p.r(x + 1, 19, 1, 2, '#7a5a3a'); p.r(x + 12, 19, 1, 2, '#7a5a3a'); }
+      crowd([[62, 'g'], [80, 'g'], [100, 'g'], [118, 's']]);
+      break;
+    }
+    default: { // yakisoba
+      fy = umiShell(p, r, '#d8b884', '#e03030', '#ffffff');
+      p.box(4, 13, 38, 8, '#b08050'); p.r(3, 12, 40, 1, '#7a5a30');
+      p.box(6, 10, 18, 2, '#2a2a2a'); for (let i = 0; i < 8; i++) p.p(8 + i * 2, 9 + (i & 1), '#b0702a');
+      p.r(9, 7, 1, 1, '#f0f0f0'); p.r(15, 6, 1, 1, '#f0f0f0'); p.r(20, 7, 1, 1, '#f0f0f0');
+      for (let i = 0; i < 3; i++) p.r(28 + i * 5, 10, 4, 2, '#ffffff'), p.r(29 + i * 5, 9, 2, 1, '#b0702a');
+      if (n > 0) hatFig(p, 14, 19, '#ffffff', 1);
+      for (const [x, c] of [[58, '#e04040'], [70, '#f0c020']]) { p.disc(x, 10, 4, c); p.disc(x, 10, 2, '#d8b884'); }
+      for (const x of [56, 80]) { p.r(x, 19, 18, 2, '#c8b878'); p.r(x + 5, 16, 8, 1, '#8a5a30'); p.r(x + 6, 17, 1, 2, '#6a4020'); p.r(x + 11, 17, 1, 2, '#6a4020'); }
+      crowd([[48, 's'], [62, 'g'], [86, 'g'], [104, 's'], [116, 'g']]);
+    }
+  }
+};
+const UMI_SIGN = {
+  yakisoba: ['YAKISOBA', '#ffffff', '#e03030'], kakigori: ['KAKIGORI', '#3a8ad0', '#ffffff'], beachbar: ['BEACH BAR', '#ffe080', '#3a2414'],
+  surfshop: ['SURF', '#ffffff', '#20a8a0'], ramune: ['RAMUNE', '#e03040', '#f8f0e0'],
+};
+SIGN.umiNoIe = (p, v, name) => {
+  if (!v.open) { signPlate(p, 'CLOSED', p.w / 2, 10, '#3a3a3a', '#f0f0e8'); p.c.sign = null; return; }
+  const s = UMI_SIGN[name] || UMI_SIGN.yakisoba;
+  signPlate(p, s[0], 92, 8, s[1], s[2]);
 };

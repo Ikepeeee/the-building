@@ -108,7 +108,8 @@ export class Dialogs {
   enqueue(item) {
     // 同じ prompt（id）が何度届いても1回だけ。★・TOWER も重ねない。待ち行列は上限つき
     const key = item.type === 'prompt' ? `p:${item.data && item.data.id}` : item.type === 'star' ? `s:${item.star}`
-      : item.type === 'scenario' ? `sc:${item.data && item.data.kind}:${item.data && item.data.title}` : item.type;
+      // 物語の1つの節目は、同じ title の通知が話し手ごとに複数届く → 話し手と本文まで含めて区別する
+      : item.type === 'scenario' ? `sc:${item.data && item.data.kind}:${item.data && (item.data.beat || '')}:${item.data && item.data.title}:${item.data && item.data.speaker}:${item.data && item.data.text}` : item.type;
     this.seen ||= new Set();
     if (this.seen.has(key)) return;
     if (this.queue.length >= 8) return;
@@ -254,12 +255,20 @@ export class Dialogs {
       h('tr', {}, h('th', { text: '施設の数' }), h('td', { text: `${sim.objs.size}` })),
       h('tr', {}, h('th', { text: '商業施設' }), h('td', { text: `${shops}` })),
       h('tr', {}, h('th', { text: '稼働中の施設' }), h('td', { text: `${tenants}` })));
-    const talk = legend && d && d.text
-      ? h('div', { class: 'talk end-talk' }, h('img', { class: 'talk-face', src: portraitURL(d.speaker || '町長'), alt: '' }),
-        h('div', {}, h('b', { text: d.speaker || '町長' }), h('p', { text: d.text })))
+    // 伝説のリゾート: 主役の2人（渚と航）と、町長・おかみさん
+    const talk = legend
+      ? h('div', { class: 'couple' },
+        h('div', { class: 'couple-main' },
+          h('figure', {}, h('img', { class: 'talk-face big', src: portraitURL('渚'), alt: '' }), h('figcaption', { text: '渚' })),
+          h('span', { class: 'couple-heart', text: '♥' }),
+          h('figure', {}, h('img', { class: 'talk-face big', src: portraitURL('航'), alt: '' }), h('figcaption', { text: '航' }))),
+        h('div', { class: 'couple-sub' },
+          h('figure', {}, h('img', { class: 'talk-face', src: portraitURL('町長'), alt: '' }), h('figcaption', { text: '町長' })),
+          h('figure', {}, h('img', { class: 'talk-face', src: portraitURL('民宿のおかみさん'), alt: '' }), h('figcaption', { text: 'おかみさん' }))),
+        d && d.text ? h('p', { class: 'couple-text', text: `${d.speaker ? d.speaker + '「' : '「'}${d.text}」` }) : h('p', { class: 'couple-text', text: '「ふたりの門出を、町じゅうで祝おう！」' }))
       : null;
     const box = h('div', { class: 'e-box' },
-      h('p', { text: legend ? '海のチャペルで、夕日の結婚式が無事に挙がりました。' : '100Fの大聖堂で、結婚式が無事に挙がりました。' }),
+      h('p', { text: legend ? '海のチャペルで、渚と航の夕日の結婚式が無事に挙がりました。' : '100Fの大聖堂で、結婚式が無事に挙がりました。' }),
       h('h1', { class: 'e-tower', text: legend ? (sim.titleText || 'LEGEND') : 'TOWER' }),
       h('h2', { text: legend ? 'おめでとうございます！「伝説のリゾート」になりました' : 'おめでとうございます！ 最高ランク「TOWER」に認定されました' }),
       h('p', { text: legend ? '寂れた浜は、誰もが憧れる伝説のリゾートとしてよみがえりました。' : 'ロビーから始まった小さなビルは、街いちばんの超高層タワーになりました。' }),
@@ -565,7 +574,8 @@ export class Dialogs {
       <h3>フリープレイとシナリオ</h3>
       <p><b>フリープレイ</b>は期限なしで TOWER を目指す遊び方。<b>シナリオ</b>は目標と期限のある物語つきのステージで、シナリオごとに別に保存され、クリアすると成績（★1〜3）が残ります。シナリオ中は左下の「🎯 目標」パネルで進み具合と残り日数が見られます。</p>
       <p>「海辺のリゾート」: 120日以内に、ホテルの客室40室・平均レビュー★4.0（直近30日）・1日の来訪者1,500人を同時に達成。★は人口ではなく「1日の来訪者」で上がります（HUD の★で条件を確認）。夏は観光客が倍増、浜からの客は 1F・2F の店に多く来ます。秋の台風に注意（警備室があると被害が減ります）。</p>
-      <p>「リゾート」タブの専用施設: <b>海の家</b>（1F・夏だけ）、<b>温泉</b>（ホテルの評判が上がる）、<b>水族館</b>（2フロア・季節を問わず人を呼ぶ）、<b>海のチャペル</b>（30F以上・★5）。★5 で海のチャペルの結婚式が成功すると「伝説のリゾート」（LEGEND）達成。</p>
+      <p>「リゾート」タブの専用施設: <b>海の家</b>（1F・夏だけ）、<b>スーパー銭湯</b>（2フロア・ホテルの評判が上がる）、<b>水族館</b>（2フロア・季節を問わず人を呼ぶ）、<b>遊園地</b>（3フロアの屋外施設・★4）、<b>海のチャペル</b>（30F以上・★5）。</p>
+      <p>物語: 渚（ホテルのフロント係）と航（ライフガード）の関係が節目ごとに進み、★5 でプロポーズ。海のチャペルで2人の結婚式が成功すると「伝説のリゾート」（LEGEND）達成。左下パネルの「📋 次にやること」に、建物の基本・次の★で足りないもの・目標・物語のヒントがまとまっています。</p>
       <h3>はじめの一歩</h3>
       <ul>
         <li>「基本」の<b>ロビー</b>を1Fに横長に置く（人の出入口）</li>
@@ -574,6 +584,8 @@ export class Dialogs {
         <li>エレベーターが混んだら施設を選んで<b>カゴを増やす</b>。待ち時間が長いと人のストレス（ピンク→赤）が上がり、評価が下がって退去してしまう</li>
         <li>ホテルは<b>ハウスキーピング</b>、事件には<b>警備室</b>が必要</li>
         <li>建てた施設はしばらく<b>工事中</b>（足場とクレーン）。完成するまで使えません</li>
+        <li><b>ファミリールーム</b>（ホテル・★2）: 家族4人で泊まれる客室</li>
+        <li><b>テラスカフェ・ビアガーデン</b>（商業・★2）: 屋外の飲食店。上には何も建てられない（屋上や空き地に）。雨の日は客が減る</li>
         <li><b>連絡通路</b>（基本・★2）: 下に支えがなくても架けられる橋。片方の端は建物につなぐ。離れた棟やフロアの切れ目を人が歩いて渡れる（上に施設は置けない）</li>
         <li>地下に<b>ごみ・リサイクルセンター</b>（サービス・地下2フロア分）を建てる。ビル全体のごみを集めて分別し、毎朝収集車が回収する。無い・溢れると評価が下がる（★4の条件にもなる）</li>
         <li>★3からは車で来る入居者がいる。地下に<b>駐車場</b>（★2で解放）を用意しないと評価が下がる</li>

@@ -1,7 +1,7 @@
 // The Building Renderer（Canvas 2D・ピクセルアート）
 // const r = new Renderer(canvas, sim); r.resize(w, h); r.render(view); r.setSim(sim);
 import { TILE_W, FLOOR_H, W, MIN_F, MAX_F, DAY, LOBBY_FLOORS, TYPES, floorName } from '../sim/constants.js';
-import { makeFacilitySprite, lobbyTile, floorTile, shaftSeg, carSprite, CAR_H, SPRITE_TOP, treeSprite, machineRoom, pitSprite, bridgeTile, fireEscapeSprite, fireEscapeTop, ESC_W, frameTile, craneSprite, truckSprite } from './facilities.js';
+import { makeFacilitySprite, lobbyTile, floorTile, shaftSeg, carSprite, CAR_H, SPRITE_TOP, treeSprite, machineRoom, pitSprite, bridgeTile, WHEEL, COASTER, fireEscapeSprite, fireEscapeTop, ESC_W, frameTile, craneSprite, truckSprite } from './facilities.js';
 import { SEA_H, WAVE_W, waveFrame, islandSprite, boatSprite, gullSprite, lighthouseSprite, palmSprite, sandStrata, deepTile } from './seaside.js';
 import { heliSprite, planeSprite, bannerPlaneSprite, bannerSprite } from './vehicles.js';
 import { peopleAtlas, KIND_INDEX, PW, PH, stressIndex, STRESS_COLORS } from './people.js';
@@ -21,12 +21,12 @@ const LOBBY_SET = new Set(LOBBY_FLOORS);
 const VIS_CAP = {
   office: 6, condo: 4, hotelSingle: 1, hotelTwin: 2, hotelSuite: 3, fastfood: 9, restaurant: 8, shop: 5,
   cinema: 10, partyHall: 14, security: 6, housekeeping: 6, medical: 6, metro: 14, cathedral: 12,
-  umiNoIe: 7, onsen: 8, aquarium: 12, seaChapel: 10,
+  umiNoIe: 7, onsen: 14, aquarium: 12, seaChapel: 10, hotelFamily: 4, terraceCafe: 6, beerGarden: 12, amusement: 10,
 };
-const COMMERCE = new Set(['fastfood', 'restaurant', 'shop', 'cinema', 'partyHall', 'umiNoIe', 'onsen', 'aquarium']);
-const ROOMS = new Set(['office', 'condo', 'hotelSingle', 'hotelTwin', 'hotelSuite']);
+const COMMERCE = new Set(['fastfood', 'restaurant', 'shop', 'cinema', 'partyHall', 'umiNoIe', 'onsen', 'aquarium', 'terraceCafe', 'beerGarden', 'amusement']);
+const ROOMS = new Set(['office', 'condo', 'hotelSingle', 'hotelTwin', 'hotelSuite', 'hotelFamily']);
 const SERVICE = new Set(['security', 'housekeeping', 'medical']);
-const EVAL_TYPES = new Set(['office', 'condo', 'hotelSingle', 'hotelTwin', 'hotelSuite', 'fastfood', 'restaurant', 'shop', 'cinema', 'partyHall', 'umiNoIe', 'onsen', 'aquarium']);
+const EVAL_TYPES = new Set(['office', 'condo', 'hotelSingle', 'hotelTwin', 'hotelSuite', 'fastfood', 'restaurant', 'shop', 'cinema', 'partyHall', 'umiNoIe', 'onsen', 'aquarium', 'terraceCafe', 'beerGarden', 'amusement', 'hotelFamily']);
 const EVAL_COL = { good: '#38d8ff', fair: '#f4d020', bad: '#f03030' };
 
 const isElev = (t) => t === 'elevator' || t === 'express';
@@ -583,7 +583,7 @@ export class Renderer {
   // 毎フレーム描き直す（チャンクに焼かない）施設: 動きがあるもの
   isDynamic(o) {
     const t = o.type;
-    return t === 'metro' || t === 'escalator' || !!o.destroyed || (t === 'garbage' && !!o.truck) || this.isBuilding(o);
+    return t === 'metro' || t === 'escalator' || t === 'amusement' || !!o.destroyed || (t === 'garbage' && !!o.truck) || this.isBuilding(o);
   }
 
   // mode: 'all' = 全部、'static' = チャンク用（動かないもの）、'dynamic' = 毎フレーム分（動くもの・カゴ）
@@ -713,7 +713,8 @@ export class Renderer {
     this._bridgeFrame = (this._bridgeFrame || 0) + 1;
     if (b && b.sim === sim && b.rev === rev && b.size === size && (rev >= 0 || this._bridgeFrame % 60)) return b.set;
     const set = new Set();
-    if (objs) for (const o of objs.values()) if (o && o.type === 'bridge') set.add(o.id);
+    // 連絡通路と屋外施設は外壁・屋上・非常階段の判定では「建物ではない」
+    if (objs) for (const o of objs.values()) if (o && (o.type === 'bridge' || (TYPES[o.type] && TYPES[o.type].outdoor))) set.add(o.id);
     this._bridges = { sim, rev, size, set };
     return set;
   }
@@ -1004,6 +1005,9 @@ export class Renderer {
     // 暗さ（夜の無人・閉店・空室）
     const night = this.night;
     let dark = 0;
+    const outdoor = !!(TYPES[type] && TYPES[type].outdoor);
+    if (type === 'amusement') this.drawRides(o, x, y, v);
+    if (outdoor) return;   // 屋根がないので暗くする箱は描かない（夜は灯りの有無で表す）
     if (COMMERCE.has(type)) dark = v.open ? 0 : 0.42 + 0.3 * night;
     else if (ROOMS.has(type)) dark = !v.occ ? 0.12 + 0.66 * night : v.n === 0 ? 0.74 * night : 0;
     else if (SERVICE.has(type)) dark = v.n === 0 ? 0.55 * night : 0;
@@ -1037,6 +1041,10 @@ export class Renderer {
         if (hash2(num(o.id), i) < burnt * 0.7) this.rect(x + ((hash2(i, num(o.id)) * ww) | 0), y + FH * th - 6 - ((hash2(i, 3) * 8) | 0), 2, 1 + ((hash2(i, 5) * 3) | 0), '#000');
       }
     }
+  }
+
+  facilityOpen(o) {
+    try { return typeof this.sim.isOpen === 'function' ? !!this.sim.isOpen(o) : true; } catch (e) { return true; }
   }
 
   isBuilding(o) { return typeof o.constructUntil === 'number' && o.constructUntil > this.simTime; }
@@ -1163,6 +1171,46 @@ export class Renderer {
         if (((ms / 300) | 0) % 2) this.rect(hop - 1, ty + 9, 5, 1, '#f0d020');
       }
     } finally { ctx.restore(); }
+  }
+
+  // 遊園地の動く部分（毎フレーム、安い線と箱だけ）
+  drawRides(o, x, y, v) {
+    if (this.lodOn) return;
+    const ctx = this.ctx, ms = this.nowMs, S = this.S;
+    const run = v.open ? 1 : 0;
+    const { cx, cy, r } = WHEEL;
+    const ang = run ? ms / 9000 : 0.3;
+    const wx = x + cx, wy = y + cy;
+    ctx.strokeStyle = '#c0c8d4'; ctx.lineWidth = Math.max(1, S * 0.8);
+    ctx.beginPath();
+    for (let k = 0; k < 8; k++) {
+      const a = ang + (k * Math.PI) / 4;
+      ctx.moveTo(this.X(wx), this.Y(wy)); ctx.lineTo(this.X(wx + Math.cos(a) * (r - 2)), this.Y(wy + Math.sin(a) * (r - 2)));
+    }
+    ctx.stroke();
+    const gc = ['#e05050', '#f0c030', '#40a0e0', '#60c060', '#e080d0', '#f08040', '#ffffff', '#8a6ad0'];
+    for (let k = 0; k < 8; k++) {
+      const a = ang + (k * Math.PI) / 4;
+      const gx = wx + Math.cos(a) * r, gy = wy + Math.sin(a) * r;
+      this.rect(gx - 0.5, gy, 1, 2, '#5a5a62');
+      this.rect(gx - 3, gy + 2, 6, 5, '#000');
+      this.rect(gx - 2.5, gy + 2.5, 5, 4, gc[k]);
+      this.rect(gx - 1.5, gy + 3.5, 3, 1.5, this.night > 0.5 && run ? '#ffe890' : '#c8e8ff');
+    }
+    if (!run) return;
+    // ジェットコースターの列車
+    const pts = COASTER;
+    if (!this._coLen) { let L = 0; const acc = [0]; for (let i = 1; i < pts.length; i++) { L += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); acc.push(L); } this._coLen = { L, acc }; }
+    const { L, acc } = this._coLen;
+    for (let c = 0; c < 3; c++) {
+      let d = (((ms / 5200) % 1) * L - c * 6 + L) % L;
+      let i = 1; while (i < acc.length - 1 && acc[i] < d) i++;
+      const t = (d - acc[i - 1]) / Math.max(0.001, acc[i] - acc[i - 1]);
+      const px = pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * t, py = pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * t;
+      this.rect(x + px - 2.5, y + py - 4, 5, 4, '#000');
+      this.rect(x + px - 2, y + py - 3.5, 4, 3, c === 0 ? '#f0c030' : '#3a6ad0');
+      this.rect(x + px - 1, y + py - 5, 2, 1.5, '#1a1a1a');
+    }
   }
 
   drawTrain(x, y, ww) {
@@ -1310,8 +1358,11 @@ export class Renderer {
         let gl = 0; for (let k = a - 1; k >= 0 && !sol(k) && gl < GAP; k--) gl++;
         let gr = 0; for (let k = b + 1; k < W && !sol(k) && gr < GAP; k++) gr++;
         // 連絡通路が取り付く側には付けない
-        if ((gl >= GAP || gl === a) && !(a > 0 && isB(row[a - 1]))) L.push(a);
-        if ((gr >= GAP || b + gr === W - 1) && !(b < W - 1 && isB(row[b + 1]))) R.push(b);
+        // 地上1階だけの小屋（海の家など）には付けない
+        const up = grid[f + 1];
+        const oneStory = f === 0 && (!up || ((up[a] === 0 || isB(up[a])) && (up[b] === 0 || isB(up[b]))));
+        if (!oneStory && (gl >= GAP || gl === a) && !(a > 0 && isB(row[a - 1]))) L.push(a);
+        if (!oneStory && (gr >= GAP || b + gr === W - 1) && !(b < W - 1 && isB(row[b + 1]))) R.push(b);
       }
     }
     this._edges = { grid, rev, left, right };
@@ -1424,6 +1475,25 @@ export class Renderer {
       const x1 = Math.round((wx + 3.5 - this.cx) * S), y1 = Math.round((feet - this.cy) * S);
       ctx.drawImage(atlas, sx, sy, PW, PH, x0, y0, x1 - x0, y1 - y0);
       count++;
+      // 連れ（家族は子ども 1〜2 人、カップルは手をつないだもう 1 人）。最大 2 体まで
+      const pt = p.party;
+      if (pt && (pt.type === 'family' || pt.type === 'couple')) {
+        const back = facing ? -1 : 1;   // 進行方向の後ろ側に並ぶ
+        const fam = pt.type === 'family';
+        const extra = fam ? Math.max(1, Math.min(2, (num(pt.size, 3) | 0) - 2)) : 1;
+        for (let j = 1; j <= extra; j++) {
+          const cx = wx + back * (fam ? 3.5 + (j - 1) * 3.5 : 4);
+          const cki = fam ? KIND_INDEX.child : KIND_INDEX.visitor;
+          const fr2 = moving ? ((Math.floor(cx / 2) + j) & 1) : 0;
+          const ax0 = Math.round((cx - 3.5 - this.cx) * S), ax1 = Math.round((cx + 3.5 - this.cx) * S);
+          ctx.drawImage(atlas, (s * 4 + fr2 * 2 + facing) * PW, cki * PH, PW, PH, ax0, y0, ax1 - ax0, y1 - y0);
+        }
+        // つないだ手
+        const hy = Math.round((feet - (fam ? 3 : 4) - this.cy) * S);
+        const hx = Math.round((wx + back * 1.5 - this.cx) * S);
+        ctx.fillStyle = STRESS_COLORS[s]; lastCol = null;
+        ctx.fillRect(back > 0 ? hx : hx - Math.max(1, Math.round(1.5 * S)), hy, Math.max(1, Math.round(1.5 * S)), Math.max(1, Math.round(S)));
+      }
     };
     // 移動中の人
     const act = sim.active;
@@ -1515,6 +1585,17 @@ export class Renderer {
         if (c) { this.rect(x + 2, y + 2, 4, 3, '#000'); this.rect(x + 3, y + 2, 2, 2, c); }
       }
       if (o.brand && zc >= 1.9) this.drawBrand(o, x, y, tw * TW);
+      if (type === 'onsen' && !this.lodOn && this.facilityOpen(o)) {
+        // 湯気（毎フレーム、上下の湯船の上に数個）
+        const ms = this.nowMs;
+        this.ctx.globalAlpha = 0.5;
+        for (let i = 0; i < 10; i++) {
+          const ph = ((ms / 2200) + i / 10) % 1;
+          const bx = [20, 40, 60, 80, 100, 70, 90, 110, 130, 160][i], by = i < 5 ? 15 : 38;
+          this.rect(x + bx + Math.sin(ph * 6 + i) * 2, y + by - ph * 10, 2 + ph * 3, 1 + ph, '#ffffff');
+        }
+        this.ctx.globalAlpha = 1;
+      }
       if (type === 'seaChapel' && this.hour >= 16.3 && this.hour < 18.8) {
         // 夕日のグロー（窓と室内をオレンジに）
         const k = 1 - Math.abs(this.hour - 17.5) / 1.3;

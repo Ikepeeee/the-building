@@ -783,3 +783,23 @@ html.standalone, html.standalone body { background: #0d1030; }
 .scn-end .end-talk p { margin: 4px 0 0; }
 .menu-mode { display: flex; justify-content: space-between; gap: 8px; padding: 4px 8px; border: 2px solid var(--lo); background: #fff8e4; font-size: 13px; }
 .ending.legend { background: linear-gradient(#0b2a5a, #c0507a 50%, #f7b05a 78%, #2a7ad8 80%); }
+#goals .g-tabs { display: flex; gap: 0; border-bottom: 2px solid var(--lo); background: var(--panel-2); }
+#goals .g-tab { flex: 1; min-height: 30px; font-size: 12px; font-weight: 700; border: 0; border-right: 1px solid var(--lo); background: transparent; color: var(--ink-2); }
+#goals .g-tab.is-on { background: var(--panel); color: var(--ink); box-shadow: inset 0 -3px 0 var(--navy-2); }
+#goals.collapsed .g-tabs { display: none; }
+#goals .g-sum { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#goals .g-todo { padding: 4px 10px 8px; max-height: 240px; overflow-y: auto; overscroll-behavior: contain; }
+#goals .g-sec { font-size: 11px; font-weight: 800; color: var(--navy); margin: 6px 0 2px; }
+#goals .g-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+#goals .g-list li { display: flex; gap: 6px; align-items: baseline; }
+#goals .g-list li.done { color: #8a8372; text-decoration: line-through; }
+#goals .g-beat { background: #fff6c8; border: 1px solid var(--gold-2); padding: 3px 6px; font-weight: 700; margin-top: 4px; }
+#goals .g-goalline { margin-top: 6px; font-size: 11px; color: var(--ink-2); }
+.couple { margin: 6px 0 12px; }
+.couple figure { margin: 0; display: inline-flex; flex-direction: column; align-items: center; gap: 2px; font-size: 12px; }
+.couple-main { display: flex; justify-content: center; align-items: center; gap: 14px; }
+.couple .talk-face.big { width: 88px; height: 88px; }
+.couple .talk-face { width: 52px; height: 52px; }
+.couple-heart { font-size: 34px; color: #ff6a9a; text-shadow: 0 2px 0 #7a1a3a; animation: star-spin 1.6s ease-in-out infinite; }
+.couple-sub { display: flex; justify-content: center; gap: 18px; margin-top: 6px; opacity: .95; }
+.couple-text { margin: 8px auto 0; max-width: 460px; }

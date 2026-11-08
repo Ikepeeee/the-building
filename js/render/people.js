@@ -127,3 +127,9 @@ export function sitFig(p, x, seatY, col = '#1a1a1a', facing = 1) {
     p.r(x - 2, seatY, 1, 4, col);
   }
 }
+// 室内の連れ: 'family' = 大人と子ども（手をつなぐ）、'couple' = 大人2人（手をつなぐ）。幅 7
+export function groupFig(p, x, yFeet, type, col = '#1a1a1a', facing = 1) {
+  standFig(p, x, yFeet, col, facing, 0);
+  if (type === 'family') { childFig(p, x + 4, yFeet, col, facing); p.p(x + 3, yFeet - 3, col); }
+  else { standFig(p, x + 4, yFeet, col, facing, 1); p.p(x + 3, yFeet - 4, col); }
+}

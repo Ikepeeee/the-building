@@ -22,7 +22,7 @@ function sizeLabel(t) {
   return `幅${t.w}マス${t.h > 1 ? `×${t.h}フロア` : ''}`;
 }
 
-const ONLY = { lobbyFloor: '1F・15F毎の階のみ', top: '100Fのみ', basement: '地下のみ', aboveGround: '地上のみ' };
+const ONLY = { lobbyFloor: '1F・15F毎の階のみ', top: '100Fのみ', basement: '地下のみ', aboveGround: '地上のみ', ground: '1Fのみ', high: '30F以上' };
 
 export class Toolbar {
   constructor(app) {
@@ -161,7 +161,7 @@ export class Toolbar {
       tip.querySelector('b').textContent = t.name;
       tip.querySelector('.tt-cost').textContent = costLabel(key) + (t.carCost ? `（カゴ追加 ${fmtMoney(t.carCost)}）` : '');
       tip.querySelector('.tt-desc').textContent = t.desc || '';
-      tip.querySelector('.tt-meta').textContent = [sizeLabel(t), ONLY[t.only]].filter(Boolean).join('・');
+      tip.querySelector('.tt-meta').textContent = [sizeLabel(t), ONLY[t.only], t.outdoor ? '屋外施設（上に何も建てられない）' : ''].filter(Boolean).join('・');
     }
     tip.hidden = false;
     const r = b.getBoundingClientRect();

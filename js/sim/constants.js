@@ -44,6 +44,7 @@ export const TYPES = {
   condo:       { name: 'マンション', cat: 'living', w: 16, cost: 80000, cap: 3, sale: 100000, star: 1, only: 'aboveGround', desc: '3人家族が住む。入居時に販売収入' },
   hotelSingle: { name: 'シングルルーム', cat: 'hotel', w: 4, cost: 20000, cap: 1, price: 1000, star: 2, only: 'aboveGround', desc: '1人宿泊。清掃が必要' },
   hotelTwin:   { name: 'ツインルーム', cat: 'hotel', w: 6, cost: 50000, cap: 2, price: 2000, star: 2, only: 'aboveGround', desc: '2人宿泊。清掃が必要' },
+  hotelFamily: { name: 'ファミリールーム', cat: 'hotel', w: 8, cost: 70000, cap: 4, price: 3500, star: 2, only: 'aboveGround', desc: '家族4人で泊まれる客室（大人2人＋子ども2人）。清掃が必要' },
   hotelSuite:  { name: 'スイートルーム', cat: 'hotel', w: 12, cost: 100000, cap: 2, price: 5000, star: 3, only: 'aboveGround', desc: '高級客室。VIPが泊まる' },
   fastfood:    { name: 'ファストフード', cat: 'commerce', w: 16, cost: 100000, price: 50, open: [10, 21], star: 1, desc: '10〜21時営業' },
   restaurant:  { name: 'レストラン', cat: 'commerce', w: 24, cost: 200000, price: 200, open: [17, 24], star: 2, desc: '17〜24時営業' },
@@ -57,10 +58,14 @@ export const TYPES = {
   medical:     { name: '医療センター', cat: 'service', w: 24, cost: 500000, star: 3, desc: '★4の条件' },
   metro:       { name: '地下鉄駅', cat: 'special', w: 30, h: 3, cost: 1000000, star: 4, only: 'basement', desc: '地下3フロア分。第2の出入口。★5の条件' },
   cathedral:   { name: '大聖堂', cat: 'special', w: 30, cost: 3000000, star: 5, only: 'top', desc: '100Fのみ。結婚式が挙がればタワー達成' },
+  // ---- 屋外施設（上に何も建てられない。地上の空き地・屋上・浜に置く） ----
+  terraceCafe: { name: 'テラスカフェ', cat: 'commerce', w: 16, cost: 120000, price: 70, open: [9, 21], star: 2, outdoor: true, desc: '屋外の飲食店。上には何も建てられない（屋上や浜辺に）' },
+  beerGarden:  { name: 'ビアガーデン', cat: 'commerce', w: 24, cost: 180000, price: 180, open: [17, 23], star: 2, outdoor: true, desc: '夕方からの屋外レストラン。上には何も建てられない' },
   // ---- シナリオ専用（scenario が一致するときだけ使える） ----
   umiNoIe:     { name: '海の家', cat: 'resort', w: 16, cost: 60000, price: 40, open: [9, 18], star: 1, only: 'ground', scenario: 'seaside', desc: '1Fのみ。夏（7〜9月）だけ営業する浜辺の店' },
-  onsen:       { name: '温泉', cat: 'resort', w: 24, cost: 300000, price: 120, open: [6, 24], star: 2, scenario: 'seaside', desc: '宿泊客・住人・観光客が入りに来る。ホテルの評価が上がる' },
+  onsen:       { name: 'スーパー銭湯', cat: 'resort', w: 32, h: 2, cost: 400000, price: 120, open: [6, 24], star: 2, scenario: 'seaside', desc: '2フロア分の温泉施設。露天風呂・サウナ・休憩処・食事処。ホテルの評価が上がる' },
   aquarium:    { name: '水族館', cat: 'resort', w: 32, h: 2, cost: 800000, price: 150, open: [9, 20], star: 3, scenario: 'seaside', desc: '2フロア分。季節を問わず観光客を呼ぶ目玉施設' },
+  amusement:   { name: '遊園地', cat: 'resort', w: 48, h: 3, cost: 2000000, price: 300, open: [9, 21], star: 4, outdoor: true, scenario: 'seaside', desc: '観覧車とジェットコースター。3フロア分の屋外施設で、上には何も建てられない' },
   seaChapel:   { name: '海のチャペル', cat: 'resort', w: 24, cost: 1500000, star: 5, only: 'high', minF: 29, scenario: 'seaside', desc: '30F以上に建てる。夕日の結婚式が挙がれば「伝説のリゾート」' },
 };
 
@@ -85,6 +90,8 @@ export const VARIANTS = {
   hotelSingle: ['classic', 'modern', 'japanese'],
   hotelTwin:   ['classic', 'modern', 'japanese'],
   hotelSuite:  ['classic', 'modern', 'japanese'],
+  hotelFamily: ['bunk', 'tatami', 'kids'],
+  umiNoIe:     ['yakisoba', 'kakigori', 'beachbar', 'surfshop', 'ramune'],
   fastfood:    ['burger', 'ramen', 'sushi', 'pizza', 'cafe', 'curry', 'donut'],
   restaurant:  ['french', 'italian', 'chinese', 'japanese', 'steak'],
   shop:        ['fashion', 'books', 'electronics', 'flowers', 'toys', 'sports', 'grocery'],

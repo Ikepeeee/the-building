@@ -643,6 +643,10 @@ export const EventsMixin = {
     for (let i = 0; i < 10; i++) kinds.push('weddingGuest');
     kinds.forEach((k, i) => {
       const p = this.newPerson(k, cath);
+      // 伝説のリゾートの式は、渚と航の結婚式
+      if (w.legend && k === 'bride') Object.assign(p, { name: '渚', age: 26, job: 'ホテルのフロント係' });
+      if (w.legend && k === 'groom') Object.assign(p, { name: '航', age: 28, job: '水族館の飼育員' });
+      if (w.legend) this.rollParty(p, 'seaChapel');
       w.people.push(p);
       this.later(i * 0.5, () => {
         if (cath.dead) return;

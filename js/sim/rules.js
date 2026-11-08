@@ -8,11 +8,18 @@ export const LOBBY_SET = new Set(LOBBY_FLOORS);
 
 export const TRANSPORT = new Set(['stairs', 'escalator', 'elevator', 'express']);
 export const ELEV = new Set(['elevator', 'express']);
-export const HOTEL = new Set(['hotelSingle', 'hotelTwin', 'hotelSuite']);
-export const COMMERCE = new Set(['fastfood', 'restaurant', 'shop', 'cinema', 'partyHall', 'umiNoIe', 'onsen', 'aquarium']);
+export const HOTEL = new Set(['hotelSingle', 'hotelTwin', 'hotelSuite', 'hotelFamily']);
+export const COMMERCE = new Set(['fastfood', 'restaurant', 'shop', 'cinema', 'partyHall', 'umiNoIe', 'onsen', 'aquarium', 'terraceCafe', 'beerGarden', 'amusement']);
 // シナリオ専用の集客施設（その利用者も「来訪者」に数える）
-export const RESORT = new Set(['umiNoIe', 'onsen', 'aquarium']);
-export const NOISY = new Set(['fastfood', 'restaurant', 'cinema', 'partyHall']);
+export const RESORT = new Set(['umiNoIe', 'onsen', 'aquarium', 'amusement']);
+export const NOISY = new Set(['fastfood', 'restaurant', 'cinema', 'partyHall', 'beerGarden', 'amusement']);
+// 連れの種類の割合 [ひとり, カップル, 家族]。施設の種類ごと（無ければ既定）
+export const PARTY_MIX = {
+  default: [0.5, 0.3, 0.2],
+  aquarium: [0.15, 0.25, 0.6], amusement: [0.1, 0.35, 0.55], umiNoIe: [0.2, 0.25, 0.55],
+  restaurant: [0.3, 0.55, 0.15], beerGarden: [0.25, 0.6, 0.15], seaChapel: [0, 1, 0],
+  terraceCafe: [0.35, 0.45, 0.2], onsen: [0.35, 0.3, 0.35],
+};
 export const TENANT = new Set(['office', 'condo']);
 export const TRANSIENT = new Set(['visitor', 'vip', 'bride', 'groom', 'weddingGuest']);
 export const STAFF_KIND = { security: 'guard', housekeeping: 'maid' };
@@ -38,6 +45,7 @@ export const SIM = {
   ESC_STRESS: 1,        // /階
   TRIP_LIMIT: 360,
   MAX_BACKLOG: 30,
+  OLD_ONSEN_COST: 300000, // 旧い温泉（§17）の代金。読み込みで建て替えられないときに払い戻す
   MEDICAL: { beds: 8, daily: 0.003, stay: [120, 120], penalty: 6 }, // 1日に体調を崩す確率、入院（分）
   MAX_EFFECTS: 120,     // 同時に出す演出の上限      // 予算付き step で持ち越すゲーム分の上限      // これを超えた移動は救済（リーク防止）
   EXTEND_COST: { elevator: 10000, express: 20000 },
@@ -77,9 +85,13 @@ export const SIM = {
 };
 
 // 商業施設: 滞在時間 [最小, 幅]、来客率、1時間あたりの上限
-export const STAY = { fastfood: [20, 25], restaurant: [40, 40], shop: [20, 30], cinema: [110, 20], partyHall: [120, 30], umiNoIe: [30, 40], onsen: [50, 40], aquarium: [70, 50] };
-export const VISIT_RATE = { fastfood: 1, restaurant: 0.8, shop: 0.8, cinema: 1.2, partyHall: 0.8, umiNoIe: 1, onsen: 0.6, aquarium: 1 };
-export const VISIT_CAP = { fastfood: 14, restaurant: 12, shop: 10, cinema: 25, partyHall: 14, umiNoIe: 16, onsen: 12, aquarium: 24 };
+export const STAY = { fastfood: [20, 25], restaurant: [40, 40], shop: [20, 30], cinema: [110, 20], partyHall: [120, 30], umiNoIe: [30, 40], onsen: [60, 60], aquarium: [70, 50], terraceCafe: [30, 30], beerGarden: [60, 60], amusement: [120, 60] };
+export const VISIT_RATE = { fastfood: 1, restaurant: 0.8, shop: 0.8, cinema: 1.2, partyHall: 0.8, umiNoIe: 1, onsen: 0.8, aquarium: 1, terraceCafe: 1, beerGarden: 0.9, amusement: 1.2 };
+export const VISIT_CAP = { fastfood: 14, restaurant: 12, shop: 10, cinema: 25, partyHall: 14, umiNoIe: 16, onsen: 20, aquarium: 24, terraceCafe: 14, beerGarden: 16, amusement: 30 };
+// 中にいられる人数の上限（スーパー銭湯は大きいが無限ではない）
+export const CAPACITY = { onsen: 80, amusement: 120, aquarium: 100 };
+// 屋外施設の天気による来客の倍率
+export const OUTDOOR_WEATHER = { rain: 0.2, typhoon: 0 };
 
 export const KIND_NAME = {
   worker: '会社員', resident: '住人', guest: '宿泊客', visitor: '来客', guard: '警備員',

@@ -380,7 +380,7 @@ export class App {
       const how = t.drag === 'h' ? (touch ? (key === 'bridge' ? '横になぞって仮置き → ✓ で確定' : '横になぞって設置') : '横にドラッグして設置')
         : t.drag === 'v' ? (touch ? '縦になぞって範囲を決める' : '縦にドラッグして範囲を決める')
           : touch ? '指を置いて滑らせると位置合わせ（指の少し上に出ます）→ ✓ で確定' : 'クリックで設置（カーソルが中心。隣の施設にぴったり寄せます／Shift で寄せない）';
-      const desc = HINT_DESC[key] || t.desc || '';
+      const desc = (HINT_DESC[key] || t.desc || '') + (t.outdoor && !(t.desc || '').includes('上に') ? '（屋外: 上に何も建てられない）' : '');
       s = touch ? `${t.name}: ${how}。${desc}` : `${t.name}: ${desc}｜${how}`;
     }
     this.toolbar.setHint(s);

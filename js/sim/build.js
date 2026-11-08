@@ -1,7 +1,7 @@
 // 建設: 施設の層（grid）と移動手段の層（tgrid）、撤去、破壊、一括コピー（Tower.prototype に混ぜ込む）
 import { W, MIN_F, MAX_F, TYPES, VARIANTS, floorName, fmtMoney } from './constants.js';
 import { LOBBY_SET, TRANSPORT, ELEV, HOTEL, COMMERCE, TENANT, STAFF_KIND, SIM } from './rules.js';
-import { pickBrand } from './brands.js';
+import { pickBrand, pickTypeBrand } from './brands.js';
 import { defaultElevConfig } from './elevator.js';
 
 const BATCH_TOOLS = new Set(Object.keys(TYPES));
@@ -28,6 +28,7 @@ export const BuildMixin = {
   checkTransportCells(type, x, w, lo, hi, self = 0, freshCells = null) {
     if (x < 0 || x + w > W) return '建設範囲の外です';
     const [r0, r1] = this.transportRows(type, lo, hi);
+    if (this.outdoorBlockedRows(r0, r1, x, w)) return '屋外施設の上には建てられません';
     for (let f = r0; f <= r1; f++) {
       for (let xi = x; xi < x + w; xi++) {
         const t = this.tcell(f, xi);
@@ -95,6 +96,29 @@ export const BuildMixin = {
     return r;
   },
 
+  // ---- 屋外施設: その真上（同じ列の上の段すべて）には何も建てられない ----
+  outdoorList() {
+    const key = this.revision * 100003 + this.objs.size;
+    if (this._outKey !== key) {
+      this._outKey = key;
+      this._outList = [];
+      for (const o of this.objs.values()) if (!o.dead && TYPES[o.type].outdoor) this._outList.push(o);
+    }
+    return this._outList;
+  },
+  outdoorBlocked(f, x, w = 1) {
+    for (const o of this.outdoorList()) {
+      if (o.dead) continue;
+      if (f < o.f + o.h) continue;
+      if (x < o.x + o.w && o.x < x + w) return true;
+    }
+    return false;
+  },
+  outdoorBlockedRows(f0, f1, x, w) {
+    for (let f = f0; f <= f1; f++) if (this.outdoorBlocked(f, x, w)) return true;
+    return false;
+  },
+
   // その型を今建てられるか（シナリオの専用施設・使わない施設・★の解放の上書きを1か所で判定）
   canBuildType(type) {
     const T = TYPES[type];
@@ -123,6 +147,7 @@ export const BuildMixin = {
         if (this.tcell(f, x) !== 0) return fail('移動手段と重なっています');
       }
       if (this.cell(f, x1 - 1) === 0 && this.cell(f, x2 + 1) === 0) return fail('どちらの端も建物に接していません');
+      if (this.outdoorBlocked(f, x1, w)) return fail('屋外施設の上には建てられません');
       const cost = T.costPerTile * w;
       return { ok: true, reason: '', cost, ghost, apply: () => this._place('bridge', f, x1, w, 1) };
     }
@@ -138,15 +163,19 @@ export const BuildMixin = {
           fresh++;
         }
       }
+      if (this.outdoorBlocked(f, x1, w)) return fail('屋外施設の上には建てられません');
       const cost = T.costPerTile * w + fresh * TYPES.floor.costPerTile;
       return { ok: true, reason: '', cost, ghost, apply: () => this._place('lobby', f, x1, w, 1) };
     }
     const cells = [];
     let unsupported = 0;
+    let blocked = 0;
     for (let x = x1; x <= x2; x++) {
       if (this.cell(f, x) !== 0) continue;
+      if (this.outdoorBlocked(f, x)) { blocked++; continue; }
       if (this.supported(f, x)) cells.push(x); else unsupported++;
     }
+    if (!cells.length && blocked) return fail('屋外施設の上には建てられません');
     if (!cells.length) {
       // 一括コピーでは、すでにフロアがあるマスは飛ばすだけ（費用 0・何もしない）
       if (p.tolerant && !unsupported) return { ok: true, reason: '', cost: 0, ghost, apply: () => null };
@@ -170,6 +199,14 @@ export const BuildMixin = {
     if (T.only === 'aboveGround' && f < 0) return fail('地上にのみ建設できます');
     if (T.only === 'lobbyFloor' && !LOBBY_SET.has(f)) return fail('ロビー階にのみ建設できます');
     if (T.only === 'ground' && f !== 0) return fail('1Fにのみ建設できます');
+    if (this.outdoorBlockedRows(f, top, x, w)) return fail('屋外施設の上には建てられません');
+    if (T.outdoor) {
+      // 屋外施設: 地下には置けず、真上（同じ列の上の段すべて）が空いていること
+      if (f < 0) return fail('屋外施設は地下には置けません');
+      for (let r = top + 1; r <= MAX_F; r++) {
+        for (let xi = x; xi < x + w; xi++) if (this.cell(r, xi) !== 0 || this.tcell(r, xi) !== 0) return fail('屋外施設の真上には何も無いことが必要です');
+      }
+    }
     if (T.only === 'high' && f < (T.minF ?? 29)) return fail(`${floorName(T.minF ?? 29)}以上にのみ建設できます`);
     let fresh = 0;
     for (let r = 0; r < h; r++) {
@@ -195,6 +232,7 @@ export const BuildMixin = {
     const fail = (reason) => ({ ok: false, reason, cost: 0, ghost });
     if (x < 0 || x + w > W || f < MIN_F || f > MAX_F) return fail('建設範囲の外です');
     if (f + 1 > MAX_F) return fail('上の階がありません');
+    if (this.outdoorBlockedRows(f, f + 1, x, w)) return fail('屋外施設の上には建てられません');
     const r = this.checkTransportCells(tool, x, w, f, f);
     if (r) return fail(r);
     for (let xi = x; xi < x + w; xi++) {
@@ -321,7 +359,7 @@ export const BuildMixin = {
   // 個性（VARIANTS の添字と店名・社名）を決める
   rollVariant(o) {
     const v = VARIANTS[o.type];
-    if (!v) { o.variant = 0; o.brand = ''; return; }
+    if (!v) { o.variant = 0; o.brand = pickTypeBrand(o.type, this.rng); return; }
     o.variant = Math.floor(this.rand(v.length));
     o.brand = pickBrand(o.type, v[o.variant], this.rng);
   },
