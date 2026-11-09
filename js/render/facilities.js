@@ -1367,3 +1367,117 @@ DRAW.amusement = (p, v) => {
   const pos = [46, 112, 126, 140, 200, 214, 228, 120, 154, 300];
   for (let i = 0; i < Math.min(n, pos.length); i++) groupFig(p, pos[i], fy - 1, i % 2 ? 'couple' : 'family', FIG, i % 2);
 };
+
+// ================= §19 イルカショー・屋外プール・スカイラウンジ =================
+// イルカショー（w32 h2 = 256x48、屋外）。プールと観客席。イルカのジャンプは renderer が毎フレーム描く
+export const DOLPHIN_POOL = { x0: 108, x1: 226, y: 31 };   // 水面
+DRAW.dolphinShow = (p, v) => {
+  const W = p.w, fy = deck(p, '#c8c0b0', '#a8a090');
+  // 観客席（ひな壇）
+  for (let i = 0; i < 5; i++) {
+    const x0 = 4 + i * 18, ty = fy - (4 - i) * 0;
+    const top = 22 + i * 4;
+    p.r(x0, top, 18 * (5 - i), fy - top, i % 2 ? '#3a6ad0' : '#2a5ab8');
+    p.r(x0, top, 18 * (5 - i), 1, '#8ab0f0');
+  }
+  // プール
+  const { x0, x1, y } = DOLPHIN_POOL;
+  p.box(x0 - 2, y - 1, x1 - x0 + 4, fy - y + 1, '#2a8ac8', '#d8e8f0');
+  for (let yy = y + 1; yy < fy; yy++) p.r(x0, yy, x1 - x0, 1, shade('#2a8ac8', -((yy - y) / (fy - y)) * 0.4));
+  p.r(x0, y, x1 - x0, 1, '#a8e0f8');
+  for (let i = 0; i < 10; i++) p.p(x0 + 6 + i * 11, y + 2 + (i % 3), '#8ad0f0');
+  // トレーナーの台とフープ
+  p.box(x1 + 2, 26, 26, 4, '#e8e8e8', '#7a8a9a'); p.r(x1 + 4, 30, 2, fy - 30, '#9aa0a8'); p.r(x1 + 22, 30, 2, fy - 30, '#9aa0a8');
+  coatFig(p, x1 + 12, 25, '#2a8ac8', 0);
+  p.r(176, 6, 1, 25, '#9aa0a8'); for (let a = 0; a < 40; a++) { const t = (a / 40) * Math.PI * 2; p.p(Math.round(176 + Math.cos(t) * 5), Math.round(10 + Math.sin(t) * 5), a % 4 < 2 ? '#e04050' : '#ffffff'); }
+  // 観客（家族連れ・カップル）
+  const n = v.open ? v.n : 0;
+  let k = 0;
+  for (let i = 0; i < 5 && k < n; i++) {
+    const top = 22 + i * 4;
+    for (let x = 6 + i * 18; x < 4 + 90 - 6 && k < n; x += 10) { groupFig(p, x, top - 1, k % 2 ? 'couple' : 'family', FIG, 1); k++; }
+  }
+  // 看板
+  p.box(40, 2, 44, 9, '#2a8ac8'); p.text('SHOW', 54, 4, '#ffffff');
+};
+// イルカ（右向き 11x6）
+export function dolphinSprite() {
+  const p = new Painter(11, 6);
+  p.r(2, 2, 7, 2, '#5a8ab0'); p.r(1, 3, 2, 1, '#5a8ab0'); p.r(8, 2, 2, 1, '#5a8ab0'); p.p(10, 2, '#5a8ab0');
+  p.r(3, 4, 5, 1, '#c8dce8'); p.r(4, 1, 2, 1, '#4a7aa0'); p.r(0, 2, 1, 1, '#4a7aa0'); p.r(0, 4, 1, 1, '#4a7aa0'); p.p(8, 2, '#1a2a3a');
+  return p.c;
+}
+
+// 屋外プール（w24 = 192x24、屋外）。昼は家族、夜はナイトプール、閉店（冬など）はシート
+DRAW.nightPool = (p, v) => {
+  const W = p.w, fy = deck(p, '#e8e0d0', '#c8c0b0');
+  const night = v.night && v.open;
+  const px0 = 30, px1 = 162;
+  if (!v.open) {
+    p.box(px0, 15, px1 - px0, 6, '#5a7a9a', '#3a4a5a'); for (let x = px0 + 4; x < px1; x += 8) p.r(x, 15, 1, 6, '#4a6a8a');
+    for (let i = 0; i < 3; i++) p.r(8, 18 - i * 2, 16, 1, '#c8c0b0');
+    return;
+  }
+  // 水
+  const base = night ? '#1a2a5a' : '#4ab0e0';
+  p.box(px0, 14, px1 - px0, 7, base, '#d8e8f0');
+  p.r(px0 + 1, 15, px1 - px0 - 2, 1, night ? '#3a4a8a' : '#a8e8ff');
+  if (night) {
+    const glow = ['#ff60c0', '#60c0ff', '#b070ff', '#60ffd0'];
+    for (let i = 0; i < 8; i++) { const x = px0 + 8 + i * 16; p.r(x, 17, 6, 3, glow[i % 4]); p.r(x + 1, 16, 4, 1, shade(glow[i % 4], 0.3)); }
+    for (let x = 2; x < W - 2; x++) { const yy = 3 + Math.round(Math.sin((x / W) * Math.PI * 3) * 2); p.p(x, yy, '#3a3a3a'); if (x % 5 === 0) p.p(x, yy + 1, ['#ffe080', '#ff80c0', '#80d0ff'][(x / 5) % 3]); }
+    for (const x of [1, W / 2, W - 2]) p.r(x, 2, 1, 19, '#5a5a5a');
+  } else {
+    // パラソルとデッキチェア
+    for (const [x, c] of [[12, '#e05050'], [W - 14, '#f0b030']]) { for (let i = 0; i < 5; i++) { const half = 2 + i * 2; p.r(x - half, 4 + i, half * 2 + 1, 1, i % 2 ? c : '#ffffff'); } p.r(x, 9, 1, 12, '#e8e8e8'); }
+    for (const x of [4, W - 26]) { p.r(x, 19, 14, 1, '#ffffff'); p.line(x + 10, 19, x + 14, 15, '#ffffff'); p.r(x + 1, 20, 1, 1, '#9a9a9a'); p.r(x + 12, 20, 1, 1, '#9a9a9a'); }
+    // 浮き輪
+    for (const [x, c] of [[60, '#f05050'], [100, '#f0c030'], [140, '#60c0f0']]) { p.r(x - 3, 14, 7, 2, c); p.r(x - 1, 14, 3, 1, '#ffffff'); }
+  }
+  // 人（昼は家族・子ども、夜はカップル）
+  const n = v.n;
+  const heads = [44, 56, 72, 84, 112, 124, 150];
+  for (let i = 0; i < Math.min(n, heads.length); i++) {
+    const x = heads[i];
+    if (night) { p.r(x, 13, 2, 2, FIG); p.r(x + 3, 13, 2, 2, FIG); p.p(x + 2, 15, FIG); }
+    else if (i % 2) { p.r(x, 14, 2, 2, FIG); } else { p.r(x, 13, 3, 2, FIG); }
+  }
+  if (n > 0) { if (night) groupFig(p, 6, fy - 1, 'couple', FIG, 1); else groupFig(p, 172, fy - 1, 'family', FIG, 0); }
+};
+
+// スカイラウンジ（w24 = 192x24、20F以上）。ガラス張りの窓に昼は空と海、夜は夜景と月
+DRAW.skyLounge = (p, v) => {
+  const W = p.w;
+  const night = v.night;
+  const fy = shell(p, night ? '#3a2a24' : '#e8e0d4', '#4a3a2e', {});
+  // 大きな窓
+  const wx0 = 4, wx1 = W - 4, wy0 = 2, wy1 = 14;
+  for (let y = wy0; y < wy1; y++) p.r(wx0, y, wx1 - wx0, 1, night ? shade('#0a1030', (y - wy0) * 0.02) : shade('#7ac0f0', (y - wy0) * 0.025));
+  p.r(wx0, 10, wx1 - wx0, wy1 - 10, night ? '#0e1838' : '#2f78b0');
+  p.r(wx0, 10, wx1 - wx0, 1, night ? '#2a3a6a' : '#cfe8f8');
+  if (night) {
+    for (let i = 0; i < 24; i++) p.p(wx0 + ((i * 37) % (wx1 - wx0)), wy0 + ((i * 5) % 7), '#ffffff');
+    p.disc(150, 5, 2, '#f4f0d0');
+    for (let i = 0; i < 6; i++) p.r(146 + (i % 2), 11 + i % 3, 6 - i, 1, '#f4f0d0');
+    for (let i = 0; i < 14; i++) p.p(wx0 + 6 + i * 13, 9, ['#ffe080', '#ff8060', '#80c0ff'][i % 3]);
+  } else { p.disc(40, 6, 3, '#ffffff'); p.r(36, 7, 10, 1, '#ffffff'); p.r(120, 9, 10, 1, '#4a6a7a'); }
+  for (let x = wx0; x < wx1; x += 24) p.r(x, wy0, 1, wy1 - wy0, night ? '#4a3a30' : '#c0c8d0');
+  p.r(wx0, wy1, wx1 - wx0, 1, night ? '#5a4a3a' : '#a8b0b8');
+  // バー
+  p.box(8, 14, 44, 7, night ? '#5a3a24' : '#7a5034'); p.r(7, 13, 46, 1, '#c8a060');
+  for (let i = 0; i < 6; i++) p.r(12 + i * 6, 15, 2, 3, ['#c8a040', '#2a6a3a', '#7a2a1a', '#e8e8e8'][i % 4]);
+  standFig(p, 30, 12, FIG, 1);
+  for (const x of [56, 64]) { p.r(x, 16, 4, 1, '#c8a060'); p.r(x + 1, 17, 1, 4, '#5a4a3a'); }
+  // ソファ
+  for (const x of [80, 120]) { p.box(x, 15, 22, 4, night ? '#6a2a3a' : '#8a5a6a'); p.box(x - 2, 13, 3, 6, night ? '#5a2030' : '#7a4a5a'); p.box(x + 21, 13, 3, 6, night ? '#5a2030' : '#7a4a5a'); p.r(x + 6, 18, 10, 1, '#c8a060'); }
+  // 望遠鏡
+  p.line(170, 20, 174, 14, '#5a5a62'); p.line(178, 20, 174, 14, '#5a5a62'); p.r(170, 11, 10, 3, '#3a3a42'); p.r(179, 11, 2, 3, '#9ad0f0');
+  // 暖かい間接照明
+  if (night) for (let x = 6; x < W - 6; x += 12) { p.p(x, 1, '#ffd890'); p.p(x + 1, 1, '#ffd890'); }
+  const n = v.n;
+  const seats = [[84, 'c'], [124, 'c'], [58, 's'], [96, 'c'], [136, 'c'], [66, 's'], [160, 's']];
+  for (let i = 0; i < Math.min(n, seats.length); i++) {
+    const [x, k] = seats[i];
+    if (k === 'c') { sitFig(p, x, 15, FIG, 1); sitFig(p, x + 5, 15, FIG, 0); } else standFig(p, x, fy - 1, FIG, i % 2, 0);
+  }
+};

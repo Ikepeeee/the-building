@@ -4,7 +4,7 @@ import { UI_SPEEDS, SPEED_ONE } from './speeds.js';
 import { Camera } from './camera.js';
 import { Input, isDragTool } from './input.js';
 import { Hud } from './hud.js';
-import { Toolbar } from './toolbar.js';
+import { Toolbar, placementNotes } from './toolbar.js';
 import { Panel } from './panel.js';
 import { Toasts } from './toast.js';
 import { Dialogs } from './dialogs.js';
@@ -159,6 +159,23 @@ export class App {
     this.nightFF = !!(this.started && s && s.hour < 6 && sp && sp.v > 0 && !sp.rt && !this.eventActive());
   }
 
+  /** 花火大会が始まったら、浜と海が見える場所へ行けるトーストを出す（1回だけ） */
+  checkFestival() {
+    const s = this.sim, f = s && s.festival;
+    const live = !!(this.started && f && f.state === 'live');
+    const key = f ? `${f.kind}:${f.start}` : '';
+    if (live && this.festSeen !== key) {
+      this.festSeen = key;
+      // 建物の上のほうの夜空（海の上）が映るあたり
+      let top = 0;
+      for (let fl = 1; fl <= MAX_F; fl++) { const r = s.grid[fl]; if (r && r.some((v) => v !== 0)) top = fl; }
+      const cx = this.buildingCenterX() ?? W / 2;
+      // 海の水平線と夜空が両方入るよう、低めの階を中心に少し引いて映す
+      this.toasts.show({ text: '🎆 花火大会が始まりました！ 海の上の夜空を見に行こう', kind: 'good', f: Math.max(6, Math.min(top + 2, 12)), x: Math.round(cx), zoom: 1 });
+      this.sound.play('ding');
+    }
+  }
+
   /** 事件のときは等速に戻す */
   calmSpeed() {
     if ((UI_SPEEDS[this.speedIdx] || {}).v > 1) {
@@ -238,7 +255,7 @@ export class App {
     }
     if (now - (this.guideTimer || 0) > 1500) { this.guideTimer = now; this.guide.update(); }
     if (now - (this.goalsTimer || 0) > 700) { this.goalsTimer = now; this.goals.update(); }
-    if (now - (this.wdTimer || 0) > 500) { this.wdTimer = now; this.dialogs.watchdog(now); }
+    if (now - (this.wdTimer || 0) > 500) { this.wdTimer = now; this.dialogs.watchdog(now); this.checkFestival(); }
     // 遊んでいない（タイトル・一時停止）ときは AudioContext を止める
     this.sound.idle(!this.started || (spd === 0 && !this.dialogs.count));
     if (now - this.ambTimer > 200) {
@@ -380,7 +397,8 @@ export class App {
       const how = t.drag === 'h' ? (touch ? (key === 'bridge' ? '横になぞって仮置き → ✓ で確定' : '横になぞって設置') : '横にドラッグして設置')
         : t.drag === 'v' ? (touch ? '縦になぞって範囲を決める' : '縦にドラッグして範囲を決める')
           : touch ? '指を置いて滑らせると位置合わせ（指の少し上に出ます）→ ✓ で確定' : 'クリックで設置（カーソルが中心。隣の施設にぴったり寄せます／Shift で寄せない）';
-      const desc = (HINT_DESC[key] || t.desc || '') + (t.outdoor && !(t.desc || '').includes('上に') ? '（屋外: 上に何も建てられない）' : '');
+      const rules = placementNotes(t).slice(1).filter((n) => !(t.desc || '').includes(n.replace(/（.*$/, '')));
+      const desc = (HINT_DESC[key] || t.desc || '') + (rules.length ? `（${rules.join('・')}）` : '');
       s = touch ? `${t.name}: ${how}。${desc}` : `${t.name}: ${desc}｜${how}`;
     }
     this.toolbar.setHint(s);
@@ -1010,9 +1028,9 @@ export class App {
     }
   }
 
-  jumpTo(f, x) {
+  jumpTo(f, x, zoom) {
     if (!Number.isFinite(f) || !Number.isFinite(x)) return;
-    this.cam.focus(f, x);
+    this.cam.focus(f, x, zoom);
     let o = null;
     try { o = this.sim.objAt(f, x); } catch { /* */ }
     if (o) { this.selectedId = o.id; this.panel.show(o.id); }

@@ -66,6 +66,10 @@ export const TYPES = {
   onsen:       { name: 'スーパー銭湯', cat: 'resort', w: 32, h: 2, cost: 400000, price: 120, open: [6, 24], star: 2, scenario: 'seaside', desc: '2フロア分の温泉施設。露天風呂・サウナ・休憩処・食事処。ホテルの評価が上がる' },
   aquarium:    { name: '水族館', cat: 'resort', w: 32, h: 2, cost: 800000, price: 150, open: [9, 20], star: 3, scenario: 'seaside', desc: '2フロア分。季節を問わず観光客を呼ぶ目玉施設' },
   amusement:   { name: '遊園地', cat: 'resort', w: 48, h: 3, cost: 2000000, price: 300, open: [9, 21], star: 4, outdoor: true, scenario: 'seaside', desc: '観覧車とジェットコースター。3フロア分の屋外施設で、上には何も建てられない' },
+  dolphinShow: { name: 'イルカショー', cat: 'resort', w: 32, h: 2, cost: 600000, price: 100, open: [10, 17], star: 3, outdoor: true, adjacent: 'aquarium', scenario: 'seaside', desc: '水族館の横に建てる屋外のショープール（2フロア分）。1日数回のショーに観客が集まる' },
+  nightPool:   { name: '屋外プール', cat: 'resort', w: 24, cost: 350000, price: 80, open: [9, 23], star: 2, outdoor: true, scenario: 'seaside', desc: '屋外のプール。昼は家族連れ、夜はナイトプールでカップル。雨に弱い' },
+  skyLounge:   { name: 'スカイラウンジ', cat: 'resort', w: 24, cost: 500000, price: 150, open: [11, 24], star: 3, only: 'high', minF: 19, scenario: 'seaside', desc: '20F以上の展望ラウンジ。高い階ほど客が増え、夜景で夜の売上が伸びる' },
+  cottage:     { name: 'コテージ', cat: 'resort', w: 16, cost: 120000, cap: 4, price: 4000, star: 2, outdoor: true, scenario: 'seaside', desc: '屋外の宿泊施設（コテージ・グランピング）。浜・地上・屋上に置く。清掃が必要。冬は客が減る' },
   seaChapel:   { name: '海のチャペル', cat: 'resort', w: 24, cost: 1500000, star: 5, only: 'high', minF: 29, scenario: 'seaside', desc: '30F以上に建てる。夕日の結婚式が挙がれば「伝説のリゾート」' },
 };
 
@@ -91,6 +95,7 @@ export const VARIANTS = {
   hotelTwin:   ['classic', 'modern', 'japanese'],
   hotelSuite:  ['classic', 'modern', 'japanese'],
   hotelFamily: ['bunk', 'tatami', 'kids'],
+  cottage:     ['wood', 'glamping', 'dome'],
   umiNoIe:     ['yakisoba', 'kakigori', 'beachbar', 'surfshop', 'ramune'],
   fastfood:    ['burger', 'ramen', 'sushi', 'pizza', 'cafe', 'curry', 'donut'],
   restaurant:  ['french', 'italian', 'chinese', 'japanese', 'steak'],

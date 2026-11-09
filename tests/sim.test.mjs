@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { Tower, TYPES, DAY, W, LOBBY_FLOORS, AutoPlayer, autoPlay, buildMegaTower, mustBuild, stepTo, smallTower, bombTrial, fireTrial, securityTower, elevatorStress, buildWideTower } from './helpers.mjs';
 import { VARIANTS } from '../js/sim/constants.js';
-import { SCENARIOS } from '../js/sim/scenarios.js';
+import { SCENARIOS, GOAL_METRICS } from '../js/sim/scenarios.js';
 import { runStrategy } from './balance.mjs';
 import { runSeaside, SeasidePlayer } from './scenario.mjs';
 import { SIM } from '../js/sim/rules.js';
@@ -2522,6 +2522,238 @@ test('性能: 100フロア・人口6000・エレベーター16基で 1 ゲーム
   assert.ok(s.pop >= 6000, `人口 ${s.pop}`);
   assert.ok(ms < 3000, '1日 3秒未満');
   checkInvariants(s);
+});
+
+// ---- §19 海辺の第3弾 ----
+// 天気のランダムを止めた海辺のビル（地上 0〜400 に床、ロビーとエレベーター）
+function seaside19(seed, floors = 3) {
+  const s = new Tower({ seed, scenario: 'seaside' });
+  s.scenarioDef = { ...s.scenarioDef, weather: {} };
+  s.weather = null;
+  s.money = 1e10; s.star = 5;
+  mustBuild(s, 'lobby', { f: 0, x: 0, x2: 59 });
+  mustBuild(s, 'floor', { f: 0, x: 60, x2: 400 });
+  for (let f = 1; f <= floors; f++) mustBuild(s, 'floor', { f, x: 0, x2: 59 });
+  mustBuild(s, 'elevator', { f: 0, f2: Math.min(floors, 29), x: 30 });
+  if (floors > 29) mustBuild(s, 'elevator', { f: 29, f2: floors, x: 40 });
+  return s;
+}
+
+test('§19 隣接: イルカショーは同じ階の水族館の左右に接して建てる', () => {
+  const s = seaside19(190);
+  assert.match(s.check('dolphinShow', { f: 0, x: 200 }).reason, /水族館の横に建ててください/);
+  mustBuild(s, 'aquarium', { f: 0, x: 200 });
+  assert.ok(s.check('dolphinShow', { f: 0, x: 232 }).ok, '右に接する');
+  assert.ok(s.check('dolphinShow', { f: 0, x: 168 }).ok, '左に接する');
+  assert.match(s.check('dolphinShow', { f: 0, x: 240 }).reason, /水族館の横/, '離れている');
+  // 別の階の水族館（屋上）では駄目
+  mustBuild(s, 'aquarium', { f: 1, x: 0 });
+  assert.match(s.check('dolphinShow', { f: 4, x: 32 }).reason || '', /水族館の横|真上|フロア/);
+  mustBuild(s, 'dolphinShow', { f: 0, x: 232 });
+  const aq = s.objAt(0, 200), aq2 = s.objAt(1, 0), d = s.objAt(0, 232);
+  assert.equal(d.type, 'dolphinShow');
+  assert.ok(s.hasDolphinNeighbor(aq) && !s.hasDolphinNeighbor(aq2), '隣の水族館だけ集客が上がる');
+  assert.ok(d.brand && typeof d.brand === 'string');
+});
+
+test('§19 イルカショー: 1日4回の予定・o.show・観客が集まる・雨は×0.4・台風は中止', () => {
+  const s = seaside19(191);
+  mustBuild(s, 'aquarium', { f: 0, x: 200 });
+  mustBuild(s, 'dolphinShow', { f: 0, x: 232 });
+  const d = s.objAt(0, 232);
+  stepTo(s, 1, 0);
+  let shows = 0, prev = 'idle', maxT = 0, cust = 0;
+  const starts = [];
+  for (let m = 0; m < DAY; m++) {
+    s.step(1);
+    const ph = d.show.phase;
+    if (ph === 'show' && prev !== 'show') { shows++; starts.push(Math.round(s.time % DAY)); }
+    if (ph === 'show') { assert.ok(d.show.t >= 0 && d.show.t < 1); maxT = Math.max(maxT, d.show.t); }
+    prev = ph;
+    cust = Math.max(cust, d.custToday);
+  }
+  assert.equal(shows, 4, '1日4回');
+  for (const [i, t] of [631, 751, 871, 961].entries()) assert.ok(Math.abs(starts[i] - t) <= 1, `ショー ${starts}`);
+  assert.ok(maxT > 0.9);
+  assert.ok(cust > 10, `ショーの客 ${cust}`);
+  // ショーの前の観客（雨の日は約4割）
+  const count = (weather) => {
+    let n = 0;
+    for (let i = 0; i < 300; i++) {
+      s.weather = weather; const before = s.events.size;
+      s.dolphinCrowd(10);
+      n += s.events.size - before;
+    }
+    s.weather = null;
+    return n;
+  };
+  const dry = count(null), wet = count({ kind: 'rain', intensity: 0.5, until: s.time + 600 });
+  assert.ok(dry > 0 && wet / dry > 0.25 && wet / dry < 0.55, `雨 ${wet}/${dry}`);
+  assert.equal(count({ kind: 'typhoon', intensity: 1, until: s.time + 600, start: s.time }), 0, '台風は中止');
+  // 台風の日はショーがない
+  stepTo(s, 2, 10);
+  s.weather = { kind: 'typhoon', intensity: 1, until: s.time + 600, start: s.time };
+  s.step(40);
+  assert.equal(d.show.phase, 'idle');
+});
+
+test('§19 屋外プール: 昼は家族・夜はカップルで高め、冬は客が減る', () => {
+  const s = seaside19(192);
+  mustBuild(s, 'nightPool', { f: 0, x: 100 });
+  const o = s.objAt(0, 100);
+  assert.equal(s.partyKey('nightPool', 12), 'nightPoolDay');
+  assert.equal(s.partyKey('nightPool', 20), 'nightPoolNight');
+  const kinds = (key) => { const c = { solo: 0, couple: 0, family: 0 }; for (let i = 0; i < 400; i++) { const p = s.newPerson('visitor', null); s.rollParty(p, key); c[p.party.type]++; } return c; };
+  const day = kinds('nightPoolDay'), night = kinds('nightPoolNight');
+  assert.ok(day.family > day.couple, `昼 ${JSON.stringify(day)}`);
+  assert.ok(night.couple > night.family * 3, `夜 ${JSON.stringify(night)}`);
+  assert.equal(s.priceMul(o, 12), 1);
+  assert.ok(Math.abs(s.priceMul(o, 20) - 1.6) < 1e-9);
+  assert.equal(s.timeMul(o), 1, '7月');
+  s.dateOffset = 0; // 4月1日から数えて…1月にする
+  while (s.date.month !== 1) s.dateOffset++;
+  assert.equal(s.timeMul(o), 0.2, '冬');
+  s.weather = { kind: 'rain', intensity: 0.5, until: s.time + 600 };
+  assert.ok(s.outdoorMul(o) <= 0.2, '雨');
+});
+
+test('§19 スカイラウンジ: 20F以上、高いほど客と単価が伸び、夜が山', () => {
+  const s = seaside19(193, 50);
+  for (let f = 1; f <= 50; f++) s.build('floor', { f, x: 60, x2: 120 });
+  assert.ok(!s.check('skyLounge', { f: 10, x: 80 }).ok, '低い階は不可');
+  mustBuild(s, 'skyLounge', { f: 19, x: 80 });
+  mustBuild(s, 'skyLounge', { f: 49, x: 80 });
+  const lo = s.objAt(19, 80), hi = s.objAt(49, 80);
+  assert.equal(s.heightMul(lo), 1, '20F で ×1');
+  assert.ok(Math.abs(s.heightMul(hi) - 1.6) < 1e-9, '50F で ×1.6');
+  assert.ok(s.timeMul(hi, 20) > s.timeMul(lo, 20));
+  assert.ok(s.timeMul(lo, 20) > s.timeMul(lo, 13) * 2, '夜が山');
+  assert.ok(s.timeMul(lo, 13) > 0, '昼も展望の客');
+  assert.ok(s.priceMul(hi, 20) > s.priceMul(lo, 20) && s.priceMul(lo, 20) > s.priceMul(lo, 13));
+  // 実際の客数も高い方が多い（数日の合計）
+  let a = 0, b = 0;
+  for (let d = 0; d < 4; d++) { stepTo(s, d, 23.9); a += lo.custToday; b += hi.custToday; s.weather = null; }
+  assert.ok(a > 0 && b >= a, `20F ${a} / 50F ${b}`);
+  // フリープレイには出てこない
+  assert.equal(new Tower({ seed: 1 }).canBuildType('skyLounge').ok, false);
+});
+
+test('§19 コテージ: 屋外の宿、予約（カップル・家族1組）・清掃・台風で休業・客室の目標には数えない', () => {
+  const s = seaside19(194);
+  mustBuild(s, 'housekeeping', { f: 1, x: 0 });
+  for (const x of [100, 116, 132]) mustBuild(s, 'cottage', { f: 0, x });
+  const cots = s.byType.cottage;
+  assert.equal(cots.length, 3);
+  assert.ok(cots.every((o) => s.hotels.includes(o)), '宿として扱う');
+  assert.ok(new Set(cots.map((o) => o.variant)).size >= 1 && cots.every((o) => o.brand));
+  assert.equal(GOAL_METRICS.hotelRooms(s), 0, '客室の目標には数えない');
+  // 台風の日は予約が入らない
+  s.weather = { kind: 'typhoon', intensity: 1, until: s.time + 600, start: s.time };
+  for (let i = 0; i < 20; i++) s.hotelBookings();
+  assert.ok(cots.every((o) => !o.occupied), '台風は休業');
+  s.weather = null;
+  for (let i = 0; i < 20 && !cots.some((o) => o.occupied); i++) s.hotelBookings();
+  const o = cots.find((c) => c.occupied);
+  assert.ok(o, '予約が入る');
+  assert.equal(o.members.length, 1);
+  assert.ok(['couple', 'family'].includes(o.members[0].party.type));
+  // 泊まって、翌朝チェックアウト → 要清掃 → ハウスキーパーが掃除
+  let dirty = false, cleaned = false, sales = 0;
+  for (let h = 0; h < 72 && !cleaned; h++) {
+    s.step(60);
+    s.weather = null;
+    sales += cots.reduce((n, c) => n + c.salesToday, 0);
+    if (o.dirty) dirty = true; else if (dirty) cleaned = true;
+  }
+  assert.ok(dirty && cleaned, `清掃 dirty=${dirty} cleaned=${cleaned}`);
+  assert.ok(sales > 0);
+  // ★の数え方（ファミリールーム10室）にも入らない
+  assert.equal(s.byType.hotelFamily.length, 0);
+});
+
+test('§19 花火大会: 3日前の告知・順延・中止・開催・保存と復元・物語', () => {
+  const s = seaside19(195);
+  mustBuild(s, 'terraceCafe', { f: 0, x: 100 });
+  mustBuild(s, 'nightPool', { f: 0, x: 116 });
+  s.star = 3;
+  const lines = []; s.on('scenario', (e) => lines.push(e));
+  // 7月1日は月曜。水曜（2日目）に告知、土曜 19:30 から
+  stepTo(s, 2, 1);
+  s.weather = null;
+  const fe = s.festival;
+  assert.ok(fe && fe.kind === 'fireworks' && fe.state === 'announced');
+  assert.equal(fe.start, 5 * DAY + 19 * 60 + 30);
+  assert.equal(fe.end, fe.start + 60);
+  assert.equal((Math.floor(fe.start / DAY)) % 7, 5, '土曜');
+  s.step(1);
+  assert.ok(lines.some((e) => e.speaker === '町長' && /花火/.test(e.text)), '町長の告知');
+  // 保存と復元（告知中）
+  const r = new Tower(); r.restore(JSON.parse(JSON.stringify(s.serialize())));
+  assert.deepEqual(r.festival, s.festival);
+  // 当日の夕方: 晴れなら開催 → 観覧の店の売上が上がる
+  stepTo(s, 5, 19); s.weather = null;
+  stepTo(s, 5, 19.6);
+  assert.equal(s.festival.state, 'live');
+  const cafe = s.objAt(0, 100);
+  assert.ok(s.priceMul(cafe) > 1, '観覧の店の単価');
+  assert.ok(s.effects.some((e) => e.kind === 'fireworks'));
+  const r2 = new Tower(); r2.restore(JSON.parse(JSON.stringify(s.serialize())));
+  assert.equal(r2.festival.state, 'live');
+  stepTo(s, 5, 21);
+  assert.equal(s.festival.state, 'done');
+  assert.ok('fireworks' in s.scn.story, '★3 で花火大会の物語');
+  s.step(1);
+  assert.ok(lines.some((e) => e.beat === 'fireworks' && e.speaker === '航'));
+  r2.scenarioDef = { ...r2.scenarioDef, weather: {} }; r2.weather = null;
+  stepTo(r2, 5, 21);
+  assert.equal(r2.festival.state, 'done', '復元後も続きから');
+  // 観覧の場所が多いほど人が集まる
+  // 雨: 翌日に順延、それでも雨なら中止
+  const t = seaside19(196);
+  t.festivalAnnounce();
+  const f2 = t.festival, d0 = f2.day;
+  stepTo(t, d0, 16);
+  t.weather = { kind: 'rain', intensity: 0.5, until: t.time + 6 * 60 };
+  stepTo(t, d0, 18);
+  assert.equal(t.festival.day, d0 + 1); assert.ok(t.festival.postponed);
+  assert.equal(t.festival.start, (d0 + 1) * DAY + 19 * 60 + 30);
+  assert.equal(t.festival.state, 'announced');
+  const t2 = new Tower(); t2.restore(JSON.parse(JSON.stringify(t.serialize())));
+  assert.ok(t2.festival.postponed && t2.festival.day === d0 + 1);
+  stepTo(t, d0 + 1, 16);
+  t.weather = { kind: 'typhoon', intensity: 1, until: t.time + 6 * 60, start: t.time };
+  stepTo(t, d0 + 1, 18);
+  assert.equal(t.festival.state, 'done'); assert.ok(t.festival.cancelled, '中止');
+  stepTo(t, d0 + 2, 0);
+  assert.ok(!('fireworks' in t.scn.story));
+  // 9月には告知しない・物語の「次」は季節外なら飛ばす
+  const u = seaside19(197);
+  while (u.date.month !== 9) u.dateOffset++;
+  u.scenarioDaily();
+  assert.equal(u.festival, null);
+  u.scn.story = Object.fromEntries(['intro', 'firstHotel', 'firstUmiNoIe', 'star2', 'firstOutdoor', 'firstOnsen', 'star3', 'typhoonSurvived'].map((k) => [k, 1]));
+  assert.notEqual(u.nextBeat().key, 'fireworks');
+  u.dateOffset = 0; while (u.date.month !== 7) u.dateOffset++;
+  assert.equal(u.nextBeat().key, 'fireworks');
+  // フリープレイには花火大会がない
+  const fp = new Tower({ seed: 3 });
+  smallTower(fp, 2);
+  stepTo(fp, 10, 0);
+  assert.equal(fp.festival, null);
+});
+
+test('§19 花火大会の人出: 観覧の場所が多いほど増える（×2〜3）', () => {
+  const crowd = (n) => {
+    const s = seaside19(198);
+    for (let i = 0; i < n; i++) mustBuild(s, 'beerGarden', { f: 0, x: 100 + i * TYPES.beerGarden.w });
+    s.festivalAnnounce();
+    stepTo(s, s.festival.day, 18); s.weather = null;
+    const before = s.events.size;
+    for (let i = 0; i < 40; i++) s.festivalCrowd(18);
+    return (s.events.size - before) / n / 40;
+  };
+  const one = crowd(1), many = crowd(8);
+  assert.ok(many > one * 1.2 && one > 2, `1か所 ${one} / 8か所 ${many}`);
 });
 
 // ====================================================================

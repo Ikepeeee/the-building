@@ -45,7 +45,7 @@ export class Tower {
     this.rng = makeRng(this.seed);
     // シナリオ（フリープレイでは null・既定値）
     this.scenario = null; this.scenarioDef = null; this.scn = null; this.theme = 'default';
-    this.minFloor = MIN_F; this.weather = null; this.dateOffset = 0; this._scnQueue = [];
+    this.minFloor = MIN_F; this.festival = null; this.weather = null; this.dateOffset = 0; this._scnQueue = [];
     this.legend = false; this.visitorsToday = 0; this.visitorsPerDay = 0; this.visitHist = [];
     this.time = 6 * 60;
     this.money = START_MONEY;
@@ -831,7 +831,7 @@ export class Tower {
     const ent = this.pickVisitorEntrance(o.f, o.x + o.w / 2);
     if (!ent) return;
     const p = this.newPerson('visitor', null);
-    this.rollParty(p, o.type);
+    this.rollParty(p, this.partyKey(o.type));
     this.spawnAt(p, ent, this.doorAim(ent, o.f, o.x + o.w / 2));
     if (!this.startTrip(p, o.f, this.spotIn(o), (pp) => this.atShop(pp, o))) this.leave(p);
   }
@@ -843,7 +843,7 @@ export class Tower {
       // 1日の来訪者: 外からの客と、シナリオの集客施設の利用者。シナリオでは連れの人数で数え、売上も人数分
       const size = this.scenarioDef ? this.partySize(p) : 1;
       if (p.kind === 'visitor' || RESORT.has(o.type)) this.visitorsToday += size;
-      const pr = TYPES[o.type].price * size;
+      const pr = Math.round(TYPES[o.type].price * size * (this.scenarioDef ? this.priceMul(o) : 1));
       this.earn(pr);
       this.dayLog.shop += pr;
       o.salesToday += pr; o.custToday++;
@@ -913,6 +913,7 @@ export class Tower {
     this.truckTick();
     if (this.bomb && !this.bomb.found && this.time >= this.bomb.deadline) this.explodeBomb();
     if (this._xmas || this.santa) this.updateSanta();
+    if (this.scenarioDef) { this.updateShows(); this.festivalTick(); }
   }
 
   // 1ゲーム分ごと: 待っている人・乗っている人のストレスと時間をまとめて更新し、長すぎる移動を救済する
@@ -1166,17 +1167,21 @@ export class Tower {
       if (o.occupied || o.dirty || o.infested || o.burning || o.vipHold) continue;
       if (vipComing && o.type === 'hotelSuite') continue; // VIP のために空けておく
       if (this.entranceDist(o.f, o.x + o.w / 2) === Infinity) continue;
-      const book = 0.75 * demand * this.evalFactor(o) * this.demandMul(o.type) * this.seasonMul() * (this.isTyphoon() ? 0.1 : 1);
+      const cot = o.type === 'cottage', mo = this.date.month;
+      // コテージ（屋外）は台風で休業、冬は客が減る
+      const cmul = cot ? (this.isTyphoon() ? 0 : mo >= 11 || mo <= 3 ? 0.5 : 1) : 1;
+      if (cmul === 0) continue;
+      const book = 0.75 * demand * cmul * this.evalFactor(o) * this.demandMul(o.type) * this.seasonMul() * (this.isTyphoon() ? 0.1 : 1);
       if (this.r() >= Math.min(0.98, book)) continue;
       o.occupied = true; o.checkedIn = 0; o.members = [];
       if (o.type === 'hotelSuite') this.rollParking(o);
       const T = TYPES[o.type];
-      // ファミリールームは家族1組（3〜4人）を1人で代表する
+      // ファミリールームは家族1組（3〜4人）を1人で代表する。コテージはカップルか家族の1組
       const fam = o.type === 'hotelFamily';
-      const n = fam ? 1 : T.cap > 1 && this.r() < 0.3 ? 1 : T.cap;
+      const n = fam || cot ? 1 : T.cap > 1 && this.r() < 0.3 ? 1 : T.cap;
       for (let i = 0; i < n; i++) {
         const p = this.newPerson('guest', o);
-        this.rollParty(p, o.type, fam ? 'family' : 'solo');
+        this.rollParty(p, o.type, fam ? 'family' : cot ? undefined : 'solo');
         o.members.push(p);
         this.later(this.rand(240), () => this.enterBuilding(p));
         if (this.r() < 0.35) this.at(d * DAY + 1140 + this.rand(120), () => this.outing(p, DINNER));
@@ -1312,7 +1317,11 @@ export class Tower {
       if (typeof sc.clearDay === 'number') this.scenario.clearDay = sc.clearDay;
       if (typeof sc.failReason === 'string') this.scenario.failReason = sc.failReason;
       const scn = sc.scn || {};
-      this.scn = { story: { ...(scn.story || {}) }, poorDays: num(scn.poorDays, 0), typhoonAt: typeof scn.typhoonAt === 'number' ? scn.typhoonAt : null, rainUntil: null };
+      this.scn = { story: { ...(scn.story || {}) }, poorDays: num(scn.poorDays, 0), typhoonAt: typeof scn.typhoonAt === 'number' ? scn.typhoonAt : null, rainUntil: null, ...(typeof scn.fwSeason === 'number' ? { fwSeason: scn.fwSeason } : {}) };
+      const fe = sc.festival;
+      if (fe && typeof fe === 'object' && ['announced', 'live', 'done'].includes(fe.state) && typeof fe.start === 'number') {
+        this.festival = { kind: 'fireworks', day: num(fe.day, Math.floor(fe.start / DAY)), start: fe.start, end: num(fe.end, fe.start + 60), state: fe.state, postponed: !!fe.postponed, ...(fe.cancelled ? { cancelled: true } : {}) };
+      }
     }
     this.rng = makeRng((this.seed ^ Math.floor(num(d.time, 0) * 7)) >>> 0);
     this.time = Math.max(0, num(d.time, 360));

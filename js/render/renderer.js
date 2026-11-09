@@ -1,7 +1,7 @@
 // The Building Renderer（Canvas 2D・ピクセルアート）
 // const r = new Renderer(canvas, sim); r.resize(w, h); r.render(view); r.setSim(sim);
 import { TILE_W, FLOOR_H, W, MIN_F, MAX_F, DAY, LOBBY_FLOORS, TYPES, floorName } from '../sim/constants.js';
-import { makeFacilitySprite, lobbyTile, floorTile, shaftSeg, carSprite, CAR_H, SPRITE_TOP, treeSprite, machineRoom, pitSprite, bridgeTile, WHEEL, COASTER, fireEscapeSprite, fireEscapeTop, ESC_W, frameTile, craneSprite, truckSprite } from './facilities.js';
+import { makeFacilitySprite, lobbyTile, floorTile, shaftSeg, carSprite, CAR_H, SPRITE_TOP, treeSprite, machineRoom, pitSprite, bridgeTile, WHEEL, COASTER, DOLPHIN_POOL, dolphinSprite, fireEscapeSprite, fireEscapeTop, ESC_W, frameTile, craneSprite, truckSprite } from './facilities.js';
 import { SEA_H, WAVE_W, waveFrame, islandSprite, boatSprite, gullSprite, lighthouseSprite, palmSprite, sandStrata, deepTile } from './seaside.js';
 import { heliSprite, planeSprite, bannerPlaneSprite, bannerSprite } from './vehicles.js';
 import { peopleAtlas, KIND_INDEX, PW, PH, stressIndex, STRESS_COLORS } from './people.js';
@@ -21,12 +21,12 @@ const LOBBY_SET = new Set(LOBBY_FLOORS);
 const VIS_CAP = {
   office: 6, condo: 4, hotelSingle: 1, hotelTwin: 2, hotelSuite: 3, fastfood: 9, restaurant: 8, shop: 5,
   cinema: 10, partyHall: 14, security: 6, housekeeping: 6, medical: 6, metro: 14, cathedral: 12,
-  umiNoIe: 7, onsen: 14, aquarium: 12, seaChapel: 10, hotelFamily: 4, terraceCafe: 6, beerGarden: 12, amusement: 10,
+  umiNoIe: 7, onsen: 14, aquarium: 12, seaChapel: 10, hotelFamily: 4, terraceCafe: 6, beerGarden: 12, amusement: 10, dolphinShow: 16, nightPool: 7, skyLounge: 7, cottage: 4,
 };
-const COMMERCE = new Set(['fastfood', 'restaurant', 'shop', 'cinema', 'partyHall', 'umiNoIe', 'onsen', 'aquarium', 'terraceCafe', 'beerGarden', 'amusement']);
-const ROOMS = new Set(['office', 'condo', 'hotelSingle', 'hotelTwin', 'hotelSuite', 'hotelFamily']);
+const COMMERCE = new Set(['fastfood', 'restaurant', 'shop', 'cinema', 'partyHall', 'umiNoIe', 'onsen', 'aquarium', 'terraceCafe', 'beerGarden', 'amusement', 'dolphinShow', 'nightPool', 'skyLounge']);
+const ROOMS = new Set(['office', 'condo', 'hotelSingle', 'hotelTwin', 'hotelSuite', 'hotelFamily', 'cottage']);
 const SERVICE = new Set(['security', 'housekeeping', 'medical']);
-const EVAL_TYPES = new Set(['office', 'condo', 'hotelSingle', 'hotelTwin', 'hotelSuite', 'fastfood', 'restaurant', 'shop', 'cinema', 'partyHall', 'umiNoIe', 'onsen', 'aquarium', 'terraceCafe', 'beerGarden', 'amusement', 'hotelFamily']);
+const EVAL_TYPES = new Set(['office', 'condo', 'hotelSingle', 'hotelTwin', 'hotelSuite', 'fastfood', 'restaurant', 'shop', 'cinema', 'partyHall', 'umiNoIe', 'onsen', 'aquarium', 'terraceCafe', 'beerGarden', 'amusement', 'hotelFamily', 'dolphinShow', 'nightPool', 'skyLounge', 'cottage']);
 const EVAL_COL = { good: '#38d8ff', fair: '#f4d020', bad: '#f03030' };
 
 const isElev = (t) => t === 'elevator' || t === 'express';
@@ -150,6 +150,7 @@ export class Renderer {
       const xA = Math.max(0, Math.floor(wx0 / TW)), xB = Math.min(W - 1, Math.floor(wx1 / TW));
       this.fLo = fLo; this.fHi = fHi; this.xA = xA; this.xB = xB;
       this.lodOn = this.opts.lod && zoom < 0.6;
+      if (sim.festival) this.phase(() => this.drawFestival());
       if (this.opts.cache) {
         // 夜の度合いを 1/16 刻みにして、チャンクの描き直しを抑える
         this.night = Math.round(this.night * 16) / 16;
@@ -160,6 +161,7 @@ export class Renderer {
       }
       if (view.overlay === 'eval') this.phase(() => this.drawEvalOverlay());
       this.phase(() => this.drawPeople());
+      if (sim.festival) this.phase(() => this.drawFestivalCrowd());
       this.phase(() => this.drawOverlays(view));
       this.phase(() => this.drawBadges());
     }
@@ -583,7 +585,7 @@ export class Renderer {
   // 毎フレーム描き直す（チャンクに焼かない）施設: 動きがあるもの
   isDynamic(o) {
     const t = o.type;
-    return t === 'metro' || t === 'escalator' || t === 'amusement' || !!o.destroyed || (t === 'garbage' && !!o.truck) || this.isBuilding(o);
+    return t === 'metro' || t === 'escalator' || t === 'amusement' || t === 'dolphinShow' || !!o.destroyed || (t === 'garbage' && !!o.truck) || this.isBuilding(o);
   }
 
   // mode: 'all' = 全部、'static' = チャンク用（動かないもの）、'dynamic' = 毎フレーム分（動くもの・カゴ）
@@ -1007,6 +1009,7 @@ export class Renderer {
     let dark = 0;
     const outdoor = !!(TYPES[type] && TYPES[type].outdoor);
     if (type === 'amusement') this.drawRides(o, x, y, v);
+    if (type === 'dolphinShow') this.drawDolphins(o, x, y, v);
     if (outdoor) return;   // 屋根がないので暗くする箱は描かない（夜は灯りの有無で表す）
     if (COMMERCE.has(type)) dark = v.open ? 0 : 0.42 + 0.3 * night;
     else if (ROOMS.has(type)) dark = !v.occ ? 0.12 + 0.66 * night : v.n === 0 ? 0.74 * night : 0;
@@ -1171,6 +1174,188 @@ export class Renderer {
         if (((ms / 300) | 0) % 2) this.rect(hop - 1, ty + 9, 5, 1, '#f0d020');
       }
     } finally { ctx.restore(); }
+  }
+
+  // イルカ: ショー中はジャンプ（水しぶき・ボール・観客の歓声）、それ以外は水面をゆっくり泳ぐ
+  drawDolphins(o, x, y, v) {
+    if (this.lodOn) return;
+    const ms = this.nowMs;
+    const { x0, x1, y: sy } = DOLPHIN_POOL;
+    const surf = y + sy;
+    const spr = this.tile('dolphin', dolphinSprite);
+    const sprL = this.tile('dolphinL', () => mirrored(spr));
+    const show = o.show && o.show.phase === 'show' && v.open;
+    if (show) {
+      for (let k = 0; k < 3; k++) {
+        const per = 2200, ph = ((ms + k * 700) % per) / per;
+        const dir = k % 2 ? -1 : 1;
+        const xa = x + x0 + 14 + k * 20, span = 44;
+        const px = dir > 0 ? xa + ph * span : xa + span - ph * span;
+        const h = 24 + k * 4;
+        const py = surf - Math.sin(Math.PI * ph) * h;
+        if (ph > 0.04 && ph < 0.96) this.img(dir > 0 ? spr : sprL, px - 5, py - 4, 11, 6);
+        // 水しぶき（飛び出し・着水）
+        if (ph < 0.12 || ph > 0.88) {
+          const sx = ph < 0.5 ? (dir > 0 ? xa : xa + span) : (dir > 0 ? xa + span : xa);
+          for (let i = 0; i < 6; i++) this.rect(sx - 4 + i * 1.6, surf - 2 - ((i * 7 + (ms >> 6)) % 5), 1, 1.5, '#ffffff');
+        }
+      }
+      // ボールの技
+      const bph = (ms % 1600) / 1600;
+      this.rect(x + 176 - 2, y + 10 - Math.abs(Math.sin(Math.PI * bph)) * 8, 4, 4, '#f0c030');
+      // 観客の歓声（手が上がる）
+      const up = ((ms / 280) | 0) % 2;
+      for (let i = 0; i < 18; i++) {
+        const row = i % 5, bx = x + 8 + row * 18 + ((i * 13) % Math.max(8, 80 - row * 18));
+        const by = y + 22 + row * 4 - 9;
+        if ((i + up) % 2) this.rect(bx, by, 1, 2, '#1a1a1a');
+      }
+    } else {
+      // 背びれがゆっくり泳ぐ
+      for (let k = 0; k < 3; k++) {
+        const t = (ms / (7000 + k * 1300) + k * 0.33) % 1;
+        const fx = x + x0 + 8 + t * (x1 - x0 - 16);
+        this.rect(fx, surf - 2, 1, 2, '#3a5a7a'); this.rect(fx + 1, surf - 1, 2, 1, '#3a5a7a');
+        this.rect(fx - 3, surf + 1, 7, 0.6, '#d0f0ff');
+      }
+    }
+  }
+
+  // ---- 花火大会（背景キャッシュの外で毎フレーム）: 牡丹・菊・しだれ・スターマイン。
+  // 火花は色ごとに 1 本のパスで短い線（尾）として描く。玉は同時に最大 16、火花は 1 玉 48 本まで。
+  drawFestival() {
+    const fe = this.sim && this.sim.festival;
+    if (!fe || fe.state !== 'live') return;
+    const ctx = this.ctx, ms = this.nowMs, dpr = this.dpr, S = this.S, ox = this.cx, oy = this.cy;
+    const [wx0, wy0, wx1, wy1] = this.vb;
+    const horizon = this.seaside ? -SEA_H : -30;
+    const end = num(fe.end, this.simTime + 60);
+    const finale = end - this.simTime < 6;
+    const nShell = finale ? 16 : 10;
+    const life = finale ? 2600 : 3400;          // 1 玉の寿命（打ち上げ＋開花＋消える）
+    const cols = ['#ff4060', '#ffd040', '#50ff90', '#50b8ff', '#ff70e0', '#ffffff', '#ff9a30', '#b080ff'];
+    const viewW = wx1 - wx0;
+    const lw = Math.max(1.2 * dpr, S * 1.1);
+    ctx.lineCap = 'round';
+    let skyFlash = 0, flashCol = '#ffffff';
+    const seaTop = this.Y(horizon), seaBot = this.Y(0);
+    for (let i = 0; i < nShell; i++) {
+      const off = (i * life) / nShell + hash2(i, 9) * 300;
+      const cyc = (ms + off) / life;
+      const gen = Math.floor(cyc), lp = cyc - gen;
+      const seed = gen * 37 + i * 11;
+      const kind = finale ? (hash2(seed, 1) < 0.6 ? 3 : 0) : (hash2(seed, 1) * 3) | 0;   // 0 牡丹 1 菊 2 しだれ 3 スターマイン
+      const big = kind !== 3 && hash2(seed, 6) < 0.3;
+      const R = kind === 3 ? 22 + hash2(seed, 5) * 18 : big ? 120 + hash2(seed, 5) * 50 : 55 + hash2(seed, 5) * 45;
+      const bx = wx0 + viewW * (0.08 + 0.84 * hash2(seed, 2));
+      const by = horizon - (kind === 3 ? 50 + hash2(seed, 3) * 80 : big ? 200 + hash2(seed, 3) * 120 : 110 + hash2(seed, 3) * 160);
+      if (bx + R < wx0 || bx - R > wx1 || by + R + 80 < wy0 || by - R > wy1) continue;
+      const col = cols[(gen * 3 + i * 5) % cols.length], col2 = cols[(gen * 3 + i * 5 + 3) % cols.length];
+      const rise = kind === 3 ? 0.12 : 0.22;
+      if (lp < rise) {
+        // 海から昇る打ち上げの尾
+        const t = lp / rise;
+        const yy = horizon + (by - horizon) * t;
+        ctx.globalAlpha = 0.9;
+        ctx.strokeStyle = '#fff2c0'; ctx.lineWidth = lw;
+        ctx.beginPath(); ctx.moveTo((bx - ox) * S, (yy - oy) * S); ctx.lineTo((bx - ox) * S, (Math.min(horizon, yy + 26) - oy) * S); ctx.stroke();
+        ctx.fillStyle = '#ffd890';
+        for (let k = 0; k < 3; k++) ctx.fillRect(((bx + (hash2(k, gen) - 0.5) * 3 - ox) * S) | 0, ((yy + 8 + k * 7 - oy) * S) | 0, Math.max(1, lw), Math.max(1, lw));
+        continue;
+      }
+      const t = (lp - rise) / (1 - rise);             // 0..1 開花後
+      const ease = 1 - Math.pow(1 - Math.min(1, t * 1.6), 3);
+      const r = R * ease;
+      const fall = t * t * (kind === 2 ? 90 : 28);
+      const fade = kind === 2 ? Math.max(0, 1 - t * 0.85) : Math.max(0, 1 - t * t * 1.1);
+      if (fade <= 0.02) continue;
+      if (t < 0.1) { skyFlash = Math.max(skyFlash, (1 - t / 0.1) * (big ? 1 : 0.6)); flashCol = col; }
+      // 海に映る色の光
+      if (seaBot > seaTop) {
+        // 重ねた帯で柔らかく（中心ほど明るい）
+        ctx.fillStyle = col;
+        for (let g = 1; g <= 3; g++) {
+          ctx.globalAlpha = 0.08 * fade * (big ? 1.3 : 1);
+          const w = R * 1.6 * S * (g / 3);
+          ctx.fillRect(((bx - ox) * S - w / 2) | 0, seaTop, w | 0, seaBot - seaTop);
+        }
+        // 水面に揺れる光の筋
+        ctx.globalAlpha = 0.5 * fade;
+        for (let k = 0; k < 6; k++) {
+          const yy = seaTop + (seaBot - seaTop) * (0.1 + k * 0.15);
+          const w = (R * 0.3 + k * 6) * S * (0.6 + 0.4 * Math.abs(Math.sin(ms / 300 + k + i)));
+          ctx.fillRect(((bx - ox) * S - w / 2) | 0, yy | 0, w | 0, Math.max(1, dpr) | 0);
+        }
+      }
+      // 開花の白い芯
+      if (t < 0.12) {
+        ctx.globalAlpha = 1 - t / 0.12;
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath(); ctx.arc((bx - ox) * S, (by - oy) * S, Math.max(3 * dpr, R * 0.22 * S * (0.5 + t * 4)), 0, Math.PI * 2); ctx.fill();
+      }
+      // 火花（短い線で尾を引く）。外側は主の色、内側は副の色
+      const np = kind === 3 ? 24 : 48;
+      const tail = kind === 2 ? 0.35 : kind === 1 ? 0.22 : 0.12;
+      for (let layer = 0; layer < 2; layer++) {
+        const rr = layer ? r * 0.55 : r;
+        if (layer && kind === 2) break;
+        ctx.globalAlpha = fade;
+        ctx.strokeStyle = layer ? col2 : (kind === 2 ? '#ffc860' : col);
+        ctx.lineWidth = layer ? lw * 0.8 : lw;
+        ctx.beginPath();
+        const n = layer ? np >> 1 : np;
+        for (let k = 0; k < n; k++) {
+          const a = (k / n) * Math.PI * 2 + hash2(k, seed) * 0.12;
+          const sp = 0.82 + hash2(seed, k) * 0.3;
+          const ca = Math.cos(a), sa = Math.sin(a);
+          const x2 = bx + ca * rr * sp, y2 = by + sa * rr * sp + fall;
+          const x1 = bx + ca * rr * sp * (1 - tail), y1 = by + sa * rr * sp * (1 - tail) + fall * (1 - tail * 0.6) - (kind === 2 ? 6 * t : 0);
+          ctx.moveTo((x1 - ox) * S, (y1 - oy) * S); ctx.lineTo((x2 - ox) * S, (y2 - oy) * S);
+        }
+        ctx.stroke();
+      }
+      // きらめき（しだれ・菊の終わりぎわ）
+      if (t > 0.45 && kind !== 3) {
+        ctx.fillStyle = '#fff6c8';
+        const tw = (ms / 90) | 0;
+        for (let k = 0; k < 14; k++) {
+          if ((k + tw) % 3) continue;
+          const a = hash2(k, seed + 1) * Math.PI * 2, d = r * (0.3 + hash2(seed + 1, k) * 0.8);
+          ctx.globalAlpha = fade;
+          ctx.fillRect(((bx + Math.cos(a) * d - ox) * S) | 0, ((by + Math.sin(a) * d + fall * 1.2 - oy) * S) | 0, Math.max(1, lw), Math.max(1, lw));
+        }
+      }
+    }
+    ctx.globalAlpha = 1; ctx.lineCap = 'butt';
+    // 空全体がふわっと明るくなる
+    if (skyFlash > 0.02) {
+      const yBot = Math.min(this.canvas.height, seaBot);
+      if (yBot > 0) { ctx.globalAlpha = 0.09 * skyFlash; ctx.fillStyle = flashCol; ctx.fillRect(0, 0, this.canvas.width, yBot); ctx.globalAlpha = 1; }
+    }
+  }
+
+  // 花火大会の日は浜に見物客（地上で建物のない場所に、最大 160 組）
+  drawFestivalCrowd() {
+    const fe = this.sim && this.sim.festival;
+    if (!fe || fe.state !== 'live' || this.lodOn) return;
+    const row = this.sim.grid && this.sim.grid[0];
+    const [wx0, wy0, wx1, wy1] = this.vb;
+    if (wy0 > 0 || wy1 < -12) return;
+    const atlas = this.atlas || (this.atlas = peopleAtlas());
+    const ctx = this.ctx, S = this.S;
+    let n = 0;
+    for (let wx = Math.floor(wx0 / 7) * 7; wx < wx1 && n < 160; wx += 7) {
+      const cell = Math.floor(wx / TW);
+      if (row && cell >= 0 && cell < W && row[cell]) continue;
+      const h = hash2(wx, 77);
+      if (h < 0.35) continue;
+      const kind = h < 0.6 ? KIND_INDEX.visitor : h < 0.8 ? KIND_INDEX.child : KIND_INDEX.resident;
+      const facing = h > 0.9 ? 0 : 1;
+      const x0 = Math.round((wx - 3.5 - this.cx) * S), x1 = Math.round((wx + 3.5 - this.cx) * S);
+      const y1 = Math.round((-1 - this.cy) * S), y0 = Math.round((-1 - PH - this.cy) * S);
+      ctx.drawImage(atlas, (facing) * PW, kind * PH, PW, PH, x0, y0, x1 - x0, y1 - y0);
+      n++;
+    }
   }
 
   // 遊園地の動く部分（毎フレーム、安い線と箱だけ）

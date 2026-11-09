@@ -39,7 +39,7 @@ export class Toasts {
       go.title = 'その場所へ移動';
       go.addEventListener('click', (e) => {
         e.stopPropagation();
-        this.app.jumpTo(m.f, m.x);
+        this.app.jumpTo(m.f, m.x, m.zoom);
         this.dismiss(t);
       });
       t.append(go);

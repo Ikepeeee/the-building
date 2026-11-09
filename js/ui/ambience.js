@@ -6,6 +6,7 @@
 // - 消防ヘリ: ローター音（sim.heli があるとき）
 // - 工事中の施設: トンカチとドリル
 // - 雨・台風: 雨音と風の音（sim.weather）
+// - 花火大会: 打ち上げの笛・ドーン・パチパチ（sim.festival が live のとき）
 // - ごみ・リサイクルセンター: 収集車のエンジン・バック警告音・積み込みの油圧音／駐車場: ドアの音・エンジン始動
 import { TILE_W, FLOOR_H, SAVE_KEY } from '../sim/constants.js';
 import { storage } from './save.js';
@@ -180,6 +181,14 @@ export class Ambience {
     if (office > 0 && Math.random() < Math.min(0.05, office * 0.0015)) this.phone(near);
     if (food > 0 && Math.random() < Math.min(0.5, food * 0.04)) this.voice(near);
     if (crowd > 0 && Math.random() < Math.min(0.4, crowd * 0.01)) this.voice(near * 0.8);
+    // 花火大会: 打ち上げの笛、ドーン、パチパチ。空が映っているほど大きく
+    const fest = sim.festival;
+    if (fest && fest.state === 'live') {
+      const groundY = (0 - cam.y) * cam.zoom; // 地面の画面上の位置
+      const skyFrac = clamp01(groundY / Math.max(1, cam.vh));
+      const k = (0.35 + 0.65 * skyFrac) * (0.6 + 0.4 * near);
+      if (Math.random() < 0.55) this.firework(k, Math.random() < 0.25);
+    }
     // 天気: 雨と風（台風は強く）。画面のどこにいても聞こえる
     const w = sim.weather;
     const wi = w ? Math.max(0, Math.min(1, w.intensity ?? 0.5)) : 0;
@@ -303,6 +312,31 @@ export class Ambience {
       if (!this.s.canVoice()) return;
       o.connect(f); f.connect(g); g.connect(this.n.out); this.s.track(o, f, g); o.start(t); o.stop(t + 1.35);
     }
+  }
+
+  /** 花火1発（big: スターマインのように続けて開く） */
+  firework(k, big) {
+    if (!this.s.canVoice(3)) return;
+    const c = this.s.ctx, t0 = c.currentTime + Math.random() * 0.3;
+    // 打ち上げの笛（ヒュ〜）
+    const o = c.createOscillator(); o.type = 'sine';
+    const rise = 0.7 + Math.random() * 0.5;
+    o.frequency.setValueAtTime(500 + Math.random() * 300, t0); o.frequency.exponentialRampToValueAtTime(1500 + Math.random() * 600, t0 + rise);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.012 * k, t0 + 0.1); g.gain.exponentialRampToValueAtTime(0.0001, t0 + rise);
+    o.connect(g); g.connect(this.n.out); this.s.track(o, g); o.start(t0); o.stop(t0 + rise + 0.05);
+    // ドーン（遠いので少し遅れて、低く）
+    const tb = t0 + rise + 0.15;
+    this.burst(tb, 1.1, { type: 'lowpass', freq: 260, vol: 0.12 * k, attack: 0.004 });
+    if (this.s.canVoice()) {
+      const th = c.createOscillator(); th.type = 'sine';
+      th.frequency.setValueAtTime(70, tb); th.frequency.exponentialRampToValueAtTime(32, tb + 0.6);
+      const tg = c.createGain(); tg.gain.setValueAtTime(0.0001, tb); tg.gain.exponentialRampToValueAtTime(0.1 * k, tb + 0.01); tg.gain.exponentialRampToValueAtTime(0.0001, tb + 0.7);
+      th.connect(tg); tg.connect(this.n.out); this.s.track(th, tg); th.start(tb); th.stop(tb + 0.75);
+    }
+    // パチパチ
+    const n = big ? 7 : 3;
+    for (let i = 0; i < n; i++) this.burst(tb + 0.35 + i * (0.06 + Math.random() * 0.08), 0.03, { type: 'highpass', freq: 3500 + Math.random() * 3000, vol: 0.03 * k });
   }
 
   chime(k) {

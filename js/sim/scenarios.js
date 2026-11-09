@@ -3,18 +3,19 @@
 
 // 目標の値の測り方（sim を受け取って数を返す）
 export const GOAL_METRICS = {
-  hotelRooms: (s) => s.hotels.length,
+  // ホテルの客室（コテージは数えない）
+  hotelRooms: (s) => s.hotels.reduce((n, o) => n + (o.type !== 'cottage' ? 1 : 0), 0),
   // 直近30日のホテルの平均レビュー（★）。件数が少ないうちは null
   hotelReview30: (s) => {
     let n = 0, sum = 0;
-    for (const o of s.hotels) for (const r of o.reviews || []) if (r.day >= s.day - 30) { n++; sum += r.stars; }
+    for (const o of s.hotels) if (o.type !== 'cottage') for (const r of o.reviews || []) if (r.day >= s.day - 30) { n++; sum += r.stars; }
     return n >= 10 ? sum / n : null;
   },
   pop: (s) => s.pop,
   visitorsPerDay: (s) => Math.round(s.visitorsPerDay),
   hotelReviewAll: (s) => {
     let n = 0, sum = 0;
-    for (const o of s.hotels) for (const r of o.reviews || []) { n++; sum += r.stars; }
+    for (const o of s.hotels) if (o.type !== 'cottage') for (const r of o.reviews || []) { n++; sum += r.stars; }
     return n >= 10 ? sum / n : null;
   },
 };
@@ -43,7 +44,14 @@ export const SCENARIOS = [
     openMonths: { umiNoIe: [7, 8, 9] },
     // 目玉施設: 人口や季節に関係なく観光客を呼ぶ（1時間・1施設あたり）
     // （来訪者は連れの人数で数えるので、組の数で書く。家族連れが多い施設ほど1組の人数が多い）
-    attractions: { aquarium: { rate: 10, season: false }, umiNoIe: { rate: 2.5, season: true }, onsen: { rate: 2, season: true }, amusement: { rate: 12, season: false } },
+    attractions: {
+      aquarium: { rate: 10, season: false }, umiNoIe: { rate: 2.5, season: true }, onsen: { rate: 2, season: true }, amusement: { rate: 12, season: false },
+      nightPool: { rate: 2, season: true }, skyLounge: { rate: 3, season: false },
+    },
+    // イルカショー（1日4回。ショーの前に観客が集まる）
+    dolphin: { times: [630, 750, 870, 960], minutes: 25, crowd: 8, rain: 0.4, aquariumBoost: 1.3 },
+    // 花火大会: 7〜8月の土曜 19:30〜20:30。3日前に告知、雨・台風なら翌日に順延（それも駄目なら中止）
+    festival: { months: [7, 8], weekday: 5, start: 19 * 60 + 30, minutes: 60, notice: 3, crowd: 1.5, sales: 1.3 },
     // 温泉があるとホテルのレビューが上がる（確率）
     onsenReview: 0.5,
     // 結婚式（伝説のリゾート）: 土日の夕方、海のチャペルで
@@ -100,6 +108,11 @@ export const SCENARIOS = [
         { speaker: '渚', text: '航くんが、浜のお客さんを一人ずつビルの中に案内してくれたんです。\n……ちょっと、かっこよかった。' },
         { speaker: '航', text: 'い、いや。仕事だから。' },
       ] },
+      fireworks: { title: '花火大会', lines: [
+        { speaker: '渚', text: 'わあ、大きい！ 浜から見る花火って、こんなにきれいだったんだ。' },
+        { speaker: '航', text: '子どものころ、毎年ここで見てた。……今年は、渚さんと見られてよかった。' },
+        { speaker: '渚', text: 'え？ 花火の音で聞こえなかった。もう一回言って？' },
+      ] },
       firstAquarium: { title: '水族館の飼育員', lines: [
         { speaker: '航', text: '水族館の飼育員になりました。海の生き物のことなら、少しは詳しいので……。' },
         { speaker: '渚', text: 'ウミガメの前で、航くんがずっと楽しそうに説明してくれたの。\nあんなにしゃべる航くん、初めて見たかも。' },
@@ -150,6 +163,7 @@ export const SCENARIOS = [
       { key: 'firstOnsen', label: 'スーパー銭湯', hint: 'スーパー銭湯を建てると、おかみさんが喜ぶ' },
       { key: 'star3', label: '★3', hint: '来訪者 800人・警備室・スーパー銭湯・屋外レストランで★3' },
       { key: 'typhoonSurvived', label: '台風の夜', hint: '台風を乗り越えると…？' },
+      { key: 'fireworks', label: '花火大会', months: [7, 8], hint: '7〜8月の土曜の夜は花火大会。★3 になったら、浜で二人が…？' },
       { key: 'firstAquarium', label: '水族館', hint: '水族館を建てると、航に新しい仕事が' },
       { key: 'star4', label: '★4', hint: '来訪者 1,500人・水族館・ファミリールーム10室・VIP の高評価で★4' },
       { key: 'firstAmusement', label: '観覧車', hint: '遊園地を建てると、観覧車で…？' },

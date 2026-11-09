@@ -26,6 +26,14 @@ const BY_TYPE = {
   amusement: ['なぎさランド', 'シーサイドパーク', 'マリンワンダーランド'],
   onsen: ['スーパー銭湯 潮の湯', '湯処 なぎさ', '天然温泉 海月の湯'],
   aquarium: ['海辺の水族館', 'アクアパーク うみかぜ', 'なぎさ水族館'],
+  dolphinShow: ['ドルフィンスタジアム', 'イルカのひろば', 'マリンショープール'],
+  nightPool: ['ナイトプール ルナ', 'プール&テラス 夏空', 'ブルーラグーン'],
+  skyLounge: ['スカイラウンジ 星空', '展望ラウンジ ほらいずん', 'ラウンジ 天の川'],
+};
+const COTTAGE = {
+  wood: ['木のコテージ こもれび', 'ログハウス 潮騒', 'コテージ 松林'],
+  glamping: ['グランピング 星の浜', 'テントサイト ほたる', 'グランピング なみおと'],
+  dome: ['ドームテント 月見', 'ドームハウス しずく', '星見ドーム'],
 };
 export function pickTypeBrand(type, rng) { const a = BY_TYPE[type]; return a ? pick(a, rng) : ''; }
 const SHOP = {
@@ -66,6 +74,7 @@ export function pickBrand(type, variant, rng) {
     return form === '（株）' ? `${name}（株）` : `${form}${name}`;
   }
   if (type === 'condo') return `${pick(SURNAME, rng)}家`;
+  if (type === 'cottage') return pick(COTTAGE[variant] || COTTAGE.wood, rng);
   if (type.startsWith('hotel')) return pick(HOTEL[variant] || HOTEL.classic, rng);
   return pick(SHOP[variant] || ['テナント'], rng);
 }

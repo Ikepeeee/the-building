@@ -200,6 +200,14 @@ export const BuildMixin = {
     if (T.only === 'lobbyFloor' && !LOBBY_SET.has(f)) return fail('ロビー階にのみ建設できます');
     if (T.only === 'ground' && f !== 0) return fail('1Fにのみ建設できます');
     if (this.outdoorBlockedRows(f, top, x, w)) return fail('屋外施設の上には建てられません');
+    if (T.adjacent) {
+      // 同じ階の指定の施設（イルカショーなら水族館）に左右どちらかで接すること
+      let ok = false;
+      for (let r = f; r <= top && !ok; r++) {
+        for (const xx of [x - 1, x + w]) { const o = this.objAt(r, xx); if (o && o.type === T.adjacent && !o.destroyed) { ok = true; break; } }
+      }
+      if (!ok) return fail(`${TYPES[T.adjacent].name}の横に建ててください`);
+    }
     if (T.outdoor) {
       // 屋外施設: 地下には置けず、真上（同じ列の上の段すべて）が空いていること
       if (f < 0) return fail('屋外施設は地下には置けません');

@@ -2,7 +2,7 @@
 // - 目標: sim.scenarioProgress() の 120日目標（進み具合のバー・残り日数・成績の目安）
 // - 次にやること: ビル運営の基本手順（建物の状態から自動チェック）＋ 次の★で足りないもの（starProgress）
 //                 ＋ 120日目標のまとめ ＋ 物語の次の節目のヒント（scenarioProgress().nextBeat）
-import { SAVE_KEY } from '../sim/constants.js';
+import { SAVE_KEY, WEEK } from '../sim/constants.js';
 import { storage } from './save.js';
 
 const KEY = SAVE_KEY + '.goals';
@@ -44,6 +44,26 @@ export function basicsChecklist(sim) {
     { label: '地下に駐車場（★3から車の客が増える）', done: has('parking'), when: star >= 3 },
     { label: 'ファミリールームを増やす（家族連れ向け）', done: countType(sim, 'hotelFamily') >= 10, when: star >= 3 },
   ].filter((it) => it.when !== false);
+}
+
+/** 花火大会の予定と、新しい施設のヒント（海辺） */
+export function facilityTips(sim) {
+  const out = [];
+  const f = sim.festival;
+  if (f && f.state === 'live') out.push('🎆 花火大会の真っ最中！ 屋外施設やスカイラウンジ、浜に人が集まっています');
+  else if (f && f.state === 'announced' && Number.isFinite(f.start)) {
+    const day = Math.floor(f.start / 1440), d = day - sim.day;
+    const wd = WEEK[(day % 7 + 7) % 7];
+    out.push(`🎆 ${d <= 0 ? '今日' : d === 1 ? '明日' : `${d}日後（${wd}曜）`}の夜は花火大会。屋外施設やスカイラウンジがあると、見物の客が増えます`);
+  }
+  if (!sim.scenario || sim.scenario.id !== 'seaside') return out;
+  const has = (t) => countType(sim, t) > 0;
+  const star = sim.star | 0;
+  if (star >= 3 && has('aquarium') && !has('dolphinShow')) out.push('🐬 水族館の横（同じ階で隣り合わせ）にイルカショーを建てると、ショーの時間に家族連れが集まります');
+  if (star >= 2 && !has('nightPool')) out.push('🏊 屋外プール: 昼は家族連れ、夜はナイトプールでカップルが来ます（屋上や空き地に）');
+  if (star >= 2 && !has('cottage')) out.push('🏕 コテージ: 浜や屋上に建てる宿泊施設。夏は予約がいっぱいに');
+  if (star >= 3 && !has('skyLounge')) out.push('🌃 スカイラウンジ: 20F以上に。高い階ほど客が増え、夜景で夜に売れます');
+  return out.slice(0, 2);
 }
 
 export class Goals {
@@ -171,6 +191,9 @@ export class Goals {
       const b = document.createElement('div'); b.className = 'g-beat'; b.textContent = `📖 ${beatText}`;
       todo.append(b);
     }
+    // 花火大会・新しい施設のヒント
+    const tips = facilityTips(sim);
+    for (const t of tips) { const b = document.createElement('div'); b.className = 'g-beat g-tip'; b.textContent = t; todo.append(b); }
     // (b) 次の★で足りないもの
     if (star && Array.isArray(star.reqs) && star.next != null) {
       const name = typeof star.next === 'number' ? `★${star.next}` : String(star.next);

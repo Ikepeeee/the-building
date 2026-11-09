@@ -8,10 +8,14 @@ export const LOBBY_SET = new Set(LOBBY_FLOORS);
 
 export const TRANSPORT = new Set(['stairs', 'escalator', 'elevator', 'express']);
 export const ELEV = new Set(['elevator', 'express']);
-export const HOTEL = new Set(['hotelSingle', 'hotelTwin', 'hotelSuite', 'hotelFamily']);
-export const COMMERCE = new Set(['fastfood', 'restaurant', 'shop', 'cinema', 'partyHall', 'umiNoIe', 'onsen', 'aquarium', 'terraceCafe', 'beerGarden', 'amusement']);
+// 宿泊施設（予約・清掃・レビュー・ゴキブリ）。コテージも含むが、ホテルの「客室」数には数えない
+export const HOTEL = new Set(['hotelSingle', 'hotelTwin', 'hotelSuite', 'hotelFamily', 'cottage']);
+export const isHotelRoom = (o) => o.type !== 'cottage';
+export const COMMERCE = new Set(['fastfood', 'restaurant', 'shop', 'cinema', 'partyHall', 'umiNoIe', 'onsen', 'aquarium', 'terraceCafe', 'beerGarden', 'amusement', 'dolphinShow', 'nightPool', 'skyLounge']);
 // シナリオ専用の集客施設（その利用者も「来訪者」に数える）
-export const RESORT = new Set(['umiNoIe', 'onsen', 'aquarium', 'amusement']);
+export const RESORT = new Set(['umiNoIe', 'onsen', 'aquarium', 'amusement', 'dolphinShow', 'nightPool', 'skyLounge']);
+// 花火大会の観覧に向く施設
+export const VIEWING = new Set(['beerGarden', 'terraceCafe', 'nightPool', 'dolphinShow', 'amusement', 'cottage', 'skyLounge']);
 export const NOISY = new Set(['fastfood', 'restaurant', 'cinema', 'partyHall', 'beerGarden', 'amusement']);
 // 連れの種類の割合 [ひとり, カップル, 家族]。施設の種類ごと（無ければ既定）
 export const PARTY_MIX = {
@@ -19,6 +23,8 @@ export const PARTY_MIX = {
   aquarium: [0.15, 0.25, 0.6], amusement: [0.1, 0.35, 0.55], umiNoIe: [0.2, 0.25, 0.55],
   restaurant: [0.3, 0.55, 0.15], beerGarden: [0.25, 0.6, 0.15], seaChapel: [0, 1, 0],
   terraceCafe: [0.35, 0.45, 0.2], onsen: [0.35, 0.3, 0.35],
+  dolphinShow: [0.1, 0.35, 0.55], skyLounge: [0.25, 0.6, 0.15], cottage: [0, 0.45, 0.55],
+  nightPoolDay: [0.15, 0.2, 0.65], nightPoolNight: [0.1, 0.8, 0.1],
 };
 export const TENANT = new Set(['office', 'condo']);
 export const TRANSIENT = new Set(['visitor', 'vip', 'bride', 'groom', 'weddingGuest']);
@@ -85,11 +91,11 @@ export const SIM = {
 };
 
 // 商業施設: 滞在時間 [最小, 幅]、来客率、1時間あたりの上限
-export const STAY = { fastfood: [20, 25], restaurant: [40, 40], shop: [20, 30], cinema: [110, 20], partyHall: [120, 30], umiNoIe: [30, 40], onsen: [60, 60], aquarium: [70, 50], terraceCafe: [30, 30], beerGarden: [60, 60], amusement: [120, 60] };
-export const VISIT_RATE = { fastfood: 1, restaurant: 0.8, shop: 0.8, cinema: 1.2, partyHall: 0.8, umiNoIe: 1, onsen: 0.8, aquarium: 1, terraceCafe: 1, beerGarden: 0.9, amusement: 1.2 };
-export const VISIT_CAP = { fastfood: 14, restaurant: 12, shop: 10, cinema: 25, partyHall: 14, umiNoIe: 16, onsen: 20, aquarium: 24, terraceCafe: 14, beerGarden: 16, amusement: 30 };
+export const STAY = { fastfood: [20, 25], restaurant: [40, 40], shop: [20, 30], cinema: [110, 20], partyHall: [120, 30], umiNoIe: [30, 40], onsen: [60, 60], aquarium: [70, 50], terraceCafe: [30, 30], beerGarden: [60, 60], amusement: [120, 60], dolphinShow: [50, 20], nightPool: [70, 60], skyLounge: [50, 40] };
+export const VISIT_RATE = { fastfood: 1, restaurant: 0.8, shop: 0.8, cinema: 1.2, partyHall: 0.8, umiNoIe: 1, onsen: 0.8, aquarium: 1, terraceCafe: 1, beerGarden: 0.9, amusement: 1.2, dolphinShow: 0.6, nightPool: 0.9, skyLounge: 0.8 };
+export const VISIT_CAP = { fastfood: 14, restaurant: 12, shop: 10, cinema: 25, partyHall: 14, umiNoIe: 16, onsen: 20, aquarium: 24, terraceCafe: 14, beerGarden: 16, amusement: 30, dolphinShow: 20, nightPool: 16, skyLounge: 16 };
 // 中にいられる人数の上限（スーパー銭湯は大きいが無限ではない）
-export const CAPACITY = { onsen: 80, amusement: 120, aquarium: 100 };
+export const CAPACITY = { onsen: 80, amusement: 120, aquarium: 100, dolphinShow: 150, nightPool: 60, skyLounge: 60 };
 // 屋外施設の天気による来客の倍率
 export const OUTDOOR_WEATHER = { rain: 0.2, typhoon: 0 };
 

@@ -73,5 +73,22 @@ export class Hud {
     if (this.el.night.hidden === ff) this.el.night.hidden = !ff;
     if (ff) this.set('night', this.el.night, `🌙 早送り中 ×${((UI_SPEEDS[cur] || {}).v || 1) * 4}`);
     this.set('mute', this.el.mute, app.sound.muted ? '🔇' : '🔊');
+    // 花火大会の告知・開催中
+    const fest = sim.festival;
+    const fb = this.el.fest || (this.el.fest = document.getElementById('fest-badge'));
+    let ft = '';
+    if (fest && fest.state === 'live') ft = '🎆 花火大会 開催中！';
+    else if (fest && fest.state === 'announced' && Number.isFinite(fest.start)) {
+      const d = Math.floor(fest.start / 1440);
+      const wd = WEEK[(d % 7 + 7) % 7];
+      const left = d - sim.day;
+      ft = `🎆 ${left <= 0 ? '今日' : left === 1 ? '明日' : `${wd}曜`} ${String(Math.floor((fest.start % 1440) / 60)).padStart(2, '0')}:${String(Math.floor(fest.start % 60)).padStart(2, '0')} 花火大会`;
+    }
+    if (fb) {
+      if (fb.hidden === !!ft) fb.hidden = !ft;
+      if (ft) this.set('fest', fb, ft);
+      fb.classList.toggle('live', !!(fest && fest.state === 'live'));
+      app.root.classList.toggle('badge-stack', !!ft && (!this.el.badge.hidden || !this.el.night.hidden));
+    }
   }
 }

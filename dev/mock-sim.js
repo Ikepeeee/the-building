@@ -44,6 +44,12 @@ export class MockTower {
       place('amusement', 16, 150, { inCount: 10 });
       place('terraceCafe', 16, 200, { inCount: 5 });
       place('seaChapel', 31, 20, { inCount: 8 });
+      // §19
+      place('dolphinShow', 13, 322, { inCount: 14, show: { phase: opt.show ? 'show' : 'idle', t: 0 } });
+      place('nightPool', 16, 216, { inCount: 6 });
+      place('skyLounge', 24, 20, { inCount: 7 });
+      for (let i = 0; i < 3; i++) place('cottage', 16, 240 + i * 16, { variant: i, ...[{ inCount: 4 }, { inCount: 2 }, { dirty: true, occupied: false }][i] });
+      if (opt.festival) this.festival = { kind: 'fireworks', start: this.time - 10, end: this.time + 50, state: 'live' };
       const hfs = [{ inCount: 4 }, { inCount: 2 }, { occupied: true, inCount: 0 }, { dirty: true, occupied: false }, { inCount: 3 }, { occupied: false }];
       for (let i = 0; i < 6; i++) place('hotelFamily', 11, 150 + i * 8, { variant: i % 3, ...hfs[i] });
       // 浜の家（ラムネ屋・サーフショップ）を本館の右の棟に
