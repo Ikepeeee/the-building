@@ -1,0 +1,104 @@
+// 共有定数。全モジュールがここを参照する。
+// キー名・フィールド名は変更しないこと（数値バランスの調整は sim 担当が行ってよい）。
+
+export const TILE_W = 8;        // 1マスの幅（ワールドpx）
+export const FLOOR_H = 24;      // 1フロアの高さ（ワールドpx）
+export const W = 480;           // 横のマス数（v2: 150 → 480。約数が多く、全施設の幅が W の約数になるようにしている）
+export const MIN_F = -10;       // 最下層 B10F
+export const MAX_F = 99;        // 最上層 100F
+export const DAY = 1440;        // 1日 = 1440 ゲーム分
+export const GAME_MIN_PER_SEC = 6;      // 等倍で 1 実秒 = 6 ゲーム分
+export const SPEEDS = [0, 1, 2, 4, 8];
+export const START_MONEY = 2000000;
+export const LOBBY_FLOORS = [0, 14, 29, 44, 59, 74, 89]; // 1F と スカイロビー階 (15F,30F,...,90F)
+export const STAR_POP = [0, 0, 300, 1000, 3000, 6000];   // ★n に必要な人口
+export const WEEK = ['月', '火', '水', '木', '金', '土', '日'];
+export const SAVE_KEY = 'thebuilding.save.v1';
+
+export const floorName = (f) => (f >= 0 ? `${f + 1}F` : `B${-f}F`);
+export const fmtMoney = (v) => (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString('en-US');
+
+// ---- 座標変換 ----
+// ワールド座標: wx = マス * TILE_W、フロア f の上端 wy = -(f+1)*FLOOR_H、下端 wy = -f*FLOOR_H（地面は wy=0）。
+// カメラ cam = { x, y, zoom }: x,y は画面左上に映るワールド座標、zoom は CSS px / ワールドpx。
+export const worldToScreen = (cam, wx, wy) => [(wx - cam.x) * cam.zoom, (wy - cam.y) * cam.zoom];
+export const screenToWorld = (cam, sx, sy) => [sx / cam.zoom + cam.x, sy / cam.zoom + cam.y];
+export const worldToCell = (wx, wy) => ({ x: Math.floor(wx / TILE_W), f: Math.floor(-wy / FLOOR_H) });
+
+// ---- 施設定義 ----
+// cat:   ツールバーのグループ
+// w:     幅（マス）。drag:'h' の場合は可変（minW）
+// h:     高さ（フロア数、既定1）。h>1 は f〜f+h-1 を占有
+// drag:  'h' 横ドラッグ / 'v' 縦ドラッグ（エレベーター）
+// only:  'lobbyFloor' LOBBY_FLOORS のみ / 'top' 100F のみ / 'basement' 地下のみ / 'aboveGround' 地上のみ
+// cap:   所属人数
+export const TYPES = {
+  floor:       { name: 'フロア', cat: 'basic', drag: 'h', minW: 1, costPerTile: 500, star: 1, desc: '空きフロア。施設の土台になる' },
+  bridge:      { name: '連絡通路', cat: 'basic', drag: 'h', minW: 1, costPerTile: 3000, star: 2, only: 'aboveGround', desc: '下に支えがなくても架けられる橋。離れた棟やフロアの切れ目をつなぐ' },
+  lobby:       { name: 'ロビー', cat: 'basic', drag: 'h', minW: 4, costPerTile: 2000, star: 1, only: 'lobbyFloor', desc: '人の出入口。1Fと15F毎のスカイロビー階に設置' },
+  stairs:      { name: '階段', cat: 'transport', w: 8, cost: 5000, star: 1, desc: '1つ上の階とつなぐ。近い階の移動向き' },
+  escalator:   { name: 'エスカレーター', cat: 'transport', w: 8, cost: 20000, star: 2, desc: '1つ上の階とつなぐ。商業施設向き' },
+  elevator:    { name: 'エレベーター', cat: 'transport', w: 4, drag: 'v', cost: 200000, carCost: 80000, maxSpan: 30, maxCars: 8, cap: 21, star: 1, desc: '全階停止。最大30フロア' },
+  express:     { name: '急行エレベーター', cat: 'transport', w: 6, drag: 'v', cost: 400000, carCost: 150000, maxSpan: 110, maxCars: 8, cap: 40, star: 3, desc: 'ロビー階と地下のみ停止' },
+  office:      { name: 'オフィス', cat: 'office', w: 10, cost: 40000, cap: 6, rent: 5500, star: 1, only: 'aboveGround', desc: '6人が平日に通勤。平日毎日賃料' },
+  condo:       { name: 'マンション', cat: 'living', w: 16, cost: 80000, cap: 3, sale: 100000, star: 1, only: 'aboveGround', desc: '3人家族が住む。入居時に販売収入' },
+  hotelSingle: { name: 'シングルルーム', cat: 'hotel', w: 4, cost: 20000, cap: 1, price: 1000, star: 2, only: 'aboveGround', desc: '1人宿泊。清掃が必要' },
+  hotelTwin:   { name: 'ツインルーム', cat: 'hotel', w: 6, cost: 50000, cap: 2, price: 2000, star: 2, only: 'aboveGround', desc: '2人宿泊。清掃が必要' },
+  hotelFamily: { name: 'ファミリールーム', cat: 'hotel', w: 8, cost: 70000, cap: 4, price: 3500, star: 2, only: 'aboveGround', desc: '家族4人で泊まれる客室（大人2人＋子ども2人）。清掃が必要' },
+  hotelSuite:  { name: 'スイートルーム', cat: 'hotel', w: 12, cost: 100000, cap: 2, price: 5000, star: 3, only: 'aboveGround', desc: '高級客室。VIPが泊まる' },
+  fastfood:    { name: 'ファストフード', cat: 'commerce', w: 16, cost: 100000, price: 50, open: [10, 21], star: 1, desc: '10〜21時営業' },
+  restaurant:  { name: 'レストラン', cat: 'commerce', w: 24, cost: 200000, price: 200, open: [17, 24], star: 2, desc: '17〜24時営業' },
+  shop:        { name: 'ショップ', cat: 'commerce', w: 12, cost: 100000, price: 100, open: [10, 21], star: 2, desc: '10〜21時営業' },
+  cinema:      { name: '映画館', cat: 'commerce', w: 32, h: 2, cost: 500000, price: 150, open: [10, 24], star: 3, desc: '2フロア分。週替わり上映' },
+  partyHall:   { name: 'パーティーホール', cat: 'commerce', w: 30, h: 2, cost: 100000, price: 2000, open: [12, 22], star: 3, desc: '2フロア分。団体客が来る' },
+  security:    { name: '警備室', cat: 'service', w: 16, cost: 100000, cap: 6, star: 2, desc: '爆弾捜索・消火を行う。★3の条件' },
+  housekeeping:{ name: 'ハウスキーピング', cat: 'service', w: 15, cost: 50000, cap: 6, star: 2, desc: 'ホテルの客室を清掃する' },
+  garbage:     { name: 'ごみ・リサイクルセンター', cat: 'service', w: 24, h: 2, cost: 150000, star: 1, only: 'basement', capacity: 600, desc: '地下2フロア分。ビル全体のごみを集めて分別し、毎朝収集車が回収する' },
+  parking:     { name: '駐車場', cat: 'service', w: 24, cost: 80000, star: 2, only: 'basement', spaces: 12, desc: '地下のみ。★3以上では車で来る入居者が駐車場を求める' },
+  medical:     { name: '医療センター', cat: 'service', w: 24, cost: 500000, star: 3, desc: '★4の条件' },
+  metro:       { name: '地下鉄駅', cat: 'special', w: 30, h: 3, cost: 1000000, star: 4, only: 'basement', desc: '地下3フロア分。第2の出入口。★5の条件' },
+  cathedral:   { name: '大聖堂', cat: 'special', w: 30, cost: 3000000, star: 5, only: 'top', desc: '100Fのみ。結婚式が挙がればタワー達成' },
+  // ---- 屋外施設（上に何も建てられない。地上の空き地・屋上・浜に置く） ----
+  terraceCafe: { name: 'テラスカフェ', cat: 'commerce', w: 16, cost: 120000, price: 70, open: [9, 21], star: 2, outdoor: true, desc: '屋外の飲食店。上には何も建てられない（屋上や浜辺に）' },
+  beerGarden:  { name: 'ビアガーデン', cat: 'commerce', w: 24, cost: 180000, price: 180, open: [17, 23], star: 2, outdoor: true, desc: '夕方からの屋外レストラン。上には何も建てられない' },
+  // ---- シナリオ専用（scenario が一致するときだけ使える） ----
+  umiNoIe:     { name: '海の家', cat: 'resort', w: 16, cost: 60000, price: 40, open: [9, 18], star: 1, only: 'ground', scenario: 'seaside', desc: '1Fのみ。夏（7〜9月）だけ営業する浜辺の店' },
+  onsen:       { name: 'スーパー銭湯', cat: 'resort', w: 32, h: 2, cost: 400000, price: 120, open: [6, 24], star: 2, scenario: 'seaside', desc: '2フロア分の温泉施設。露天風呂・サウナ・休憩処・食事処。ホテルの評価が上がる' },
+  aquarium:    { name: '水族館', cat: 'resort', w: 32, h: 2, cost: 800000, price: 150, open: [9, 20], star: 3, scenario: 'seaside', desc: '2フロア分。季節を問わず観光客を呼ぶ目玉施設' },
+  amusement:   { name: '遊園地', cat: 'resort', w: 48, h: 3, cost: 2000000, price: 300, open: [9, 21], star: 4, outdoor: true, scenario: 'seaside', desc: '観覧車とジェットコースター。3フロア分の屋外施設で、上には何も建てられない' },
+  dolphinShow: { name: 'イルカショー', cat: 'resort', w: 32, h: 2, cost: 600000, price: 100, open: [10, 17], star: 3, outdoor: true, adjacent: 'aquarium', scenario: 'seaside', desc: '水族館の横に建てる屋外のショープール（2フロア分）。1日数回のショーに観客が集まる' },
+  nightPool:   { name: '屋外プール', cat: 'resort', w: 24, cost: 350000, price: 80, open: [9, 23], star: 2, outdoor: true, scenario: 'seaside', desc: '屋外のプール。昼は家族連れ、夜はナイトプールでカップル。雨に弱い' },
+  skyLounge:   { name: 'スカイラウンジ', cat: 'resort', w: 24, cost: 500000, price: 150, open: [11, 24], star: 3, only: 'high', minF: 19, scenario: 'seaside', desc: '20F以上の展望ラウンジ。高い階ほど客が増え、夜景で夜の売上が伸びる' },
+  cottage:     { name: 'コテージ', cat: 'resort', w: 16, cost: 120000, cap: 4, price: 4000, star: 2, outdoor: true, scenario: 'seaside', desc: '屋外の宿泊施設（コテージ・グランピング）。浜・地上・屋上に置く。清掃が必要。冬は客が減る' },
+  seaChapel:   { name: '海のチャペル', cat: 'resort', w: 24, cost: 1500000, star: 5, only: 'high', minF: 29, scenario: 'seaside', desc: '30F以上に建てる。夕日の結婚式が挙がれば「伝説のリゾート」' },
+};
+
+export const TOOL_CATS = [
+  { id: 'basic', name: '基本' },
+  { id: 'transport', name: '移動' },
+  { id: 'office', name: 'オフィス' },
+  { id: 'living', name: '住居' },
+  { id: 'hotel', name: 'ホテル' },
+  { id: 'commerce', name: '商業' },
+  { id: 'service', name: 'サービス' },
+  { id: 'special', name: '特別' },
+  { id: 'resort', name: 'リゾート' },   // シナリオ専用の施設があるときだけ表示
+];
+
+// ---- テナントのバリエーション（v2） ----
+// 各施設に o.variant（下記配列の添字）を sim が割り当てる。render は種類ごとに内装を描き分け、
+// sim は種類ごとの店名・社名（o.brand）を付ける。キー名は render / sim の共通語彙。
+export const VARIANTS = {
+  office:      ['standard', 'it', 'law', 'design', 'bank', 'publisher', 'game', 'trading'],
+  condo:       ['modern', 'japanese', 'family', 'luxury', 'artist', 'minimal'],
+  hotelSingle: ['classic', 'modern', 'japanese'],
+  hotelTwin:   ['classic', 'modern', 'japanese'],
+  hotelSuite:  ['classic', 'modern', 'japanese'],
+  hotelFamily: ['bunk', 'tatami', 'kids'],
+  cottage:     ['wood', 'glamping', 'dome'],
+  umiNoIe:     ['yakisoba', 'kakigori', 'beachbar', 'surfshop', 'ramune'],
+  fastfood:    ['burger', 'ramen', 'sushi', 'pizza', 'cafe', 'curry', 'donut'],
+  restaurant:  ['french', 'italian', 'chinese', 'japanese', 'steak'],
+  shop:        ['fashion', 'books', 'electronics', 'flowers', 'toys', 'sports', 'grocery'],
+};
+export const TRANSPORT_TYPES = ['elevator', 'express', 'stairs', 'escalator'];
