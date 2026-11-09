@@ -60,12 +60,18 @@ export class Hud {
     this.el.net.className = 'hud-sub ' + (net >= 0 ? 'pos' : 'neg');
     this.set('pop', this.el.pop, (sim.pop | 0).toLocaleString('en-US'));
     const wd = WEEK[((sim.weekday ?? sim.day % 7) + 7) % 7] || '';
-    this.set('day', this.el.day, `${(sim.day | 0) + 1}日目`);
+    // 月日（sim.date: フリープレイは 4/1、海辺は 7/1 始まり）と経過日数
+    const dt = sim.date;
+    const dateText = dt && dt.month ? `${dt.month}月${dt.day}日・` : '';
+    this.set('day', this.el.day, `${dateText}${(sim.day | 0) + 1}日目`);
     const hh = String(sim.hour | 0).padStart(2, '0'), mm = String(sim.minute | 0).padStart(2, '0');
     const w = sim.weather;
-    const wx = w ? (w.kind === 'typhoon' ? ' 🌀' : ' ☂') : '';
-    this.set('time', this.el.time, `${wd} ${hh}:${mm}${wx}`);
-    this.el.time.title = w ? (w.kind === 'typhoon' ? '台風が来ています' : '雨') : '';
+    // 天気があれば天気、なければ季節のマーク
+    const m = dt && dt.month;
+    const season = !m ? null : m >= 3 && m <= 5 ? ['🌸', '春'] : m >= 6 && m <= 8 ? ['☀️', '夏'] : m >= 9 && m <= 11 ? ['🍁', '秋'] : ['⛄', '冬'];
+    const mark = w ? (w.kind === 'typhoon' ? ' 🌀' : ' ☂') : season ? ` ${season[0]}` : '';
+    this.set('time', this.el.time, `${wd} ${hh}:${mm}${mark}`);
+    this.el.time.title = w ? (w.kind === 'typhoon' ? '台風が来ています' : '雨') : season ? season[1] : '';
     const cur = app.speedIdx;
     this.speedBtns.forEach((b, i) => b.classList.toggle('is-on', i === cur));
     this.el.badge.hidden = !(cur === 0 && !app.blocked());
