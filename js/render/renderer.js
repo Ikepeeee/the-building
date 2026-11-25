@@ -21,12 +21,12 @@ const LOBBY_SET = new Set(LOBBY_FLOORS);
 const VIS_CAP = {
   office: 6, condo: 4, hotelSingle: 1, hotelTwin: 2, hotelSuite: 3, fastfood: 9, restaurant: 8, shop: 5,
   cinema: 10, partyHall: 14, security: 6, housekeeping: 6, medical: 6, metro: 14, cathedral: 12,
-  umiNoIe: 7, onsen: 14, aquarium: 12, seaChapel: 10, hotelFamily: 4, terraceCafe: 6, beerGarden: 12, amusement: 10, dolphinShow: 16, nightPool: 7, skyLounge: 7, cottage: 4,
+  umiNoIe: 7, onsen: 14, aquarium: 30, seaChapel: 10, hotelFamily: 4, terraceCafe: 6, beerGarden: 12, amusement: 10, nightPool: 7, skyLounge: 7, cottage: 4,
 };
-const COMMERCE = new Set(['fastfood', 'restaurant', 'shop', 'cinema', 'partyHall', 'umiNoIe', 'onsen', 'aquarium', 'terraceCafe', 'beerGarden', 'amusement', 'dolphinShow', 'nightPool', 'skyLounge']);
+const COMMERCE = new Set(['fastfood', 'restaurant', 'shop', 'cinema', 'partyHall', 'umiNoIe', 'onsen', 'aquarium', 'terraceCafe', 'beerGarden', 'amusement', 'nightPool', 'skyLounge']);
 const ROOMS = new Set(['office', 'condo', 'hotelSingle', 'hotelTwin', 'hotelSuite', 'hotelFamily', 'cottage']);
 const SERVICE = new Set(['security', 'housekeeping', 'medical']);
-const EVAL_TYPES = new Set(['office', 'condo', 'hotelSingle', 'hotelTwin', 'hotelSuite', 'fastfood', 'restaurant', 'shop', 'cinema', 'partyHall', 'umiNoIe', 'onsen', 'aquarium', 'terraceCafe', 'beerGarden', 'amusement', 'hotelFamily', 'dolphinShow', 'nightPool', 'skyLounge', 'cottage']);
+const EVAL_TYPES = new Set(['office', 'condo', 'hotelSingle', 'hotelTwin', 'hotelSuite', 'fastfood', 'restaurant', 'shop', 'cinema', 'partyHall', 'umiNoIe', 'onsen', 'aquarium', 'terraceCafe', 'beerGarden', 'amusement', 'hotelFamily', 'nightPool', 'skyLounge', 'cottage']);
 const EVAL_COL = { good: '#38d8ff', fair: '#f4d020', bad: '#f03030' };
 
 const isElev = (t) => t === 'elevator' || t === 'express';
@@ -585,7 +585,7 @@ export class Renderer {
   // 毎フレーム描き直す（チャンクに焼かない）施設: 動きがあるもの
   isDynamic(o) {
     const t = o.type;
-    return t === 'metro' || t === 'escalator' || t === 'amusement' || t === 'dolphinShow' || !!o.destroyed || (t === 'garbage' && !!o.truck) || this.isBuilding(o);
+    return t === 'metro' || t === 'escalator' || t === 'amusement' || t === 'aquarium' || !!o.destroyed || (t === 'garbage' && !!o.truck) || this.isBuilding(o);
   }
 
   // mode: 'all' = 全部、'static' = チャンク用（動かないもの）、'dynamic' = 毎フレーム分（動くもの・カゴ）
@@ -1009,7 +1009,7 @@ export class Renderer {
     let dark = 0;
     const outdoor = !!(TYPES[type] && TYPES[type].outdoor);
     if (type === 'amusement') this.drawRides(o, x, y, v);
-    if (type === 'dolphinShow') this.drawDolphins(o, x, y, v);
+    if (type === 'aquarium' && tw >= 55) this.drawDolphins(o, x, y, v);
     if (outdoor) return;   // 屋根がないので暗くする箱は描かない（夜は灯りの有無で表す）
     if (COMMERCE.has(type)) dark = v.open ? 0 : 0.42 + 0.3 * night;
     else if (ROOMS.has(type)) dark = !v.occ ? 0.12 + 0.66 * night : v.n === 0 ? 0.74 * night : 0;
@@ -1191,7 +1191,7 @@ export class Renderer {
         const dir = k % 2 ? -1 : 1;
         const xa = x + x0 + 14 + k * 20, span = 44;
         const px = dir > 0 ? xa + ph * span : xa + span - ph * span;
-        const h = 24 + k * 4;
+        const h = 13 + k * 3;   // 屋内の天井（トラス）より下に収める
         const py = surf - Math.sin(Math.PI * ph) * h;
         if (ph > 0.04 && ph < 0.96) this.img(dir > 0 ? spr : sprL, px - 5, py - 4, 11, 6);
         // 水しぶき（飛び出し・着水）
@@ -1202,11 +1202,11 @@ export class Renderer {
       }
       // ボールの技
       const bph = (ms % 1600) / 1600;
-      this.rect(x + 176 - 2, y + 10 - Math.abs(Math.sin(Math.PI * bph)) * 8, 4, 4, '#f0c030');
+      this.rect(x + DOLPHIN_POOL.hoop - 2, y + 22 - Math.abs(Math.sin(Math.PI * bph)) * 8, 4, 4, '#f0c030');
       // 観客の歓声（手が上がる）
       const up = ((ms / 280) | 0) % 2;
       for (let i = 0; i < 18; i++) {
-        const row = i % 5, bx = x + 8 + row * 18 + ((i * 13) % Math.max(8, 80 - row * 18));
+        const row = i % 5, bx = x + DOLPHIN_POOL.seats + 4 + row * 18 + ((i * 13) % Math.max(8, 80 - row * 18));
         const by = y + 22 + row * 4 - 9;
         if ((i + up) % 2) this.rect(bx, by, 1, 2, '#1a1a1a');
       }

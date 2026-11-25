@@ -22,12 +22,15 @@ function sizeLabel(t) {
   return `幅${t.w}マス${t.h > 1 ? `×${t.h}フロア` : ''}`;
 }
 
+// 施設の特徴として添える一言（ツールチップとヒント）
+const EXTRA_NOTE = { 水族館: 'イルカショーあり: 1日4回 10:30／12:30／14:30／16:00' };
+
 /** 置ける場所の決まり（ツールチップとヒント用） */
 export function placementNotes(t) {
   const out = [sizeLabel(t)];
   if (t.only === 'high') out.push(`${(t.minF ?? 29) + 1}F以上`);
   else if (ONLY[t.only]) out.push(ONLY[t.only]);
-  if (t.adjacent) out.push(`同じ階の${(TYPES[t.adjacent] && TYPES[t.adjacent].name) || t.adjacent}の横に建てる`);
+  if (EXTRA_NOTE[t.name]) out.push(EXTRA_NOTE[t.name]);
   if (t.outdoor) out.push('屋外施設（上に何も建てられない）');
   return out.filter(Boolean);
 }

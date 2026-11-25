@@ -7,8 +7,8 @@ export class SeasidePlayer extends AutoPlayer {
     super(sim);
     this.skill = skill;
     if (skill === 'average') this.pace = { floorsPerDay: 1, reserve: 400000 };
-    // 地上の並び: テラスカフェ 161〜176 の右に、プール・コテージ・水族館とイルカショー・遊園地
-    this.beachX = { nightPool: 177, cottage: 201, aquarium: 265, dolphin: 297, amusement: 329 };
+    // 地上の並び: テラスカフェ 161〜176 の右に、プール・コテージ・浜の水族館（イルカショー付き）・遊園地
+    this.beachX = { nightPool: 177, cottage: 201, aquarium: 265, amusement: 325 };
   }
 
   setup() {
@@ -32,15 +32,15 @@ export class SeasidePlayer extends AutoPlayer {
     if (s.hotels.length < 48 && f % 2 === 1 && ((sp.hotelFloors || 0) < 4 || s.hotels.length < 44)) return 'hotel';
     if (!sp.onsen && s.star >= 2 && this.money() > (this.skill === 'average' ? 1200000 : 500000)) return 'onsen';
     const avg = this.skill === 'average';
-    if (!sp.aquarium && s.star >= 3 && this.money() > (avg ? 2600000 : 900000)) return 'aquarium';
+    if (!sp.aquarium && s.star >= 3 && this.money() > (avg ? 3000000 : 1500000)) return 'aquarium';
     // 上手なプレイヤーは、資金に余裕があればさらに人を呼ぶ（水族館・店のフロア）
-    if (avg && sp.aquarium && s.byType.aquarium.length < 2 && this.money() > 3500000) return 'aquarium';
+    if (avg && sp.aquarium && s.byType.aquarium.length < 2 && this.money() > 4200000) return 'aquarium';
     // 普通のプレイヤーも、かなり余裕ができたら店のフロアを足す
     if (avg && sp.aquarium && this.money() > 3500000 && f % 3 === 1) return 'commerce';
     // 20F より上: スカイラウンジ（★3）
     if (f >= 19 && s.star >= 3 && !s.byType.skyLounge.length && this.money() > (avg ? 1500000 : 800000)) return 'lounge';
     if (!avg && this.money() > 1500000) {
-      if (sp.aquarium && s.byType.aquarium.length < 3 && f % 3 === 0) return 'aquarium';
+      if (sp.aquarium && s.byType.aquarium.length < 2 && f % 3 === 0) return 'aquarium';
       if (f % 3 === 1) return 'commerce';
     }
     return 'condo';
@@ -95,15 +95,13 @@ export class SeasidePlayer extends AutoPlayer {
   // 浜辺の屋外施設（地上は床でつないで並べる）
   beachFacilities() {
     const s = this.s;
-    // テラスカフェ・屋外プール・コテージ（★2）、浜の水族館とイルカショー（★3）、遊園地（★4）
+    // テラスカフェ・屋外プール・コテージ（★2）、浜の水族館（★3）、遊園地（★4）
     const avg = this.skill === 'average', B = this.beachX;
     if (s.star >= 2 && !s.byType.terraceCafe.length && this.money() > (avg ? 600000 : 250000)) s.build('terraceCafe', { f: 0, x: 161 });
     if (s.byType.terraceCafe.length) {
       if (s.star >= 4 && !s.byType.amusement.length && this.money() > (avg ? 3500000 : 2300000)) this.beach('amusement', B.amusement);
       if (s.star >= 2 && !s.byType.nightPool.length && this.money() > (avg ? 1500000 : 420000)) this.beach('nightPool', B.nightPool);
-      if (s.star >= 3 && !s.byType.dolphinShow.length && this.money() > (avg ? 3200000 : 1500000)) {
-        if (this.objAt(0, B.aquarium, 'aquarium') || this.beach('aquarium', B.aquarium).ok) this.beach('dolphinShow', B.dolphin);
-      }
+      if (s.star >= 3 && s.byType.cottage.length >= 4 && !this.objAt(0, B.aquarium, 'aquarium') && this.money() > (avg ? 3600000 : 1900000)) this.beach('aquarium', B.aquarium);
       if (s.byType.nightPool.length && s.byType.cottage.length < 4 && this.money() > (avg ? 1200000 : 250000)) {
         for (let i = 0; i < 4; i++) if (!s.objAt(0, B.cottage + i * 16)) { this.beach('cottage', B.cottage + i * 16); break; }
       }

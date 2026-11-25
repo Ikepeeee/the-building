@@ -39,13 +39,12 @@ export class MockTower {
       place('umiNoIe', 0, 442, { inCount: 5, variant: 1, brand: 'かき氷 白波' });
       place('umiNoIe', 0, 458, { inCount: 4, variant: 2, brand: 'バー サンセット' });
       place('onsen', 13, 250, { inCount: 14 }); this.floor(13, 250, 281); this.floor(14, 250, 281);
-      place('aquarium', 13, 290, { inCount: 10 }); this.floor(13, 290, 321); this.floor(14, 290, 321);
+      place('aquarium', 13, 290, { inCount: 26, show: { phase: opt.show ? 'show' : 'idle', t: 0 } }); this.floor(13, 290, 349); this.floor(14, 290, 349);
       place('beerGarden', 15, 290, { inCount: 10 });
       place('amusement', 16, 150, { inCount: 10 });
       place('terraceCafe', 16, 200, { inCount: 5 });
       place('seaChapel', 31, 20, { inCount: 8 });
       // §19
-      place('dolphinShow', 13, 322, { inCount: 14, show: { phase: opt.show ? 'show' : 'idle', t: 0 } });
       place('nightPool', 16, 216, { inCount: 6 });
       place('skyLounge', 24, 20, { inCount: 7 });
       for (let i = 0; i < 3; i++) place('cottage', 16, 240 + i * 16, { variant: i, ...[{ inCount: 4 }, { inCount: 2 }, { dirty: true, occupied: false }][i] });

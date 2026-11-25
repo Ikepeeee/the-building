@@ -2469,6 +2469,39 @@ test('§18 移行: 旧い温泉（w24・h1）はスーパー銭湯（w32・h2）
   assert.ok(msg.some((t) => /払い戻しました/.test(t)));
 });
 
+test('§20 移行: 水族館＋隣のイルカショーは新しい水族館1つに、旧い水族館は w60 に置き直す（無理なら払い戻し）', () => {
+  const row = (a, b) => { let t = ''; for (let x = 0; x < 300; x++) t += x >= a && x <= b ? '1' : '0'; return t; };
+  const rows = { 0: row(0, 299), 1: row(0, 299), 2: row(0, 299), 3: row(0, 299) };
+  const base = { v: 3, seed: 1, time: 700, money: 1000000, star: 3, rows, nextId: 30, scenario: { id: 'seaside', startDay: 0, deadlineDay: 120, state: 'playing', grade: 0, scn: { story: { intro: 0 } } } };
+  const lobby = { id: 1, type: 'lobby', f: 0, x: 0, w: 60, h: 1 };
+  const notes = (t) => { const m = []; t.on('message', (e) => m.push(e.text)); t.step(1); return m; };
+  // 水族館（w32）＋右のイルカショー（w32） → 合わせた範囲（64マス）に w60 の水族館
+  const a = new Tower();
+  a.restore({ ...base, objs: [lobby, { id: 2, type: 'aquarium', f: 0, x: 100, w: 32, h: 2, brand: '海辺の水族館' }, { id: 3, type: 'dolphinShow', f: 0, x: 132, w: 32, h: 2 }] });
+  const o = a.objs.get(2);
+  assert.ok(o && o.type === 'aquarium' && o.w === 60 && o.x >= 100 && o.x + 60 <= 164, `まとめる ${o && o.x}`);
+  assert.equal(a.objs.has(3), false);
+  assert.equal(o.brand, '海辺の水族館');
+  assert.equal(a.money, 1000000);
+  assert.ok(notes(a).some((t) => /まとめました/.test(t)));
+  // 旧い水族館だけ: 右に空きがあれば w60 で置き直す、左右とも塞がっていれば撤去して払い戻し
+  const b = new Tower();
+  b.restore({ ...base, objs: [lobby, { id: 2, type: 'aquarium', f: 0, x: 100, w: 32, h: 2 }] });
+  assert.ok(b.objs.get(2) && b.objs.get(2).w === 60);
+  const c = new Tower();
+  c.restore({ ...base, objs: [lobby, { id: 4, type: 'shop', f: 0, x: 84, w: 16, h: 1 }, { id: 5, type: 'shop', f: 0, x: 132, w: 16, h: 1 }, { id: 2, type: 'aquarium', f: 0, x: 100, w: 32, h: 2 }] });
+  assert.equal(c.objs.has(2), false);
+  assert.ok(c.objs.has(4) && c.objs.has(5), 'ほかの施設はそのまま');
+  assert.equal(c.money, 1000000 + SIM.OLD_AQUARIUM_COST);
+  assert.ok(notes(c).some((t) => /水族館.*払い戻しました/.test(t)));
+  // 水族館のないイルカショー → 撤去して払い戻し
+  const d = new Tower();
+  d.restore({ ...base, objs: [lobby, { id: 3, type: 'dolphinShow', f: 0, x: 132, w: 32, h: 2 }] });
+  assert.equal(d.objs.size >= 1 && [...d.objs.values()].some((x) => x.type === 'dolphinShow'), false);
+  assert.equal(d.money, 1000000 + SIM.OLD_DOLPHIN_COST);
+  assert.ok(notes(d).some((t) => /イルカショー.*払い戻しました/.test(t)));
+});
+
 test('性能: 横幅480・30フロア・人口6000超の横長ビルで 1 ゲーム日', () => {
   const s = new Tower({ seed: 113 });
   s.money = 1e12; s.star = 3;
@@ -2539,27 +2572,20 @@ function seaside19(seed, floors = 3) {
   return s;
 }
 
-test('§19 隣接: イルカショーは同じ階の水族館の左右に接して建てる', () => {
+test('§20 水族館: w60・h2・屋内（上に建てられる）・イルカショーは別の施設ではない', () => {
   const s = seaside19(190);
-  assert.match(s.check('dolphinShow', { f: 0, x: 200 }).reason, /水族館の横に建ててください/);
+  assert.equal(TYPES.dolphinShow, undefined);
+  assert.equal(TYPES.aquarium.w, 60); assert.equal(TYPES.aquarium.h, 2);
   mustBuild(s, 'aquarium', { f: 0, x: 200 });
-  assert.ok(s.check('dolphinShow', { f: 0, x: 232 }).ok, '右に接する');
-  assert.ok(s.check('dolphinShow', { f: 0, x: 168 }).ok, '左に接する');
-  assert.match(s.check('dolphinShow', { f: 0, x: 240 }).reason, /水族館の横/, '離れている');
-  // 別の階の水族館（屋上）では駄目
-  mustBuild(s, 'aquarium', { f: 1, x: 0 });
-  assert.match(s.check('dolphinShow', { f: 4, x: 32 }).reason || '', /水族館の横|真上|フロア/);
-  mustBuild(s, 'dolphinShow', { f: 0, x: 232 });
-  const aq = s.objAt(0, 200), aq2 = s.objAt(1, 0), d = s.objAt(0, 232);
-  assert.equal(d.type, 'dolphinShow');
-  assert.ok(s.hasDolphinNeighbor(aq) && !s.hasDolphinNeighbor(aq2), '隣の水族館だけ集客が上がる');
-  assert.ok(d.brand && typeof d.brand === 'string');
+  const aq = s.objAt(0, 200);
+  assert.ok(aq.w === 60 && aq.brand);
+  assert.ok(s.check('floor', { f: 2, x: 200, x2: 259 }).ok, '屋内なので上に建てられる');
+  assert.ok(s.check('aquarium', { f: 0, x: 300 }).ok, '隣接の決まりはない');
 });
 
-test('§19 イルカショー: 1日4回の予定・o.show・観客が集まる・雨は×0.4・台風は中止', () => {
+test('§20 水族館のイルカショー: 1日4回の予定・o.show・観客が集まる・雨は×0.4・台風は中止', () => {
   const s = seaside19(191);
   mustBuild(s, 'aquarium', { f: 0, x: 200 });
-  mustBuild(s, 'dolphinShow', { f: 0, x: 232 });
   const d = s.objAt(0, 232);
   stepTo(s, 1, 0);
   let shows = 0, prev = 'idle', maxT = 0, cust = 0;
@@ -2581,7 +2607,7 @@ test('§19 イルカショー: 1日4回の予定・o.show・観客が集まる�
     let n = 0;
     for (let i = 0; i < 300; i++) {
       s.weather = weather; const before = s.events.size;
-      s.dolphinCrowd(10);
+      s.showCrowd(10);
       n += s.events.size - before;
     }
     s.weather = null;

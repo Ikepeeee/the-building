@@ -59,7 +59,7 @@ export function facilityTips(sim) {
   if (!sim.scenario || sim.scenario.id !== 'seaside') return out;
   const has = (t) => countType(sim, t) > 0;
   const star = sim.star | 0;
-  if (star >= 3 && has('aquarium') && !has('dolphinShow')) out.push('🐬 水族館の横（同じ階で隣り合わせ）にイルカショーを建てると、ショーの時間に家族連れが集まります');
+  if (star >= 3 && !has('aquarium')) out.push('🐬 水族館（大水槽とイルカショー）: 1日4回のショーに家族連れが集まる目玉施設。★4 の条件にもなります');
   if (star >= 2 && !has('nightPool')) out.push('🏊 屋外プール: 昼は家族連れ、夜はナイトプールでカップルが来ます（屋上や空き地に）');
   if (star >= 2 && !has('cottage')) out.push('🏕 コテージ: 浜や屋上に建てる宿泊施設。夏は予約がいっぱいに');
   if (star >= 3 && !has('skyLounge')) out.push('🌃 スカイラウンジ: 20F以上に。高い階ほど客が増え、夜景で夜に売れます');
@@ -116,7 +116,8 @@ export class Goals {
     let star = null;
     try { star = sim.starProgress(); } catch { star = null; }
     const basics = basicsChecklist(sim);
-    const sig = JSON.stringify([prog, star, basics.map((b) => b.done), this.collapsed, this.tab]);
+    const tips = facilityTips(sim);
+    const sig = JSON.stringify([prog, star, basics.map((b) => b.done), tips, this.collapsed, this.tab]);
     if (sig === this.sig) return;
     this.sig = sig;
     el.classList.toggle('collapsed', this.collapsed);
@@ -192,7 +193,6 @@ export class Goals {
       todo.append(b);
     }
     // 花火大会・新しい施設のヒント
-    const tips = facilityTips(sim);
     for (const t of tips) { const b = document.createElement('div'); b.className = 'g-beat g-tip'; b.textContent = t; todo.append(b); }
     // (b) 次の★で足りないもの
     if (star && Array.isArray(star.reqs) && star.next != null) {

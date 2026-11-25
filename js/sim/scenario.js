@@ -109,9 +109,9 @@ export const ScenarioMixin = {
   },
   partyKey(type, h = this.hour) { return type === 'nightPool' ? (h >= 18 ? 'nightPoolNight' : 'nightPoolDay') : type; },
 
-  // ---- イルカショー ----
+  // ---- 水族館のイルカショー ----
   updateShows() {
-    const D = this.scenarioDef && this.scenarioDef.dolphin, list = this.byType.dolphinShow;
+    const D = this.scenarioDef && this.scenarioDef.aquariumShow, list = this.byType.aquarium;
     if (!D || !list || !list.length) return;
     const m = this.time % DAY;
     let phase = 'idle', t = 0;
@@ -119,15 +119,16 @@ export const ScenarioMixin = {
       for (const st of D.times) if (m >= st && m < st + D.minutes) { phase = 'show'; t = (m - st) / D.minutes; }
     }
     for (const o of list) {
+      if (o.destroyed || o.burning) { if (!o.show || o.show.phase !== 'idle') o.show = { phase: 'idle', t: 0 }; continue; }
       if (!o.show || o.show.phase !== phase || phase === 'show') o.show = { phase, t };
     }
   },
-  // その時間に始まるショーへ、前の30分で観客が集まる
-  dolphinCrowd(h) {
-    const D = this.scenarioDef && this.scenarioDef.dolphin;
+  // その時間に始まるショーへ、前の30分で観客が集まる（雨の日は少なめ、台風は中止）
+  showCrowd(h) {
+    const D = this.scenarioDef && this.scenarioDef.aquariumShow;
     if (!D || this.isTyphoon()) return;
-    for (const o of this.byType.dolphinShow || []) {
-      if (o.burning || this.entranceDist(o.f, o.x + o.w / 2) === Infinity) continue;
+    for (const o of this.byType.aquarium || []) {
+      if (o.burning || o.destroyed || this.entranceDist(o.f, o.x + o.w / 2) === Infinity) continue;
       for (const st of D.times) {
         const lead = st - 30;
         if (lead < h * 60 || lead >= h * 60 + 60) continue;
@@ -136,10 +137,6 @@ export const ScenarioMixin = {
         for (let i = 0; i < n; i++) this.at(this.day * DAY + lead + this.rand(30), () => this.visit(o));
       }
     }
-  },
-  hasDolphinNeighbor(o) {
-    for (const d of this.byType.dolphinShow || []) if (d.f === o.f && (d.x === o.x + o.w || d.x + d.w === o.x)) return true;
-    return false;
   },
 
   // ---- 花火大会 ----
@@ -219,14 +216,13 @@ export const ScenarioMixin = {
     const def = this.scenarioDef;
     if (!def || !def.beach || this.isTyphoon()) return;
     // 目玉施設（水族館・海の家・温泉など）は人口に関係なく観光客を呼ぶ
-    this.dolphinCrowd(h);
+    this.showCrowd(h);
     this.festivalCrowd(h);
     for (const [t, A] of Object.entries(def.attractions || {})) {
       for (const o of this.byType[t] || []) {
         if (o.burning || !this.isOpen(o, h)) continue;
         if (this.entranceDist(o.f, o.x + o.w / 2) === Infinity) continue;
-        const boost = t === 'aquarium' && def.dolphin && this.hasDolphinNeighbor(o) ? def.dolphin.aquariumBoost : 1;
-        const lam = A.rate * boost * this.timeMul(o, h) * (A.season ? this.seasonMul() : 1) * this.weatherVisitorMul() * this.evalFactor(o) * this.outdoorMul(o);
+        const lam = A.rate * this.timeMul(o, h) * (A.season ? this.seasonMul() : 1) * this.weatherVisitorMul() * this.evalFactor(o) * this.outdoorMul(o);
         const n = Math.floor(lam * (0.5 + this.r()));
         for (let i = 0; i < n; i++) this.later(this.rand(55), () => this.visit(o));
       }

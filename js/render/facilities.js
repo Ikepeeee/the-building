@@ -1217,13 +1217,54 @@ DRAW.aquarium = (p, v) => {
   // 見物客（影）
   // 家族連れとカップル、ひとり客の影
   const pos = [44, 60, 76, 100, 112, 128, 140, 160, 176, 192, 218, 234];
-  for (let i = 0; i < Math.min(v.n, pos.length); i++) {
+  const nLeft = Math.min(v.n, Math.ceil(v.n * 0.4), pos.length);
+  for (let i = 0; i < nLeft; i++) {
     const k = i % 3;
     if (k === 0) groupFig(p, pos[i], fy - 1, 'family', '#0a0a14', 1);
     else if (k === 1) groupFig(p, pos[i], fy - 1, 'couple', '#0a0a14', 0);
     else standFig(p, pos[i], fy - 1, '#0a0a14', i % 2, i % 2);
   }
+  if (W >= 440) dolphinStadium(p, AQUA_STADIUM, v, v.n - nLeft);
 };
+
+// 屋内のイルカスタジアム（水族館の右側。sx から幅 228）
+export const AQUA_STADIUM = 252;
+export const DOLPHIN_POOL = { x0: AQUA_STADIUM + 100, x1: AQUA_STADIUM + 186, y: 31, hoop: AQUA_STADIUM + 150, seats: AQUA_STADIUM + 4 };
+function dolphinStadium(p, sx, v, nSeat) {
+  const fy = p.h - 3, W = p.w;
+  // 仕切りとスタジアムの壁・屋根のトラス・照明
+  p.r(sx - 4, 1, 3, fy - 1, '#0a1428');
+  p.r(sx, 1, W - sx - 1, fy - 1, '#1c3058');
+  for (let x = sx; x < W - 1; x += 12) { p.line(x, 1, x + 6, 6, '#3a5080'); p.line(x + 6, 6, x + 12, 1, '#3a5080'); }
+  p.r(sx, 6, W - sx - 1, 1, '#3a5080');
+  for (let x = sx + 10; x < W - 8; x += 36) { p.r(x, 7, 4, 2, v.open ? '#fff2c0' : '#5a6070'); }
+  // 観客席（ひな壇）
+  for (let i = 0; i < 5; i++) {
+    const x0 = sx + 4 + i * 18, top = 22 + i * 4;
+    p.r(x0, top, 18 * (5 - i), fy - top, i % 2 ? '#3a6ad0' : '#2a5ab8');
+    p.r(x0, top, 18 * (5 - i), 1, '#8ab0f0');
+  }
+  // ショープール
+  const { x0, x1, y } = DOLPHIN_POOL;
+  p.box(x0 - 2, y - 1, x1 - x0 + 4, fy - y + 1, '#2a8ac8', '#d8e8f0');
+  for (let yy = y + 1; yy < fy; yy++) p.r(x0, yy, x1 - x0, 1, shade('#2a8ac8', -((yy - y) / (fy - y)) * 0.4));
+  p.r(x0, y, x1 - x0, 1, '#a8e0f8');
+  for (let i = 0; i < 8; i++) p.p(x0 + 6 + i * 10, y + 2 + (i % 3), '#8ad0f0');
+  // トレーナーの台とフープ
+  p.box(x1 + 2, 26, 26, 4, '#e8e8e8', '#7a8a9a'); p.r(x1 + 4, 30, 2, fy - 30, '#9aa0a8'); p.r(x1 + 22, 30, 2, fy - 30, '#9aa0a8');
+  coatFig(p, x1 + 12, 25, '#2a8ac8', 0);
+  const hx = DOLPHIN_POOL.hoop;
+  p.r(hx, 12, 1, y - 12, '#9aa0a8'); for (let a = 0; a < 40; a++) { const t = (a / 40) * Math.PI * 2; p.p(Math.round(hx + Math.cos(t) * 5), Math.round(16 + Math.sin(t) * 5), a % 4 < 2 ? '#e04050' : '#ffffff'); }
+  // 大型ビジョン
+  p.box(sx + 20, 9, 40, 9, '#111820'); p.r(sx + 22, 11, 36, 5, v.open ? '#2a8ac8' : '#1a2a3a'); if (v.open) { p.r(sx + 30, 12, 10, 2, '#c8dce8'); p.p(sx + 41, 12, '#c8dce8'); }
+  // 観客（家族連れ・カップル）
+  const n = v.open ? nSeat : 0;
+  let k = 0;
+  for (let i = 0; i < 5 && k < n; i++) {
+    const top = 22 + i * 4;
+    for (let x = sx + 6 + i * 18; x < sx + 94 - 6 && k < n; x += 10) { groupFig(p, x, top - 1, k % 2 ? 'couple' : 'family', FIG, 1); k++; }
+  }
+}
 
 // 海のチャペル（w24 = 192x24、屋根の上に鐘楼）。白いガラスの礼拝堂、海の見える大きな窓
 DRAW.seaChapel = (p, v) => {
@@ -1368,38 +1409,7 @@ DRAW.amusement = (p, v) => {
   for (let i = 0; i < Math.min(n, pos.length); i++) groupFig(p, pos[i], fy - 1, i % 2 ? 'couple' : 'family', FIG, i % 2);
 };
 
-// ================= §19 イルカショー・屋外プール・スカイラウンジ =================
-// イルカショー（w32 h2 = 256x48、屋外）。プールと観客席。イルカのジャンプは renderer が毎フレーム描く
-export const DOLPHIN_POOL = { x0: 108, x1: 226, y: 31 };   // 水面
-DRAW.dolphinShow = (p, v) => {
-  const W = p.w, fy = deck(p, '#c8c0b0', '#a8a090');
-  // 観客席（ひな壇）
-  for (let i = 0; i < 5; i++) {
-    const x0 = 4 + i * 18, ty = fy - (4 - i) * 0;
-    const top = 22 + i * 4;
-    p.r(x0, top, 18 * (5 - i), fy - top, i % 2 ? '#3a6ad0' : '#2a5ab8');
-    p.r(x0, top, 18 * (5 - i), 1, '#8ab0f0');
-  }
-  // プール
-  const { x0, x1, y } = DOLPHIN_POOL;
-  p.box(x0 - 2, y - 1, x1 - x0 + 4, fy - y + 1, '#2a8ac8', '#d8e8f0');
-  for (let yy = y + 1; yy < fy; yy++) p.r(x0, yy, x1 - x0, 1, shade('#2a8ac8', -((yy - y) / (fy - y)) * 0.4));
-  p.r(x0, y, x1 - x0, 1, '#a8e0f8');
-  for (let i = 0; i < 10; i++) p.p(x0 + 6 + i * 11, y + 2 + (i % 3), '#8ad0f0');
-  // トレーナーの台とフープ
-  p.box(x1 + 2, 26, 26, 4, '#e8e8e8', '#7a8a9a'); p.r(x1 + 4, 30, 2, fy - 30, '#9aa0a8'); p.r(x1 + 22, 30, 2, fy - 30, '#9aa0a8');
-  coatFig(p, x1 + 12, 25, '#2a8ac8', 0);
-  p.r(176, 6, 1, 25, '#9aa0a8'); for (let a = 0; a < 40; a++) { const t = (a / 40) * Math.PI * 2; p.p(Math.round(176 + Math.cos(t) * 5), Math.round(10 + Math.sin(t) * 5), a % 4 < 2 ? '#e04050' : '#ffffff'); }
-  // 観客（家族連れ・カップル）
-  const n = v.open ? v.n : 0;
-  let k = 0;
-  for (let i = 0; i < 5 && k < n; i++) {
-    const top = 22 + i * 4;
-    for (let x = 6 + i * 18; x < 4 + 90 - 6 && k < n; x += 10) { groupFig(p, x, top - 1, k % 2 ? 'couple' : 'family', FIG, 1); k++; }
-  }
-  // 看板
-  p.box(40, 2, 44, 9, '#2a8ac8'); p.text('SHOW', 54, 4, '#ffffff');
-};
+// ================= §19 屋外プール・スカイラウンジ =================
 // イルカ（右向き 11x6）
 export function dolphinSprite() {
   const p = new Painter(11, 6);

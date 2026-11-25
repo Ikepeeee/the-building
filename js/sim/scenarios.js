@@ -48,8 +48,8 @@ export const SCENARIOS = [
       aquarium: { rate: 10, season: false }, umiNoIe: { rate: 2.5, season: true }, onsen: { rate: 2, season: true }, amusement: { rate: 12, season: false },
       nightPool: { rate: 2, season: true }, skyLounge: { rate: 3, season: false },
     },
-    // イルカショー（1日4回。ショーの前に観客が集まる）
-    dolphin: { times: [630, 750, 870, 960], minutes: 25, crowd: 8, rain: 0.4, aquariumBoost: 1.3 },
+    // 水族館のイルカショー（1日4回。ショーの前に観客が集まる）
+    aquariumShow: { times: [630, 750, 870, 960], minutes: 25, crowd: 8, rain: 0.4 },
     // 花火大会: 7〜8月の土曜 19:30〜20:30。3日前に告知、雨・台風なら翌日に順延（それも駄目なら中止）
     festival: { months: [7, 8], weekday: 5, start: 19 * 60 + 30, minutes: 60, notice: 3, crowd: 1.5, sales: 1.3 },
     // 温泉があるとホテルのレビューが上がる（確率）

@@ -883,6 +883,36 @@ export class Tower {
     return this.lastStepMs;
   }
 
+  // §20 移行: イルカショーは水族館と一つの施設になった。
+  // 水族館と、その左右に接するイルカショーは、二つを合わせた範囲に新しい水族館（w60）を1つ置く。
+  // 隣の水族館がないイルカショーは撤去して代金を返す。水族館はほかの施設のあとに置く（ずらす余地を残す）
+  _migrateAquariums(list) {
+    const aqW = TYPES.aquarium.w;
+    const shows = list.filter((s) => s && s.type === 'dolphinShow');
+    const aqs = list.filter((s) => s && s.type === 'aquarium');
+    const rest = list.filter((s) => !s || (s.type !== 'dolphinShow' && s.type !== 'aquarium'));
+    if (!shows.length && !aqs.length) return list;
+    const used = new Set();
+    const out = [];
+    for (const a of aqs) {
+      if (typeof a.w !== 'number' || a.w === aqW) { out.push(a); continue; }
+      const d = shows.find((x) => !used.has(x) && x.f === a.f && typeof x.x === 'number' && (x.x === a.x + a.w || x.x + (x.w || 32) === a.x));
+      if (!d) { out.push(a); continue; }
+      used.add(d);
+      const x0 = Math.min(a.x, d.x), x1 = Math.max(a.x + a.w, d.x + (d.w || 32));
+      const x = Math.max(0, Math.min(W - aqW, x0 + Math.floor((x1 - x0 - aqW) / 2)));
+      out.push({ ...a, x, w: aqW, destroyed: a.destroyed || null });
+      this._loadNotes.push(`${floorName(a.f)}の水族館とイルカショーを、イルカショーのある新しい水族館にまとめました`);
+    }
+    for (const d of shows) {
+      if (used.has(d)) continue;
+      const refund = SIM.OLD_DOLPHIN_COST;
+      this.money += refund;
+      this._loadNotes.push(`${floorName(d.f)}のイルカショーは水族館と一つになったため撤去し、代金 ${fmtMoney(refund)} を払い戻しました`);
+    }
+    return rest.concat(out);
+  }
+
   flushScenario() {
     if (!this._scnQueue.length) return;
     const l = this._scnQueue; this._scnQueue = [];
@@ -1356,7 +1386,7 @@ export class Tower {
     const elevs = [];
     const oldGarbage = [];
     let oldBags = 0;
-    for (let s of Array.isArray(d.objs) ? d.objs : []) {
+    for (let s of this._migrateAquariums(Array.isArray(d.objs) ? d.objs : [])) {
       try {
         // 旧 recycling は同じ場所の garbage として読む
         if (s && s.type === 'recycling') s = { ...s, type: 'garbage' };
@@ -1391,6 +1421,13 @@ export class Tower {
         // 旧い幅の garbage（w16）は、置けなければ地下の空きへ移す
         if (s.type === 'garbage' && !fits(s.f, s.f + h - 1, sx, w)) { oldGarbage.push(s); continue; }
         if (!fits(s.f, s.f + h - 1, sx, w)) {
+          // 旧い水族館（w32）が新しい水族館（w60）として入らなければ、代金を返す
+          if (s.type === 'aquarium' && s.w !== w) {
+            const refund = SIM.OLD_AQUARIUM_COST;
+            this.money += refund;
+            this._loadNotes.push(`${floorName(s.f)}の水族館は新しい大型の水族館に建て替えられなかったため撤去し、代金 ${fmtMoney(refund)} を払い戻しました`);
+            continue;
+          }
           // 旧い温泉（w24・h1）が新しいスーパー銭湯（w32・h2）として入らなければ、代金を返す
           if (s.type === 'onsen') {
             const refund = SIM.OLD_ONSEN_COST;

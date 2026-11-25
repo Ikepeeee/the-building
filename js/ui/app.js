@@ -398,7 +398,7 @@ export class App {
         : t.drag === 'v' ? (touch ? '縦になぞって範囲を決める' : '縦にドラッグして範囲を決める')
           : touch ? '指を置いて滑らせると位置合わせ（指の少し上に出ます）→ ✓ で確定' : 'クリックで設置（カーソルが中心。隣の施設にぴったり寄せます／Shift で寄せない）';
       const rules = placementNotes(t).slice(1).filter((n) => !(t.desc || '').includes(n.replace(/（.*$/, '')));
-      const desc = (HINT_DESC[key] || t.desc || '') + (rules.length ? `（${rules.join('・')}）` : '');
+      const desc = (HINT_DESC[key] || t.desc || '') + (rules.length ? ` ／ ${rules.join('・')}` : '');
       s = touch ? `${t.name}: ${how}。${desc}` : `${t.name}: ${desc}｜${how}`;
     }
     this.toolbar.setHint(s);
