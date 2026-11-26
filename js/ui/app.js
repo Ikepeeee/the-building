@@ -779,6 +779,8 @@ export class App {
   // ---------- コピーの操作バー ----------
   setupCopyBar() {
     const $ = (id) => document.getElementById(id);
+    // コピーの操作バーも下のメニューの中（いちばん上の段）に入れる
+    document.getElementById('toolbar').prepend($('copy-bar'));
     this.cpb = { el: $('copy-bar'), text: $('cp-text'), clear: $('cp-clear'), free: $('cp-free'), back: $('cp-back'), go: $('cp-go') };
     this.cpb.clear.addEventListener('click', () => { this.copy.clearMarks(); this.sound.play('click'); this.updateCopyBar(); });
     this.cpb.go.addEventListener('click', () => this.startCopyPaste());
@@ -851,7 +853,7 @@ export class App {
     const gs = this.copy.preview(cell, true);
     this.pending = { tool: 'copy', cell, ghosts: gs, ghost: null };
     this.pending.ghost = this.copyPendingGhost();
-    if (!silent) this.sound.play(this.copy.res && this.copy.res.ok ? 'click' : 'error');
+    if (!silent) { this.sound.play(this.copy.res && this.copy.res.ok ? 'click' : 'error'); this.ensurePendingVisible(); }
     this.updateConfirmBar();
   }
 
@@ -907,6 +909,37 @@ export class App {
     else this.setPending(this.tool, this.clickParams(this.tool, cell, false), cell, true);
   }
 
+  /**
+   * 仮置きのゴーストが HUD・ツールバー・画面の端・開いた引き出しに隠れていたら、見える所までカメラを少しだけ動かす。
+   * ゴーストの上のラベル（費用・理由）の分も空ける。指で動かしている最中は呼ばない（離したとき・微調整のあと）。
+   */
+  ensurePendingVisible() {
+    clearTimeout(this.ensureTimer);
+    // ツールバーが確定バーに切り替わった後の大きさで測る
+    this.ensureTimer = setTimeout(() => {
+      const g = this.pending && this.pending.ghost;
+      if (!g || !this.started) return;
+      const cam = this.cam;
+      if (cam.anim) { this.ensurePendingVisible(); return; } // 移動中のアニメーションが終わってから
+      const lo = g.lo ?? g.f, hi = g.hi ?? g.f + (g.h || 1) - 1;
+      const z = cam.zoom;
+      const x0 = (g.x * TILE_W - cam.x) * z, x1 = ((g.x + g.w) * TILE_W - cam.x) * z;
+      const yTop = (-(hi + 1) * FLOOR_H - cam.y) * z, yBot = (-lo * FLOOR_H - cam.y) * z;
+      const M = 12, LABEL = 30, LEFT = 52; // 余白・ラベルの高さ・左のフロア番号
+      let top = cam.insetTop + M + LABEL;
+      let bottom = cam.vh - cam.insetBottom - M;
+      const dr = this.drawerOpen && (document.getElementById('goals').getClientRects().length ? document.getElementById('goals') : document.getElementById('guide'));
+      if (dr && dr.getClientRects().length) bottom = Math.min(bottom, dr.getBoundingClientRect().top - this.canvas.getBoundingClientRect().top - M);
+      let dy = 0, dx = 0;
+      if (yBot > bottom) dy = yBot - bottom; else if (yTop < top) dy = yTop - top;
+      if (x1 - x0 < cam.vw - LEFT - M) {
+        if (x0 < LEFT) dx = x0 - LEFT; else if (x1 > cam.vw - M) dx = x1 - (cam.vw - M);
+      }
+      if (!dx && !dy) return;
+      cam.anim = { kind: 'move', x0: cam.x, y0: cam.y, z0: cam.zoom, x1: cam.x + dx / z, y1: cam.y + dy / z, z1: cam.zoom, t0: performance.now(), dur: 260 };
+    }, 80);
+  }
+
   placeEnd() {
     const pl = this.place;
     this.place = null;
@@ -922,6 +955,7 @@ export class App {
       }
     }
     this.sound.play(this.pending && this.pending.ghost && this.pending.ghost.ok ? 'click' : 'error');
+    this.ensurePendingVisible();
   }
 
   /** 仮置きを1マス（1階）ずつ動かす（確定バーの ◀ ▶ ▲ ▼） */
@@ -953,6 +987,7 @@ export class App {
       this.setPending(pd.tool, p, cell, true);
     }
     this.sound.play('click');
+    this.ensurePendingVisible();
   }
 
   placeCancel() { this.place = null; }
@@ -968,7 +1003,7 @@ export class App {
   setPending(tool, p, cell, silent) {
     const ghost = this.evalGhost(tool, p);
     this.pending = ghost ? { tool, p, ghost, cell } : null;
-    if (!silent) this.sound.play(ghost && !ghost.ok ? 'error' : 'click');
+    if (!silent) { this.sound.play(ghost && !ghost.ok ? 'error' : 'click'); this.ensurePendingVisible(); }
     this.updateConfirmBar();
   }
 
@@ -1045,6 +1080,9 @@ export class App {
       ok: document.getElementById('cb-ok'),
       cancel: document.getElementById('cb-cancel'),
     };
+    // 確定バーは下のメニューの中に入れる（仮置き中はツールバーの代わりに表示＝キャンバスの上に浮かない）
+    const tb = document.getElementById('toolbar');
+    tb.prepend(this.cb.el);
     this.cb.ok.addEventListener('click', () => { this.userGesture(); this.confirmPending(); });
     this.cb.cancel.addEventListener('click', () => { this.cancelPending(); });
     for (const [id, dx, df] of [['cb-l', -1, 0], ['cb-r', 1, 0], ['cb-u', 0, 1], ['cb-d', 0, -1]]) {
@@ -1064,8 +1102,13 @@ export class App {
     if (!cb) return;
     const pd = this.pending;
     const show = !!(pd && pd.ghost);
+    const was = this.root.classList.contains('confirming');
     this.root.classList.toggle('confirming', show);
+    // 仮置き中は、いちばん下の地下も toolbar の上に余裕をもって出せるよう、少し下まで動かせる
+    this.cam.extraBottom = show ? 2 * FLOOR_H : 0;
+    if (show !== was) { this.layoutNow && this.layoutNow(); if (!show) this.cam.clamp(); }
     if (!show) { cb.el.hidden = true; return; }
+    if (!was) this.closeDrawer();
     cb.el.hidden = false;
     const t = TYPES[pd.tool];
     cb.name.textContent = pd.tool === 'bulldoze' ? '撤去' : pd.tool === 'copy' ? 'コピー' : t ? t.name : pd.tool;

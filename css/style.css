@@ -859,3 +859,33 @@ html.standalone, html.standalone body { background: #0d1030; }
   #minimap-show { right: calc(6px + var(--sar)); bottom: calc(var(--tb-h, 130px) + 6px); width: 36px; height: 36px; font-size: 18px; }
 }
 #app.side-tb #minimap-show { right: calc(6px + var(--sar)); bottom: calc(6px + var(--sab)); }
+
+/* ===== 確定モード: 仮置き中は、下のメニューの中身を確定バーに置き換える（キャンバスの上に浮かせない） ===== */
+#app #toolbar #confirm-bar, #app #toolbar #copy-bar {
+  position: static; transform: none; left: auto; bottom: auto; width: auto; max-width: none;
+  border: 0; border-bottom: 2px solid var(--lo); box-shadow: none; background: var(--panel); margin: 0; animation: none;
+}
+#toolbar #confirm-bar { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; padding: 6px 10px; min-height: 60px; }
+#toolbar #confirm-bar[hidden], #toolbar #copy-bar[hidden] { display: none !important; }
+#toolbar #confirm-bar .cb-text { flex: 1 1 auto; min-width: 0; }
+#toolbar #confirm-bar .cb-nudge { flex: none; }
+#toolbar #copy-bar { padding: 4px 8px; justify-content: center; }
+#app.confirming #toolbar .tb-tabs, #app.confirming #toolbar .tb-row, #app.confirming #toolbar .tb-hint { display: none !important; }
+#app.confirming #copy-bar { bottom: auto; }
+@media (max-width: 760px) {
+  #toolbar #confirm-bar { flex-wrap: wrap; gap: 4px 6px; padding: 5px 6px; width: auto; }
+  #toolbar #confirm-bar .cb-text { flex: 1 1 0; flex-direction: column; order: 0; }
+  #toolbar #confirm-bar #cb-cancel { order: 1; } #toolbar #confirm-bar #cb-ok { order: 2; }
+  #toolbar #confirm-bar .cb-nudge { order: 3; flex: 1 1 100%; justify-content: center; }
+  #app.confirming #copy-bar #cp-text { display: none; }
+}
+/* 横向き: 左の縦列が確定モードになる */
+#app.side-tb #toolbar #confirm-bar { flex-direction: column; align-items: stretch; flex-wrap: nowrap; padding: 8px; gap: 8px; border-bottom: 0; }
+#app.side-tb #toolbar #confirm-bar .cb-text { flex: none; }
+#app.side-tb #toolbar #confirm-bar .cb-nudge { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; order: 0; }
+#app.side-tb #toolbar #confirm-bar .cb-nudge .btn { max-width: none; min-width: 0; }
+#app.side-tb #toolbar #confirm-bar .btn { min-height: 44px; }
+#app.side-tb #toolbar #copy-bar { flex-direction: column; align-items: stretch; }
+#app.side-tb.confirming #toolbar { justify-content: flex-start; }
+/* 仮置き中は全体図（とその表示ボタン）を隠して、ゴーストと確定の操作を隠さない */
+#app.confirming #minimap, #app.confirming #minimap-show { display: none !important; }
