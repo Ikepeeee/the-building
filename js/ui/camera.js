@@ -17,6 +17,8 @@ export class Camera {
     this.vw = 1; this.vh = 1;
     this.insetTop = 0; this.insetBottom = 0;
     this.anim = null;
+    // いちばん下の地下を、下のメニューより上まで自分で動かせるよう、下にいつも少し余裕を持たせる
+    this.extraBottom = 2 * 24;
   }
 
   get view() { return { x: this.x, y: this.y, zoom: this.zoom }; }

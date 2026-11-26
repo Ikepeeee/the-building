@@ -602,7 +602,7 @@ textarea.io {
 @media (max-width: 760px) {
   #minimap { width: 132px; height: 48px; right: calc(6px + var(--sar)); bottom: calc(var(--tb-h, 130px) + 6px); }
   #guide { width: min(222px, calc(100% - 152px)); }
-  #app.sheet-open #minimap, #app.confirming #minimap { display: none; }
+  #app.sheet-open #minimap { display: none; }
   #night-badge { font-size: 12px; padding: 2px 8px; }
   #btn-fs { display: none; } /* 狭い画面ではメニューから */
 }
@@ -854,7 +854,7 @@ html.standalone, html.standalone body { background: #0d1030; }
   width: 40px; height: 40px; padding: 0; font-size: 20px; line-height: 1;
 }
 #app.mm-off #minimap-show { display: block; }
-#app.is-title #minimap-show, #app.sheet-open #minimap-show, #app.confirming #minimap-show { display: none !important; }
+#app.is-title #minimap-show, #app.sheet-open #minimap-show { display: none !important; }
 @media (max-width: 760px) {
   #minimap-show { right: calc(6px + var(--sar)); bottom: calc(var(--tb-h, 130px) + 6px); width: 36px; height: 36px; font-size: 18px; }
 }
@@ -887,5 +887,57 @@ html.standalone, html.standalone body { background: #0d1030; }
 #app.side-tb #toolbar #confirm-bar .btn { min-height: 44px; }
 #app.side-tb #toolbar #copy-bar { flex-direction: column; align-items: stretch; }
 #app.side-tb.confirming #toolbar { justify-content: flex-start; }
-/* 仮置き中は全体図（とその表示ボタン）を隠して、ゴーストと確定の操作を隠さない */
-#app.confirming #minimap, #app.confirming #minimap-show { display: none !important; }
+
+/* ===== 確定モード（改）: 下のメニューの大きさ・位置はそのまま、中身だけ入れ替える ===== */
+#app #toolbar #confirm-bar {
+  position: absolute; inset: 0; z-index: 2; margin: 0; width: auto; height: auto; max-width: none; transform: none;
+  border: 0; box-shadow: none; background: var(--panel);
+  padding: 8px calc(10px + var(--sar)) calc(8px + var(--sab)) calc(10px + var(--sal));
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-rows: 1fr; align-items: center; gap: 6px 14px;
+}
+#app #toolbar #confirm-bar[hidden] { display: none !important; }
+#app.confirming #toolbar .tb-tabs, #app.confirming #toolbar .tb-row, #app.confirming #toolbar .tb-hint { display: flex !important; visibility: hidden; }
+#app.confirming #toolbar .tb-hint { display: -webkit-box !important; }
+#app.side-tb.confirming #toolbar .tb-hint { display: none !important; }
+#app.side-tb.confirming #toolbar .tb-tabs { display: grid !important; }
+#app.side-tb.confirming #toolbar .tb-row { display: flex !important; }
+#toolbar #confirm-bar .cb-icon { width: 96px; height: 60px; image-rendering: pixelated; border: 2px solid var(--edge); background: #fff; }
+#toolbar #confirm-bar .cb-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; margin: 0; }
+#toolbar #confirm-bar .cb-text b { font-size: 16px; }
+#toolbar #confirm-bar #cb-cost { font-family: var(--mono); font-weight: 800; font-size: 15px; color: var(--money); white-space: normal; }
+#toolbar #confirm-bar.bad #cb-cost { color: var(--bad); font-family: var(--font); font-size: 13px; }
+#toolbar #confirm-bar .cb-desc { font-size: 12px; color: var(--ink-2); line-height: 1.35; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+#toolbar #confirm-bar .cb-notes { font-size: 11px; color: var(--navy-2); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#toolbar #confirm-bar .cb-copy { display: flex; flex-direction: column; gap: 4px; }
+#toolbar #confirm-bar .cb-copy[hidden] { display: none; }
+#toolbar #confirm-bar .cb-copy .btn.is-on { background: var(--navy-2); color: #fff; }
+#toolbar #confirm-bar .cb-nudge { display: grid; grid-template-columns: repeat(3, 44px); grid-template-rows: 32px 32px; gap: 3px; }
+#toolbar #confirm-bar .cb-nudge .btn { min-width: 0; min-height: 0; width: auto; padding: 0; font-size: 14px; max-width: none; flex: none; }
+#toolbar #confirm-bar #cb-u { grid-column: 2; grid-row: 1; } #toolbar #confirm-bar #cb-l { grid-column: 1; grid-row: 2; }
+#toolbar #confirm-bar #cb-d { grid-column: 2; grid-row: 2; } #toolbar #confirm-bar #cb-r { grid-column: 3; grid-row: 2; }
+#toolbar #confirm-bar .cb-acts { display: flex; gap: 8px; }
+#toolbar #confirm-bar #cb-cancel, #toolbar #confirm-bar #cb-ok { min-height: 56px; min-width: 110px; font-size: 15px; order: 0; }
+/* スマホ縦: アイコン＋説明 / ボタン の2段 */
+@media (max-width: 760px) {
+  #app #toolbar #confirm-bar { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: auto auto; gap: 4px 8px; padding: 6px calc(6px + var(--sar)) calc(6px + var(--sab)) calc(6px + var(--sal)); align-content: start; }
+  #toolbar #confirm-bar .cb-icon { width: 64px; height: 40px; grid-row: 1; grid-column: 1; }
+  #toolbar #confirm-bar .cb-text { grid-row: 1; grid-column: 2 / 4; }
+  #toolbar #confirm-bar .cb-text b { font-size: 14px; }
+  #toolbar #confirm-bar .cb-desc { -webkit-line-clamp: 1; }
+  #toolbar #confirm-bar .cb-copy { grid-row: 1; grid-column: 3; }
+  #toolbar #confirm-bar .cb-copy:not([hidden]) ~ * {}
+  #toolbar #confirm-bar .cb-nudge { grid-row: 2; grid-column: 1 / 3; grid-template-columns: repeat(4, 1fr); grid-template-rows: 44px; }
+  #toolbar #confirm-bar #cb-l, #toolbar #confirm-bar #cb-u, #toolbar #confirm-bar #cb-d, #toolbar #confirm-bar #cb-r { grid-row: 1; }
+  #toolbar #confirm-bar #cb-l { grid-column: 1; } #toolbar #confirm-bar #cb-u { grid-column: 2; } #toolbar #confirm-bar #cb-d { grid-column: 3; } #toolbar #confirm-bar #cb-r { grid-column: 4; }
+  #toolbar #confirm-bar .cb-acts { grid-row: 2; grid-column: 3; }
+  #toolbar #confirm-bar #cb-cancel, #toolbar #confirm-bar #cb-ok { min-height: 44px; min-width: 0; padding: 0 10px; font-size: 13px; }
+  #toolbar #confirm-bar .cb-copy { flex-direction: row; }
+}
+/* 横向き: 左の縦列の中を縦に並べる */
+#app.side-tb #toolbar #confirm-bar { display: flex; flex-direction: column; align-items: stretch; gap: 6px; padding: 8px 8px calc(8px + var(--sab)) calc(8px + var(--sal)); overflow-y: auto; }
+#app.side-tb #toolbar #confirm-bar .cb-icon { width: 80px; height: 50px; align-self: center; }
+#app.side-tb #toolbar #confirm-bar .cb-desc { -webkit-line-clamp: 3; }
+#app.side-tb #toolbar #confirm-bar .cb-notes { white-space: normal; }
+#app.side-tb #toolbar #confirm-bar .cb-nudge { grid-template-columns: repeat(3, 1fr); grid-template-rows: 36px 36px; }
+#app.side-tb #toolbar #confirm-bar .cb-acts { flex-direction: row; }
+#app.side-tb #toolbar #confirm-bar #cb-cancel, #app.side-tb #toolbar #confirm-bar #cb-ok { min-width: 0; flex: 1; min-height: 44px; padding: 0 6px; font-size: 13px; }

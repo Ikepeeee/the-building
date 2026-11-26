@@ -62,15 +62,22 @@
   <aside id="panel" class="frame" hidden></aside>
 
   <div id="confirm-bar" class="frame" hidden>
-    <div class="cb-text"><b id="cb-name"></b><span id="cb-cost"></span></div>
+    <img class="cb-icon" id="cb-icon" alt="">
+    <div class="cb-text"><b id="cb-name"></b><span id="cb-cost"></span><span class="cb-desc" id="cb-desc"></span><span class="cb-notes" id="cb-notes"></span></div>
+    <div class="cb-copy" id="cb-copy" hidden>
+      <button class="btn btn-small" id="cb-free" aria-pressed="false">↔ 横も動かす</button>
+      <button class="btn btn-small" id="cb-back">◀ 選び直す</button>
+    </div>
     <div class="cb-nudge" role="group" aria-label="1マスずつ動かす">
       <button class="btn" id="cb-l" aria-label="左へ1マス">◀</button>
       <button class="btn" id="cb-u" aria-label="上へ1階">▲</button>
       <button class="btn" id="cb-d" aria-label="下へ1階">▼</button>
       <button class="btn" id="cb-r" aria-label="右へ1マス">▶</button>
     </div>
-    <button class="btn" id="cb-cancel">✕ やめる</button>
-    <button class="btn btn-primary" id="cb-ok">✓ 建設</button>
+    <div class="cb-acts">
+      <button class="btn" id="cb-cancel">✕ やめる</button>
+      <button class="btn btn-primary" id="cb-ok">✓ 建設</button>
+    </div>
   </div>
 
   <div id="copy-bar" class="frame" hidden>
