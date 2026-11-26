@@ -841,3 +841,21 @@ html.standalone, html.standalone body { background: #0d1030; }
   max-height: calc(100% - var(--hud-h, 40px) - 10px);
 }
 #app.side-tb .tb-tab.drawer-btn { grid-column: 1 / -1; justify-content: center; margin: 0; }
+
+/* 全体図をしまう／出す */
+#minimap .mm-hide {
+  position: absolute; top: -10px; right: -10px; z-index: 2; width: 24px; height: 24px; padding: 0;
+  font-size: 13px; line-height: 1; color: #fff; background: #2f46a8; border: 2px solid var(--edge);
+  border-radius: 50%; cursor: pointer; touch-action: manipulation;
+}
+#minimap.mm-collapsed { display: none !important; }
+#minimap-show {
+  display: none; position: absolute; z-index: 21; right: calc(10px + var(--sar)); bottom: calc(var(--tb-h, 130px) + 10px);
+  width: 40px; height: 40px; padding: 0; font-size: 20px; line-height: 1;
+}
+#app.mm-off #minimap-show { display: block; }
+#app.is-title #minimap-show, #app.sheet-open #minimap-show, #app.confirming #minimap-show { display: none !important; }
+@media (max-width: 760px) {
+  #minimap-show { right: calc(6px + var(--sar)); bottom: calc(var(--tb-h, 130px) + 6px); width: 36px; height: 36px; font-size: 18px; }
+}
+#app.side-tb #minimap-show { right: calc(6px + var(--sar)); bottom: calc(6px + var(--sab)); }
