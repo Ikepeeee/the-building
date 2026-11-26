@@ -76,7 +76,7 @@ export const EventsMixin = {
       for (const hk of this.byType.housekeeping) {
         for (const m of hk.members) {
           if (m.task || m.state !== 'in' || m.loc !== hk) continue;
-          const room = this.findDirty(m.f);
+          const room = this.findDirty(m);
           if (!room) break;
           this.assignClean(m, room);
         }
@@ -102,12 +102,16 @@ export const EventsMixin = {
   },
 
   // ---- メイド ----
-  findDirty(f) {
+  // いちばん近い階の要清掃の部屋。メイドが歩いて行ける部屋だけ（棟が離れていても、その棟の部屋を掃除する）
+  findDirty(m) {
+    const f = typeof m === 'number' ? m : m.f, x = typeof m === 'number' ? undefined : m.x;
     let best = null, bd = Infinity;
     for (const o of this.hotels) {
       if (!o.dirty || o.occupied || o.cleaner || o.burning || o.cleanFail > this.time - 60) continue;
       const d = Math.abs(o.f - f);
-      if (d < bd) { bd = d; best = o; }
+      if (d >= bd) continue;
+      if (x !== undefined && this.dist(f, o.f, x, o.x + o.w / 2) === Infinity) continue;
+      bd = d; best = o;
     }
     return best;
   },
@@ -139,7 +143,7 @@ export const EventsMixin = {
       }
     }
     const h = this.hour;
-    const next = h >= 8 && h < 20 ? this.findDirty(p.f) : null;
+    const next = h >= 8 && h < 20 ? this.findDirty(p) : null;
     if (next && this.assignClean(p, next)) return;
     this.goHome(p);
   },
@@ -152,7 +156,9 @@ export const EventsMixin = {
     const base = g.home ? g.home.f : g.f;
     for (const f of b.floors) {
       if (b.searched.has(f) || b.assigned.has(f) || Math.abs(f - base) > SIM.GUARD_RANGE) continue;
-      const d = this.dist(g.f, f, g.x);
+      // 警備員はその階の同じ列（自分の棟）へ行く。歩いて行けない階（別の棟だけの階など）は捜索しない
+      const d = this.dist(g.f, f, g.x, g.x);
+      if (d === Infinity) continue;
       if (d < bd) { bd = d; best = f; }
     }
     if (best === null) return false;
@@ -160,7 +166,7 @@ export const EventsMixin = {
     g.task = { kind: 'search', f: best };
     const onArrive = (p) => this.startPatrol(p, this.searchTime(best), (pp) => this.searchDone(pp));
     if (best === g.f) { this.unsettle(g); onArrive(g); return true; }
-    if (!this.startTrip(g, best, g.x, onArrive)) { b.assigned.delete(best); b.searched.add(best); g.task = null; return false; }
+    if (!this.startTrip(g, best, g.x, onArrive)) { b.assigned.delete(best); g.task = null; return false; }
     return true;
   },
 

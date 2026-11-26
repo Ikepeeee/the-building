@@ -35,16 +35,9 @@ export class Guide {
     this.list = el.querySelector('ul');
     this.next = el.querySelector('.g-next');
     this.toggleBtn = el.querySelector('.g-toggle');
-    el.querySelector('.g-head').addEventListener('click', (e) => {
-      if (e.target.closest('.g-close')) return;
-      this.collapsed = !this.collapsed;
-      this.persist();
-      this.apply();
-    });
-    el.querySelector('.g-close').addEventListener('click', () => {
-      this.setHidden(true);
-      app.toasts.show({ text: '「次にやること」はメニューからまた表示できます', kind: 'info' });
-    });
+    // 下のメニューの引き出しとして出す（✕・同じボタン・外側のタップ・Esc で閉じる）
+    el.classList.add('drawer');
+    el.querySelector('.g-close').addEventListener('click', () => app.closeDrawer());
     document.getElementById('app').append(el);
     this.apply();
   }
@@ -57,13 +50,23 @@ export class Guide {
     this.apply();
   }
 
+  /** 引き出しが開いていて、フリープレイのときだけ見せる */
+  get shown() {
+    const app = this.app;
+    return !!(app.drawerOpen && app.started && app.sim && !app.sim.scenario);
+  }
+
   apply() {
-    this.el.hidden = this.hidden;
-    this.el.classList.toggle('collapsed', this.collapsed);
-    this.toggleBtn.textContent = this.collapsed ? '＋' : '－';
-    this.toggleBtn.setAttribute('aria-label', this.collapsed ? '開く' : 'たたむ');
+    this.el.hidden = !this.shown;
+    this.toggleBtn.hidden = true;
     this.sig = '';
     this.update();
+  }
+
+  /** ボタンのバッジ用: 済んだ数 / 全部 */
+  progress() {
+    const items = this.items().filter((it) => !it.head);
+    return { done: items.filter((it) => it.done).length, total: items.length, first: (items.find((it) => !it.done) || {}).label || '' };
   }
 
   items() {
@@ -101,9 +104,9 @@ export class Guide {
 
   update() {
     // シナリオ中は目標パネルを出すので、こちらは出さない
-    const scn = !!(this.app.sim && this.app.sim.scenario);
-    if (this.el.hidden !== (this.hidden || scn)) this.el.hidden = this.hidden || scn;
-    if (this.hidden || scn || !this.app.started || !this.app.sim) return;
+    const shown = this.shown;
+    if (this.el.hidden === shown) this.el.hidden = !shown;
+    if (!shown) return;
     const items = this.items();
     const sig = JSON.stringify(items);
     if (sig === this.sig) return;

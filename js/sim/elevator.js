@@ -195,7 +195,7 @@ export const ElevatorMixin = {
   extendElevator(e, dir) {
     const r = this.planResize(e, dir < 0 ? e.lo - 1 : e.lo, dir > 0 ? e.hi + 1 : e.hi);
     if (!r.ok) return { ok: false, reason: r.reason, cost: r.cost };
-    if (r.cost > this.money) return { ok: false, reason: '資金が足りません', cost: r.cost };
+    if (!this._batch && r.cost > this.money) return { ok: false, reason: '資金が足りません', cost: r.cost };
     this.spend(r.cost);
     r.apply();
     this.sound('build');
@@ -205,7 +205,7 @@ export const ElevatorMixin = {
   addCar(e) {
     const T = TYPES[e.type];
     if (e.cars.length >= T.maxCars) return { ok: false, reason: `カゴは最大${T.maxCars}台です` };
-    if (this.money < T.carCost) return { ok: false, reason: '資金が足りません' };
+    if (!this._batch && this.money < T.carCost) return { ok: false, reason: '資金が足りません' };
     this.spend(T.carCost);
     let best = e.sLo, bd = -1;
     for (const s of e.stops) {

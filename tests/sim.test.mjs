@@ -7,7 +7,7 @@ import { SCENARIOS, GOAL_METRICS } from '../js/sim/scenarios.js';
 import { runStrategy } from './balance.mjs';
 import { runSeaside, SeasidePlayer } from './scenario.mjs';
 import { SIM } from '../js/sim/rules.js';
-import { MIN_F, MAX_F, START_MONEY } from '../js/sim/constants.js';
+import { MIN_F, MAX_F, START_MONEY, fmtMoney } from '../js/sim/constants.js';
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -2780,6 +2780,102 @@ test('§19 花火大会の人出: 観覧の場所が多いほど増える（×2�
   };
   const one = crowd(1), many = crowd(8);
   assert.ok(many > one * 1.2 && one > 2, `1か所 ${one} / 8か所 ${many}`);
+});
+
+// 離れた2棟（地上のロビーだけでつながる / まったくつながらない）
+function twoTowers(seed, layout, hkIn = [0, 200]) {
+  const s = new Tower({ seed });
+  s.money = 1e9; s.star = 3;
+  if (layout === 'ground') mustBuild(s, 'lobby', { f: 0, x: 0, x2: 259 });
+  else { mustBuild(s, 'lobby', { f: 0, x: 0, x2: 59 }); mustBuild(s, 'lobby', { f: 0, x: 200, x2: 259 }); }
+  for (const x0 of [0, 200]) {
+    for (let f = 1; f <= 4; f++) mustBuild(s, 'floor', { f, x: x0, x2: x0 + 59 });
+    mustBuild(s, 'elevator', { f: 0, f2: 4, x: x0 + 2 });
+    if (hkIn.includes(x0)) mustBuild(s, 'housekeeping', { f: 1, x: x0 + 10 });
+    for (const f of [3, 4]) for (let x = x0 + 10; x + TYPES.hotelSingle.w <= x0 + 60; x += TYPES.hotelSingle.w) s.build('hotelSingle', { f, x });
+  }
+  return s;
+}
+
+test('fb74 ハウスキーピング: 離れた2棟でも、それぞれの棟の部屋を掃除する（地上でつながる・つながらない）', () => {
+  for (const layout of ['ground', 'separate']) {
+    const s = twoTowers(201, layout);
+    stepTo(s, 1, 7);
+    const dirtyIn = (x0) => s.hotels.filter((o) => o.x >= x0 && o.x < x0 + 60 && o.dirty).length;
+    // 何度汚れても毎回きれいになる
+    for (let round = 0; round < 3; round++) {
+      for (const o of s.hotels) { o.occupied = false; o.dirty = true; o.dirtySince = s.time; o.cleanFail = undefined; }
+      stepTo(s, 1 + round, 15);
+      assert.equal(dirtyIn(0), 0, `${layout}: 左の棟 round${round}`);
+      assert.equal(dirtyIn(200), 0, `${layout}: 右の棟 round${round}`);
+      stepTo(s, 2 + round, 7);
+    }
+    checkInvariants(s);
+  }
+  // 片方の棟にしかハウスキーピングがなく、行き来できない → その棟の部屋だけ掃除される
+  const s = twoTowers(202, 'separate', [200]);
+  stepTo(s, 1, 7);
+  for (const o of s.hotels) { o.occupied = false; o.dirty = true; o.dirtySince = s.time; }
+  stepTo(s, 1, 15);
+  assert.equal(s.hotels.filter((o) => o.x >= 200 && o.dirty).length, 0, '自分の棟はきれい');
+  assert.ok(s.hotels.filter((o) => o.x < 60).every((o) => o.dirty), '行けない棟は掃除できない');
+  // 地上でつながっていれば、もう一方の棟のメイドが掃除しに行く
+  const g = twoTowers(203, 'ground', [200]);
+  stepTo(g, 1, 7);
+  for (const o of g.hotels) { o.occupied = false; o.dirty = true; o.dirtySince = g.time; }
+  stepTo(g, 1, 19);
+  assert.equal(g.hotels.filter((o) => o.dirty).length, 0, '行ける部屋はすべて掃除する');
+});
+
+test('fb74 警備: 離れた棟でも、行ける階を捜索する（行けない階を「捜索済み」にしない）', () => {
+  for (const layout of ['ground', 'separate']) {
+  const s = twoTowers(204, layout, []);
+  for (let f = 5; f <= 8; f++) mustBuild(s, 'floor', { f, x: 200, x2: 259 });
+  s.act(s.transportAt(1, 202), 'remove');
+  mustBuild(s, 'elevator', { f: 0, f2: 8, x: 202 });
+  mustBuild(s, 'security', { f: 1, x: 20 });
+  mustBuild(s, 'security', { f: 1, x: 220 });
+  stepTo(s, 1, 9);
+  s.plantBomb(7, 230); // 右の棟だけにある階
+  // 左の棟の警備員は 8F へ行けない → 割り当てず、「捜索済み」にもしない
+  const ga = s.byType.security.find((o) => o.x < 60).members.find((g) => !g.task && g.state === 'in');
+  const floors = s.bomb.floors, assigned = s.bomb.assigned;
+  s.bomb.floors = [7]; s.bomb.assigned = new Set();
+  assert.equal(s.assignSearch(ga), false);
+  assert.ok(!s.bomb.searched.has(7) && !s.bomb.assigned.has(7));
+  s.bomb.floors = floors; s.bomb.assigned = assigned;
+  for (let i = 0; i < 180 && !s.bomb.found; i++) s.step(1);
+  assert.ok(s.bomb.found, `${layout}: 右の棟の警備員が見つける`);
+  }
+});
+
+test('コピーの費用: 合計で資金を判定（足りればOK・足りなければ必要額と不足額、check は資金を変えない）', () => {
+  const s = new Tower({ seed: 205 });
+  s.money = 1e9; s.star = 3;
+  mustBuild(s, 'lobby', { f: 0, x: 0, x2: 300 });
+  for (let f = 1; f <= 2; f++) mustBuild(s, 'floor', { f, x: 0, x2: 60 });
+  mustBuild(s, 'office', { f: 1, x: 0 }); mustBuild(s, 'office', { f: 1, x: 10 }); mustBuild(s, 'fastfood', { f: 2, x: 10 });
+  const bp = s.blueprint({ f1: 0, x1: 0, f2: 2, x2: 60 });
+  const full = s.checkBatch(bp.ops, { f: 0, x: 100 });
+  assert.ok(full.ok && full.cost > 0, full.reason);
+  const total = full.cost;
+  s.money = total;
+  assert.ok(s.checkBatch(bp.ops, { f: 0, x: 100 }).ok, 'ちょうど足りる');
+  const N = 12345;
+  s.money = total - N;
+  const m0 = s.money, n0 = s.objs.size;
+  const r = s.checkBatch(bp.ops, { f: 0, x: 100 });
+  assert.equal(r.ok, false);
+  assert.equal(r.short, N);
+  assert.ok(r.reason.includes(fmtMoney(total)) && r.reason.includes(fmtMoney(N)), r.reason);
+  assert.match(r.reason, /資金が足りません（必要 .*・あと .*）/);
+  assert.equal(s.money, m0, '資金は変わらない'); assert.equal(s.objs.size, n0);
+  const b = s.buildBatch(bp.ops, { f: 0, x: 100 });
+  assert.equal(b.ok, false); assert.equal(b.short, N);
+  assert.equal(s.money, m0); assert.equal(s.objs.size, n0, '建てない');
+  s.money = total;
+  assert.ok(s.buildBatch(bp.ops, { f: 0, x: 100 }).ok);
+  assert.equal(s.money, 0);
 });
 
 // ====================================================================

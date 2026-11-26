@@ -66,6 +66,7 @@ export class App {
     this.input = new Input(this);
     this.guide = new Guide(this);
     this.goals = new Goals(this);
+    this.drawerOpen = false; // 目標／次にやること の引き出し（最初は閉じる）
     this.copy = new CopyTool(this);
     this.resize = new ElevatorResize(this);
     this.minimap = new Minimap(this);
@@ -81,6 +82,7 @@ export class App {
     this.perf = new Perf(this);
     this.setupConfirmBar();
     this.setupCopyBar();
+    this.setupDrawer();
     this.setupTitle();
     this.setupResize();
     this.setupLifecycle();
@@ -176,6 +178,84 @@ export class App {
     }
   }
 
+  // ---------- 目標／次にやること の引き出し（下のメニュー） ----------
+  setupDrawer() {
+    const b = document.createElement('button');
+    b.id = 'drawer-btn';
+    b.className = 'tb-tab drawer-btn';
+    b.setAttribute('aria-expanded', 'false');
+    b.innerHTML = '<span class="db-label"></span><span class="db-badge"></span><span class="dot" hidden></span>';
+    b.addEventListener('click', () => { this.userGesture(); this.toggleDrawer(); });
+    const tabs = document.getElementById('tb-tabs');
+    tabs.prepend(b);
+    this.drawerBtn = b;
+    // 引き出しの外をタップしたら閉じる（そのタップは下の操作にそのまま使われる）
+    document.addEventListener('pointerdown', (e) => {
+      if (!this.drawerOpen) return;
+      const t = e.target;
+      if (t.closest && (t.closest('#goals') || t.closest('#guide') || t.closest('#drawer-btn') || t.closest('.modal-wrap'))) return;
+      this.closeDrawer();
+    }, true);
+    this.hintSeen = '';
+    this.updateDrawerButton();
+  }
+
+  toggleDrawer(open = !this.drawerOpen) {
+    this.drawerOpen = !!open && this.started;
+    if (this.drawerOpen) { this.hintSeen = this.hintSig(); this.sound.play('click'); }
+    this.root.classList.toggle('drawer-open', this.drawerOpen);
+    this.goals.sig = '';
+    this.goals.update();
+    this.guide.apply();
+    this.updateDrawerButton();
+  }
+
+  closeDrawer() { if (this.drawerOpen) this.toggleDrawer(false); }
+
+  /** 新しいヒントが出たか（赤い点）を見分けるための印 */
+  hintSig() {
+    const s = this.sim;
+    if (!s) return '';
+    if (s.scenario) {
+      const p = this.goals.prog;
+      const beat = p && p.nextBeat ? p.nextBeat.key || p.nextBeat.hint || '' : '';
+      let star = '';
+      try { const sp = s.starProgress(); star = sp ? `${sp.next}` : ''; } catch { /* */ }
+      const fest = s.festival && s.festival.state !== 'done' ? `${s.festival.state}${s.festival.start}` : '';
+      return `${beat}|${star}|${fest}`;
+    }
+    const g = this.guide.progress();
+    return `${g.first}`;
+  }
+
+  updateDrawerButton() {
+    const b = this.drawerBtn;
+    if (!b) return;
+    const s = this.sim;
+    const scn = !!(s && s.scenario);
+    let badge = '';
+    if (scn) {
+      const p = this.goals.prog || (typeof s.scenarioProgress === 'function' ? (() => { try { return s.scenarioProgress(); } catch { return null; } })() : null);
+      const goals = p && Array.isArray(p.goals) ? p.goals : [];
+      badge = goals.length ? `${goals.filter((g) => g.done).length}/${goals.length}` : '';
+    } else if (s) {
+      const g = this.guide.progress();
+      badge = g.total ? `${g.done}/${g.total}` : '';
+    }
+    const label = scn ? '🎯 目標' : '📋 やること';
+    const lb = b.querySelector('.db-label'), bd = b.querySelector('.db-badge'), dot = b.querySelector('.dot');
+    if (lb.textContent !== label) lb.textContent = label;
+    if (bd.textContent !== badge) bd.textContent = badge;
+    bd.hidden = !badge;
+    const sig = this.hintSig();
+    if (!this.hintSeen) this.hintSeen = sig; // 最初の状態は「既読」
+    const fresh = !this.drawerOpen && sig !== this.hintSeen;
+    if (dot.hidden === fresh) dot.hidden = !fresh;
+    b.classList.toggle('is-on', this.drawerOpen);
+    b.setAttribute('aria-expanded', this.drawerOpen ? 'true' : 'false');
+    b.title = scn ? '目標・次にやること（物語のヒント・次の★）' : '次にやること';
+  }
+
   /** 事件のときは等速に戻す */
   calmSpeed() {
     if ((UI_SPEEDS[this.speedIdx] || {}).v > 1) {
@@ -254,7 +334,7 @@ export class App {
       this.recheckGhosts();
     }
     if (now - (this.guideTimer || 0) > 1500) { this.guideTimer = now; this.guide.update(); }
-    if (now - (this.goalsTimer || 0) > 700) { this.goalsTimer = now; this.goals.update(); }
+    if (now - (this.goalsTimer || 0) > 700) { this.goalsTimer = now; this.goals.update(); this.updateDrawerButton(); }
     if (now - (this.wdTimer || 0) > 500) { this.wdTimer = now; this.dialogs.watchdog(now); this.checkFestival(); }
     // 遊んでいない（タイトル・一時停止）ときは AudioContext を止める
     this.sound.idle(!this.started || (spd === 0 && !this.dialogs.count));
@@ -1041,6 +1121,7 @@ export class App {
     if (this.dialogs.escape()) return;
     if (!this.started) return;
     if (this.input.mode === 'drag') { this.dragCancel(); this.input.mode = null; this.input.drag = null; return; }
+    if (this.drawerOpen) { this.closeDrawer(); return; }
     if (this.resize.active) { this.resize.cancel(); return; }
     if (this.tool === 'copy' && this.copy.phase === 'paste') { this.backToCopySelect(); return; }
     if (this.tool === 'copy' && this.copy.marked.size) { this.copy.clearMarks(); this.updateCopyBar(); return; }
@@ -1250,6 +1331,9 @@ export class App {
 
   enterGame() {
     this.dialogs.closeAll();
+    this.drawerOpen = false;
+    this.root.classList.remove('drawer-open');
+    this.hintSeen = '';
     this.started = true;
     this.root.classList.remove('is-title');
     this.setTool('inspect');
@@ -1260,6 +1344,7 @@ export class App {
   }
 
   toTitle() {
+    this.closeDrawer();
     this.autosave();
     this.panel.close();
     this.pending = null;

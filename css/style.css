@@ -812,3 +812,32 @@ html.standalone, html.standalone body { background: #0d1030; }
 @keyframes fest-glow { from { box-shadow: inset 0 0 0 1px #c070ff, 0 0 0 rgba(255, 200, 80, 0); } to { box-shadow: inset 0 0 0 1px #ffd34d, 0 0 14px rgba(255, 200, 80, .9); } }
 #app.badge-stack #fest-badge { top: calc(var(--hud-h, 52px) + 38px); }
 #app.is-title #fest-badge { display: none !important; }
+
+/* ===== 目標／次にやること の引き出し（下のメニュー） ===== */
+.tb-tab.drawer-btn { background: #2a3a8a; color: #fff; box-shadow: inset 2px 2px 0 #5a6ac8; margin-right: 6px; position: relative; display: inline-flex; align-items: center; gap: 4px; }
+.tb-tab.drawer-btn .db-badge { font-family: var(--mono); font-size: 11px; background: #fff; color: var(--navy); padding: 0 4px; border: 1px solid #000; }
+.tb-tab.drawer-btn .dot { position: absolute; top: 2px; right: 2px; margin: 0; width: 8px; height: 8px; border: 1px solid #fff; }
+.tb-tab.drawer-btn.is-on { background: #ffcc33; color: #000; box-shadow: inset 2px 2px 0 #fff2b0; padding-bottom: 6px; }
+#app.is-title .drawer-btn { display: none; }
+/* 引き出しの本体: 閉じているときは hidden（キャンバスを覆わない） */
+#goals.drawer, #guide.drawer {
+  left: calc(8px + var(--sal)); right: auto; bottom: calc(var(--tb-h, 130px) - 2px); top: auto;
+  width: min(380px, calc(100% - 16px)); max-height: min(70vh, calc(100% - var(--hud-h, 52px) - var(--tb-h, 130px) - 8px));
+  overflow-y: auto; z-index: 26; overscroll-behavior: contain;
+  animation: drawer-up .16s steps(3) both;
+  box-shadow: inset 2px 2px 0 var(--hi), inset -2px -2px 0 var(--lo), 0 -4px 0 rgba(0,0,0,.25);
+}
+@keyframes drawer-up { from { transform: translateY(24px); opacity: 0; } }
+#goals.drawer .g-todo { max-height: none; }
+#guide.drawer.collapsed ul { display: grid; }
+#guide.drawer .g-next, #goals.drawer .g-sum { display: none !important; }
+#guide.drawer ul, #goals.drawer ul { display: grid; }
+@media (max-width: 760px) {
+  #goals.drawer, #guide.drawer { left: calc(4px + var(--sal)); right: calc(4px + var(--sar)); width: auto; bottom: calc(var(--tb-h, 130px) - 2px); }
+  #app.sheet-open #goals.drawer, #app.confirming #goals.drawer, #app.sheet-open #guide.drawer, #app.confirming #guide.drawer { display: block; }
+}
+#app.side-tb #goals.drawer, #app.side-tb #guide.drawer {
+  left: calc(var(--tb-w) + var(--sal) + 4px); bottom: calc(4px + var(--sab)); width: min(380px, calc(100% - var(--tb-w) - 16px));
+  max-height: calc(100% - var(--hud-h, 40px) - 10px);
+}
+#app.side-tb .tb-tab.drawer-btn { grid-column: 1 / -1; justify-content: center; margin: 0; }

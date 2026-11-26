@@ -80,7 +80,7 @@ export const BuildMixin = {
       const e = this.objs.get(p.id);
       if (!e || !ELEV.has(e.type)) return { ok: false, reason: 'エレベーターがありません', cost: 0, ghost: null };
       const r = this.planResize(e, p.lo ?? e.lo, p.hi ?? e.hi);
-      if (r.ok && r.cost > this.money) return { ...r, ok: false, reason: `資金が足りません（${fmtMoney(r.cost)}）` };
+      if (r.ok && !this._batch && r.cost > this.money) return { ...r, ok: false, reason: `資金が足りません（${fmtMoney(r.cost)}）` };
       return r;
     }
     const T = TYPES[tool];
@@ -92,7 +92,8 @@ export const BuildMixin = {
     else r = this._planFacility(tool, T, p);
     if (r.ok && r.ghost && (r.ghost.lo ?? r.ghost.f) < this.minFloor) return { ...r, ok: false, reason: `地下水位が高く、${floorName(this.minFloor)}より下は掘れません` };
     if (r.ok) { const cb = this.canBuildType(tool); if (!cb.ok) return { ...r, ok: false, reason: cb.reason }; }
-    if (r.ok && r.cost > this.money) return { ...r, ok: false, reason: `資金が足りません（${fmtMoney(r.cost)}）` };
+    // 一括建設（コピー）では手順ごとに資金を見ず、最後に合計で判定する
+    if (r.ok && !this._batch && r.cost > this.money) return { ...r, ok: false, reason: `資金が足りません（${fmtMoney(r.cost)}）` };
     return r;
   },
 
@@ -586,6 +587,12 @@ export const BuildMixin = {
       Object.assign(res, { ok: false, reason: String(err && err.message || err) });
     }
     res.cost = money0 - this.money;
+    // 合計の費用で資金を判定する（途中の手順の費用だけを出すと、足りない額が分からない）
+    if (res.ok && res.cost > money0) {
+      const short = res.cost - Math.max(0, money0);
+      Object.assign(res, { ok: false, failedIndex: -1, short, reason: `資金が足りません（必要 ${fmtMoney(res.cost)}・あと ${fmtMoney(short)}）` });
+      res.ghosts = res.ghosts.map((g) => (g ? { ...g, ok: false } : g));
+    }
     const keep = commit && res.ok;
     this._deferIndex = false;
     const batch = this._batch;

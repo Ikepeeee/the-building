@@ -82,16 +82,11 @@ export class Goals {
     el.innerHTML = '<div class="titlebar g-head"><span class="tb-title"></span><span class="g-days"></span><button class="btn-close g-toggle" aria-label="たたむ"></button></div>'
       + '<div class="g-tabs" role="tablist"><button class="g-tab" data-tab="goals" role="tab">🎯 目標</button><button class="g-tab" data-tab="todo" role="tab">📋 次にやること</button></div>'
       + '<div class="g-sum"></div><div class="g-body"><ul class="g-goals"></ul><div class="g-rule"></div><div class="g-todo"></div></div>';
-    el.querySelector('.g-head').addEventListener('click', () => {
-      this.collapsed = !this.collapsed;
-      this.persist();
-      this.sig = '';
-      this.update();
-    });
+    el.classList.add('drawer');
+    el.querySelector('.g-toggle').addEventListener('click', () => app.closeDrawer());
     for (const b of el.querySelectorAll('.g-tab')) {
       b.addEventListener('click', () => {
         this.tab = b.dataset.tab;
-        if (this.collapsed) this.collapsed = false;
         this.persist();
         this.sig = '';
         this.update();
@@ -110,9 +105,13 @@ export class Goals {
     if (app.started && sim && sim.scenario && typeof sim.scenarioProgress === 'function') {
       try { prog = sim.scenarioProgress(); } catch (e) { app.reportError(e, 'scenarioProgress'); }
     }
+    this.prog = prog;
     if (!prog) { if (!el.hidden) el.hidden = true; app.root.classList.remove('scenario-on'); return; }
-    el.hidden = false;
     app.root.classList.add('scenario-on');
+    const shown = !!app.drawerOpen;
+    if (el.hidden === shown) { el.hidden = !shown; this.sig = ''; }
+    if (!shown) return;
+    this.collapsed = false;
     let star = null;
     try { star = sim.starProgress(); } catch { star = null; }
     const basics = basicsChecklist(sim);
@@ -133,7 +132,8 @@ export class Goals {
     const days = el.querySelector('.g-days');
     days.textContent = st === 'cleared' ? `クリア ${'★'.repeat(prog.grade || 0)}` : st === 'failed' ? '失敗' : `残り ${Math.max(0, prog.daysLeft ?? 0)}日`;
     days.className = `g-days ${st}` + (st === 'playing' && prog.daysLeft <= 10 ? ' urgent' : '');
-    el.querySelector('.g-toggle').textContent = this.collapsed ? '＋' : '－';
+    el.querySelector('.g-toggle').textContent = '✕';
+    el.querySelector('.g-toggle').setAttribute('aria-label', '閉じる');
     // たたんだときの1行: 目標の数と、次にやることの先頭
     const firstTodo = basics.find((b) => !b.done) || (star && Array.isArray(star.reqs) ? star.reqs.find((r) => !r.done) : null);
     el.querySelector('.g-sum').textContent = `目標 ${done}/${goals.length}` + (firstTodo ? `・次: ${firstTodo.label}` : '');
