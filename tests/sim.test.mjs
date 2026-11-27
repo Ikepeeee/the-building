@@ -2275,7 +2275,7 @@ test('§18 屋外施設: 真上が空いていること・建てた後は真上�
   assert.match(s.check('floor', { f: 1, x: 100, x2: 115 }).reason, R, 'フロア');
   assert.ok(s.check('floor', { f: 1, x: 61, x2: 120 }).ok, '空いているマスだけ張れる');
   assert.match(s.check('office', { f: 1, x: 100 }).reason, R, '施設');
-  assert.match(s.check('bridge', { f: 1, x: 61, x2: 115 }).reason, R, '連絡通路');
+  assert.match(s.check('bridge', { f: 1, x: 61, x2: 115 }).reason, /間を3階あければ/, '連絡通路（すぐ上は不可）');
   assert.match(s.check('elevator', { f: 0, f2: 3, x: 105 }).reason, R, 'エレベーター');
   assert.match(s.check('stairs', { f: 0, x: 96 }).reason, R, '階段（上の段が屋外施設の上）');
   // 隣のエレベーターの機械室も真上に入れない
@@ -2500,6 +2500,38 @@ test('§20 移行: 水族館＋隣のイルカショーは新しい水族館1つ
   assert.equal(d.objs.size >= 1 && [...d.objs.values()].some((x) => x.type === 'dolphinShow'), false);
   assert.equal(d.money, 1000000 + SIM.OLD_DOLPHIN_COST);
   assert.ok(notes(d).some((t) => /イルカショー.*払い戻しました/.test(t)));
+});
+
+test('屋外施設の上空: 間を3階あければ連絡通路だけ架けられる', () => {
+  const s = new Tower({ seed: 9 });
+  s.money = 1e9; s.star = 5;
+  // 左右に2つの棟（0〜59 と 100〜159、各10階）、その間の地上（60〜99）にビアガーデン
+  mustBuild(s, 'lobby', { f: 0, x: 0, x2: 59 });
+  mustBuild(s, 'lobby', { f: 0, x: 100, x2: 159 });
+  for (let f = 1; f <= 10; f++) { mustBuild(s, 'floor', { f, x: 0, x2: 59 }); mustBuild(s, 'floor', { f, x: 100, x2: 159 }); }
+  mustBuild(s, 'beerGarden', { f: 0, x: 68 }); // 最上段は f=0、x 68〜91
+  // すぐ上の1〜3階（f=1〜3）は連絡通路でも不可
+  for (const f of [1, 2, 3]) {
+    const r = s.check('bridge', { f, x: 60, x2: 99 });
+    assert.equal(r.ok, false, `f=${f} は不可`);
+    assert.match(r.reason, /間を3階あければ/);
+  }
+  // 4階上（f=4）からは可
+  assert.ok(s.check('bridge', { f: 4, x: 60, x2: 99 }).ok, 'f=4 は可');
+  mustBuild(s, 'bridge', { f: 6, x: 60, x2: 99 });
+  // 連絡通路以外はどの高さでも不可
+  assert.equal(s.check('floor', { f: 8, x: 70, x2: 80 }).ok, false);
+  assert.equal(s.check('stairs', { f: 6, x: 70 }).ok, false);
+  // 先に連絡通路がある場所でも、その4階以上下なら屋外施設を置ける・3階以内なら置けない
+  const s2 = new Tower({ seed: 10 });
+  s2.money = 1e9; s2.star = 5;
+  mustBuild(s2, 'lobby', { f: 0, x: 0, x2: 59 });
+  mustBuild(s2, 'lobby', { f: 0, x: 100, x2: 159 });
+  for (let f = 1; f <= 10; f++) { mustBuild(s2, 'floor', { f, x: 0, x2: 59 }); mustBuild(s2, 'floor', { f, x: 100, x2: 159 }); }
+  mustBuild(s2, 'bridge', { f: 4, x: 60, x2: 99 });
+  assert.ok(s2.check('beerGarden', { f: 0, x: 68 }).ok, '連絡通路が4階上なら置ける');
+  mustBuild(s2, 'bridge', { f: 2, x: 60, x2: 99 });
+  assert.equal(s2.check('beerGarden', { f: 0, x: 68 }).ok, false, '連絡通路が2階上なら置けない');
 });
 
 test('性能: 横幅480・30フロア・人口6000超の横長ビルで 1 ゲーム日', () => {

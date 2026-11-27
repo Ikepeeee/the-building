@@ -5,6 +5,8 @@ import { pickBrand, pickTypeBrand } from './brands.js';
 import { defaultElevConfig } from './elevator.js';
 
 const BATCH_TOOLS = new Set(Object.keys(TYPES));
+// 屋外施設の上空に連絡通路を架けるとき、あけておく階数（最上段のすぐ上からこの階数ぶんは禁止）
+const BRIDGE_GAP = 3;
 
 export const BuildMixin = {
   // ================= マス =================
@@ -107,10 +109,13 @@ export const BuildMixin = {
     }
     return this._outList;
   },
-  outdoorBlocked(f, x, w = 1) {
+  // bridge=true（連絡通路）のときは、屋外施設の最上段から BRIDGE_GAP 階分だけを禁止する
+  // （間を3階あければ、屋外施設の上空にも連絡通路だけは架けられる）
+  outdoorBlocked(f, x, w = 1, bridge = false) {
     for (const o of this.outdoorList()) {
       if (o.dead) continue;
       if (f < o.f + o.h) continue;
+      if (bridge && f >= o.f + o.h + BRIDGE_GAP) continue;
       if (x < o.x + o.w && o.x < x + w) return true;
     }
     return false;
@@ -148,7 +153,7 @@ export const BuildMixin = {
         if (this.tcell(f, x) !== 0) return fail('移動手段と重なっています');
       }
       if (this.cell(f, x1 - 1) === 0 && this.cell(f, x2 + 1) === 0) return fail('どちらの端も建物に接していません');
-      if (this.outdoorBlocked(f, x1, w)) return fail('屋外施設の上には建てられません');
+      if (this.outdoorBlocked(f, x1, w, true)) return fail(`屋外施設の上は、間を${BRIDGE_GAP}階あければ連絡通路だけ架けられます`);
       const cost = T.costPerTile * w;
       return { ok: true, reason: '', cost, ghost, apply: () => this._place('bridge', f, x1, w, 1) };
     }
@@ -205,7 +210,12 @@ export const BuildMixin = {
       // 屋外施設: 地下には置けず、真上（同じ列の上の段すべて）が空いていること
       if (f < 0) return fail('屋外施設は地下には置けません');
       for (let r = top + 1; r <= MAX_F; r++) {
-        for (let xi = x; xi < x + w; xi++) if (this.cell(r, xi) !== 0 || this.tcell(r, xi) !== 0) return fail('屋外施設の真上には何も無いことが必要です');
+        for (let xi = x; xi < x + w; xi++) {
+          const c = this.cell(r, xi);
+          // 間を BRIDGE_GAP 階あけた連絡通路だけは、屋外施設の上空にあってよい
+          if (c !== 0 && !(r > top + BRIDGE_GAP && this.isBridgeCell(c))) return fail('屋外施設の真上には何も無いことが必要です');
+          if (this.tcell(r, xi) !== 0) return fail('屋外施設の真上には何も無いことが必要です');
+        }
       }
     }
     if (T.only === 'high' && f < (T.minF ?? 29)) return fail(`${floorName(T.minF ?? 29)}以上にのみ建設できます`);

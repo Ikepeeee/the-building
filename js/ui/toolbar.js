@@ -31,7 +31,7 @@ export function placementNotes(t) {
   if (t.only === 'high') out.push(`${(t.minF ?? 29) + 1}F以上`);
   else if (ONLY[t.only]) out.push(ONLY[t.only]);
   if (EXTRA_NOTE[t.name]) out.push(EXTRA_NOTE[t.name]);
-  if (t.outdoor) out.push('屋外施設（上に何も建てられない）');
+  if (t.outdoor) out.push('屋外施設（上には何も建てられない。間を3階あければ連絡通路のみ可）');
   return out.filter(Boolean);
 }
 
