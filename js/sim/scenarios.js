@@ -27,7 +27,7 @@ export const SCENARIOS = [
     subtitle: '寂れた浜に、もう一度人を呼ぶ',
     desc: '夏の観光客をつかまえて、評判のよいリゾートホテルを建てよう。台風には気をつけて。',
     theme: 'seaside',
-    start: { money: 1500000, star: 1, month: 7, day: 1, minFloor: -2 },
+    start: { money: 1500000, star: 1, month: 7, day: 1, minFloor: -3 },
     // ★の解放の上書き（型 → 必要な★）
     unlock: { hotelSingle: 1, hotelTwin: 1, restaurant: 1, shop: 1, escalator: 1, housekeeping: 1 },
     // このシナリオでは使わない型

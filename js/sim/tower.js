@@ -125,6 +125,10 @@ export class Tower {
     const l = this.listeners[name];
     if (l) { const i = l.indexOf(fn); if (i >= 0) l.splice(i, 1); }
   }
+  // 事件・催しが実際に始まったときのお知らせ（1件につき1回）。UI はこれで「見に行く？」を出す
+  // { kind, title, text, f?, x?, view? }  view: 'sea'（海側の空）/ 'building'（ビル全体）
+  eventStart(kind, title, text, where = {}) { this.emit('eventStart', { kind, title, text, ...where }); }
+
   emit(name, data) {
     const l = this.listeners[name];
     if (!l) return;

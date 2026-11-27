@@ -266,6 +266,7 @@ export const EventsMixin = {
     if (!this.bomb.floors.includes(f)) this.bomb.floors.push(f);
     const n = this.byType.security.length;
     this.msg(`爆弾が仕掛けられました！ 3時間以内に見つけないと爆発します${n ? '。警備員が捜索を始めます' : '（警備室がありません）'}`, 'event');
+    this.eventStart('bomb', '爆弾が仕掛けられました', `3時間以内に見つけないと爆発します。${n ? '警備員が捜索を始めます' : '警備室がないため、捜索できません'}`, { view: 'building' });
     this.sound('alarm');
     this.staffDispatch();
     return true;
@@ -296,6 +297,7 @@ export const EventsMixin = {
     this.effect('smoke', b.f + 1, b.x, 90);
     this.sound('boom');
     this.msg(`爆弾が爆発しました！ ${floorName(b.f)}付近の施設${hit.size}件が破壊されました。撤去して建て直してください`, 'bad', b.f, b.x);
+    this.eventStart('explosion', '爆弾が爆発しました', `${floorName(b.f)}付近の施設${hit.size}件が破壊されました`, { f: b.f, x: b.x });
   },
 
   // ================= 火災 =================
@@ -312,6 +314,7 @@ export const EventsMixin = {
     this.ignite(o);
     const n = this.byType.security.length;
     this.msg(`${floorName(o.f)}の${TYPES[o.type].name}で火災が発生しました！`, 'event', o.f, o.x + o.w / 2);
+    this.eventStart('fire', '火災が発生しました', `${floorName(o.f)}の${TYPES[o.type].name}で火災が発生しました`, { f: o.f, x: o.x + o.w / 2 });
     this.sound('fire');
     this.sound('alarm');
     this.ask('fire', '火災発生！',
@@ -355,6 +358,7 @@ export const EventsMixin = {
       h.f = Math.abs(df) <= vs ? goal : h.f + Math.sign(df) * vs;
       if (h.x === h.targetX && Math.abs(h.f - hover) < 1e-6) {
         h.phase = 'spray'; h.until = this.time + SIM.HELI_SPRAY;
+        this.eventStart('heli', '消防ヘリが到着しました', `${floorName(h.targetF)}の火災に散水しています`, { f: h.targetF, x: h.targetX });
         this.effect('smoke', h.targetF, h.targetX, SIM.HELI_SPRAY + 10);
       }
     } else if (h.phase === 'spray') {
@@ -574,6 +578,7 @@ export const EventsMixin = {
     });
     if (!ok) { this.leave(p); this.vipEnd(['部屋までの経路がなかった']); return; }
     this.msg('VIPが来館しました', 'event', ent.f, (ent.x0 + ent.x1) / 2);
+    this.eventStart('vip', 'VIPが来館しました', `${ent.metro ? '地下鉄駅' : 'ロビー'}から、${floorName(suite.f)}のスイートルームへ向かいます`, { f: ent.f, x: (ent.x0 + ent.x1) / 2 });
     this.recalcPop();
     this.at((this.day + 1) * DAY + 9 * 60 + this.rand(60), () => this.vipLeave());
   },
@@ -645,6 +650,7 @@ export const EventsMixin = {
         : '新郎新婦と招待客10人が、ロビーから100Fの大聖堂へ向かいます。\n14時までに、疲れずに到着できれば式は成功です。',
       [{ label: 'OK', value: 'ok' }]);
     this.sound('bells');
+    this.eventStart('wedding', '結婚式が始まります', w.legend ? `渚と航、招待客がロビーから${floorName(cath.f)}の${vname}へ向かいます` : `新郎新婦と招待客がロビーから${floorName(cath.f)}の${vname}へ向かいます`, { f: cath.f, x: cath.x + cath.w / 2 });
     const kinds = ['bride', 'groom'];
     for (let i = 0; i < 10; i++) kinds.push('weddingGuest');
     kinds.forEach((k, i) => {

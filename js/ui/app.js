@@ -100,8 +100,11 @@ export class App {
   // ---------------- sim の接続 ----------------
   attachSim(sim) {
     const mine = (fn) => (d) => { if (sim === this.sim) fn(d || {}); };
-    sim.on('message', mine((m) => { if (m.kind === 'event' && !this.restoring) this.calmSpeed(); if (this.toasts) this.toasts.show(m); }));
-    sim.on('prompt', mine((p) => { if (!this.restoring) { this.calmSpeed(); this.dialogs.enqueue({ type: 'prompt', data: p }); } }));
+    // お知らせ・事件の通知・物語では速度を変えない（モーダルの間は止まり、閉じると元の速度で続く）
+    sim.on('message', mine((m) => { if (this.toasts) this.toasts.show(m); }));
+    sim.on('prompt', mine((p) => { if (!this.restoring) this.dialogs.enqueue({ type: 'prompt', data: p }); }));
+    // 事件の発生: 「見に行きますか？」（同じ種類は短い間にまとめる）
+    sim.on('eventStart', mine((d) => { if (!this.restoring && this.started) this.onEventStart(d); }));
     sim.on('star', mine((s) => { if (!this.restoring && this.started) this.dialogs.enqueue({ type: 'star', star: s.star }); }));
     sim.on('scenario', mine((d) => {
       if (this.restoring || !this.started) return;
@@ -160,23 +163,6 @@ export class App {
     const s = this.sim;
     const sp = UI_SPEEDS[this.speedIdx];
     this.nightFF = !!(this.started && s && s.hour < 6 && sp && sp.v > 0 && !sp.rt && !this.eventActive());
-  }
-
-  /** 花火大会が始まったら、浜と海が見える場所へ行けるトーストを出す（1回だけ） */
-  checkFestival() {
-    const s = this.sim, f = s && s.festival;
-    const live = !!(this.started && f && f.state === 'live');
-    const key = f ? `${f.kind}:${f.start}` : '';
-    if (live && this.festSeen !== key) {
-      this.festSeen = key;
-      // 建物の上のほうの夜空（海の上）が映るあたり
-      let top = 0;
-      for (let fl = 1; fl <= MAX_F; fl++) { const r = s.grid[fl]; if (r && r.some((v) => v !== 0)) top = fl; }
-      const cx = this.buildingCenterX() ?? W / 2;
-      // 海の水平線と夜空が両方入るよう、低めの階を中心に少し引いて映す
-      this.toasts.show({ text: '🎆 花火大会が始まりました！ 海の上の夜空を見に行こう', kind: 'good', f: Math.max(6, Math.min(top + 2, 12)), x: Math.round(cx), zoom: 1 });
-      this.sound.play('ding');
-    }
   }
 
   // ---------- 目標／次にやること の引き出し（下のメニュー） ----------
@@ -255,6 +241,62 @@ export class App {
     b.classList.toggle('is-on', this.drawerOpen);
     b.setAttribute('aria-expanded', this.drawerOpen ? 'true' : 'false');
     b.title = scn ? '目標・次にやること（物語のヒント・次の★）' : '次にやること';
+  }
+
+  // ---------- 事件の発生（eventStart）: 見に行くか確認する ----------
+  onEventStart(d, deferred) {
+    if (!d || !d.kind) return;
+    // 同じ瞬間に届く判断の prompt（火災など）を先に並ばせてから判断する
+    if (!deferred) { setTimeout(() => { if (this.started) this.onEventStart(d, true); }, 0); return; }
+    const now = performance.now();
+    this.esSeen ||= {};
+    // 同じ種類が少し前にも来ていたらまとめる（8倍速で続けて起きても溜めない）
+    if (now - (this.esSeen[d.kind] || -1e9) < 20000) return;
+    // 火災・爆破予告は、答えた prompt が確認を兼ねる（同じ事件で2回聞かない）
+    if (this.decidedRecently(d.kind)) return;
+    const queued = this.dialogs.queue.filter((i) => i.type === 'eventStart').length;
+    if (queued >= 2) return;
+    this.esSeen[d.kind] = now;
+    this.dialogs.enqueue({ type: 'eventStart', data: { ...d, _t: now } });
+  }
+
+  /** 火災・爆破予告: 判断の prompt が出ている／出たばかりなら、発生の確認は出さない（同じ事件で2回聞かない） */
+  decidedRecently(kind) {
+    const k = kind === 'heli' ? 'fire' : kind;
+    if (k !== 'fire' && k !== 'bomb') return false;
+    if (performance.now() - ((this.decisionAt && this.decisionAt[k]) || -1e9) < 30000) return true;
+    const dl = this.dialogs;
+    if (dl.queue.some((i) => i.type === 'prompt' && i.data && i.data.kind === k)) return true;
+    if (dl.current && dl.current.type === 'prompt' && dl.current.data && dl.current.data.kind === k) return true;
+    return false;
+  }
+
+  /** 事件の現場・景色へカメラを動かす */
+  goSee(d) {
+    if (!d) return;
+    const s = this.sim;
+    if (Number.isFinite(d.f) && Number.isFinite(d.x)) { this.cam.focus(d.f, d.x, Math.max(this.cam.zoom, 1.5)); return; }
+    let top = 0, minX = Infinity, maxX = -Infinity;
+    for (let fl = 0; fl <= MAX_F; fl++) {
+      const r = s.grid[fl];
+      if (!r) continue;
+      let any = false;
+      for (let x = 0; x < r.length; x++) if (r[x] !== 0) { any = true; if (x < minX) minX = x; if (x > maxX) maxX = x; }
+      if (any) top = fl;
+    }
+    const cx = Number.isFinite(minX) ? (minX + maxX + 1) / 2 : this.buildingCenterX() ?? W / 2;
+    if (d.view === 'building') {
+      // ビル全体が入るズーム（段階に合わせる）
+      const usable = this.cam.vh - this.cam.insetTop - this.cam.insetBottom;
+      const needW = Number.isFinite(minX) ? (maxX - minX + 8) * TILE_W : 400;
+      const needH = (top + 3) * FLOOR_H;
+      const zf = Math.min(this.cam.vw / needW, usable / needH);
+      const z = this.cam.nearestStep(Math.max(0.25, Math.min(2, zf * 0.92)));
+      this.cam.focus(Math.round(top / 2), Math.round(cx), z);
+    } else {
+      // 'sea': 海の水平線と空、浜が入るように
+      this.cam.focus(Math.max(6, Math.min(top + 2, 12)), Math.round(cx), 1);
+    }
   }
 
   /** 事件のときは等速に戻す */
@@ -336,7 +378,7 @@ export class App {
     }
     if (now - (this.guideTimer || 0) > 1500) { this.guideTimer = now; this.guide.update(); }
     if (now - (this.goalsTimer || 0) > 700) { this.goalsTimer = now; this.goals.update(); this.updateDrawerButton(); }
-    if (now - (this.wdTimer || 0) > 500) { this.wdTimer = now; this.dialogs.watchdog(now); this.checkFestival(); }
+    if (now - (this.wdTimer || 0) > 500) { this.wdTimer = now; this.dialogs.watchdog(now); }
     // 遊んでいない（タイトル・一時停止）ときは AudioContext を止める
     this.sound.idle(!this.started || (spd === 0 && !this.dialogs.count));
     if (now - this.ambTimer > 200) {

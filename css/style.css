@@ -941,3 +941,6 @@ html.standalone, html.standalone body { background: #0d1030; }
 #app.side-tb #toolbar #confirm-bar .cb-nudge { grid-template-columns: repeat(3, 1fr); grid-template-rows: 36px 36px; }
 #app.side-tb #toolbar #confirm-bar .cb-acts { flex-direction: row; }
 #app.side-tb #toolbar #confirm-bar #cb-cancel, #app.side-tb #toolbar #confirm-bar #cb-ok { min-width: 0; flex: 1; min-height: 44px; padding: 0 6px; font-size: 13px; }
+.modal .go-see { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 6px 8px; border: 2px dashed var(--lo); background: #fff8e4; font-size: 13px; font-weight: 700; cursor: pointer; }
+.modal .go-see input { width: 20px; height: 20px; }
+.modal .es-q { font-weight: 800; font-size: 15px; }

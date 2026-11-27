@@ -1,9 +1,12 @@
 // モーダル類: 事件の prompt、確認、メニュー、遊び方、状況（★進捗・財務）、セーブ入出力、★昇格演出、エンディング
-import { TYPES, STAR_POP, LOBBY_FLOORS, fmtMoney, floorName } from '../sim/constants.js';
+import { TYPES, STAR_POP, LOBBY_FLOORS, SAVE_KEY, fmtMoney, floorName } from '../sim/constants.js';
+import { SPEED_ONE } from './speeds.js';
 import { iconURL } from './icons.js';
 import { portraitURL } from './portraits.js';
 import { exportText, parseImport, downloadText, peekSave, storage } from './save.js';
 
+const GO_KEY = SAVE_KEY + '.goSee';
+const EVENT_ICON = { typhoon: '🌀', fireworks: '🎆', vip: '🎩', wedding: '💒', fire: '🔥', bomb: '💣', explosion: '💥', heli: '🚁' };
 const PROMPT_ICON = { bomb: '💣', fire: '🔥', vip: '🎩', wedding: '💒', roach: '🪳', santa: '🎅' };
 
 function h(tag, props = {}, ...kids) {
@@ -109,6 +112,7 @@ export class Dialogs {
     // 同じ prompt（id）が何度届いても1回だけ。★・TOWER も重ねない。待ち行列は上限つき
     const key = item.type === 'prompt' ? `p:${item.data && item.data.id}` : item.type === 'star' ? `s:${item.star}`
       // 物語の1つの節目は、同じ title の通知が話し手ごとに複数届く → 話し手と本文まで含めて区別する
+      : item.type === 'eventStart' ? `es:${item.data && item.data.kind}:${item.data && item.data._t}`
       : item.type === 'scenario' ? `sc:${item.data && item.data.kind}:${item.data && (item.data.beat || '')}:${item.data && item.data.title}:${item.data && item.data.speaker}:${item.data && item.data.text}` : item.type;
     this.seen ||= new Set();
     if (this.seen.has(key)) return;
@@ -123,9 +127,11 @@ export class Dialogs {
     if (this.busy || !this.queue.length) return;
     const item = this.queue.shift();
     this.busy = true;
+    this.current = item;
     this.app.onModalChange();
     const done = () => {
       this.busy = false;
+      this.current = null;
       // 答えた prompt は、同じ id でまた届いても出さない（sim が再送しても重複しない）。★は次の昇格のために消す
       if (item.type !== 'prompt' && this.seen) this.seen.delete(item.key);
       this.app.onModalChange();
@@ -136,6 +142,7 @@ export class Dialogs {
       else if (item.type === 'star') this.showStar(item.star, done);
       else if (item.type === 'tower') this.showEnding(done, item.data);
       else if (item.type === 'scenario') this.showScenario(item.data, done);
+      else if (item.type === 'eventStart') this.showEventStart(item.data, done);
       else done();
     } catch (e) {
       console.error(e);
@@ -163,6 +170,7 @@ export class Dialogs {
       else if (now - this.wdSince > 2000) {
         console.warn('[watchdog] 表示中のダイアログが無いのに一時停止していたので解除しました', { busy: this.busy, stack: this.stack.length, queue: this.queue.length });
         this.busy = false;
+        this.current = null;
         this.escHandler = null;
         this.wdSince = 0;
         this.app.onModalChange();
@@ -172,12 +180,40 @@ export class Dialogs {
     if (!this.busy && this.queue.length) this.pump();
   }
 
+  /** 事件が始まった: 見に行くか確認（見に行く → 等速＋カメラ、このまま → 元の速度） */
+  showEventStart(d, done) {
+    const app = this.app;
+    if (app.decidedRecently(d.kind)) { done(); return; } // 判断の prompt で答え済み
+    const what = d.title || '事件';
+    const body = h('div', {},
+      h('div', { class: 'prompt-icon', text: EVENT_ICON[d.kind] || PROMPT_ICON[d.kind] || '📢' }),
+      d.text ? h('p', { text: d.text }) : null,
+      // sim の title が文（〜ました／〜ます）ならそのまま、名詞なら「〜が始まりました」
+      h('p', { class: 'es-q', text: `${/(ました|ます)$/.test(what) ? what : `${what}が始まりました`}。見に行きますか？` }));
+    this.open({
+      title: what, kind: d.kind, body, closable: true,
+      buttons: [{ label: 'このまま', value: false }, { label: '📍 見に行く', value: true, primary: true }],
+    }).then((v) => {
+      if (v === true && app.sim) { app.setSpeed(SPEED_ONE); app.goSee(d); }
+      done();
+    });
+  }
+
   showPrompt(p, done) {
     const app = this.app;
     const sim = app.sim;
+    // 判断が必要な事件（火災・爆破予告）: 答えたあと現場を見に行くか（等速）
+    const decision = p.kind === 'fire' || p.kind === 'bomb';
+    let goChk = null;
+    if (decision) {
+      goChk = h('input', { type: 'checkbox', id: 'go-see' });
+      goChk.checked = storage.get(GO_KEY) === '1';
+      goChk.addEventListener('change', () => storage.set(GO_KEY, goChk.checked ? '1' : '0'));
+    }
     const body = h('div', {},
       h('div', { class: 'prompt-icon', text: PROMPT_ICON[p.kind] || '📢' }),
-      ...(String(p.text || '').split('\n').map((line) => h('p', { text: line }))));
+      ...(String(p.text || '').split('\n').map((line) => h('p', { text: line }))),
+      decision ? h('label', { class: 'go-see' }, goChk, ' 答えたあと現場を見に行く（等速）') : null);
     const choices = Array.isArray(p.choices) && p.choices.length ? p.choices : [{ label: 'OK', value: true }];
     const wrapClose = { closed: false };
     this.open({
@@ -188,6 +224,16 @@ export class Dialogs {
       wrapClose.closed = true;
       if (sim === app.sim) {
         try { sim.answer(p.id, v); } catch (e) { console.error(e); }
+        if (decision) {
+          (app.decisionAt ||= {})[p.kind] = performance.now();
+          if (goChk && goChk.checked) {
+            app.setSpeed(SPEED_ONE);
+            const fire = sim.fire;
+            if (p.kind === 'fire' && fire && Number.isFinite(fire.f)) app.goSee({ f: fire.f, x: Math.round(fire.x) });
+            else if (p.kind === 'fire' && p.data && Number.isFinite(p.data.f)) app.goSee({ f: p.data.f, x: p.data.x });
+            else app.goSee({ view: 'building' });
+          }
+        }
       }
       done();
     });
@@ -577,6 +623,8 @@ export class Dialogs {
       <p>「リゾート」タブの専用施設: <b>海の家</b>（1F・夏だけ）、<b>スーパー銭湯</b>（2フロア・ホテルの評判が上がる）、<b>水族館</b>（2フロア・大水槽とイルカショーあり（1日4回）・季節を問わず人を呼ぶ）、<b>遊園地</b>（3フロアの屋外施設・★4）、<b>屋外プール</b>（昼は家族、夜はナイトプール）、<b>スカイラウンジ</b>（20F以上・夜景）、<b>コテージ</b>（浜や屋上の宿泊施設）、<b>海のチャペル</b>（30F以上・★5）。屋外施設の上には何も建てられません。</p>
       <p><b>花火大会</b>: 7〜8月の毎週土曜の夜。3日前にお知らせ（HUD の下に 🎆）。当日は観光客が2〜3倍になり、屋外施設やスカイラウンジがあるほど人が集まります。</p>
       <p>物語: 渚（ホテルのフロント係）と航（ライフガード）の関係が節目ごとに進み、★5 でプロポーズ。海のチャペルで2人の結婚式が成功すると「伝説のリゾート」（LEGEND）達成。「🎯 目標」ボタンの「📋 次にやること」に、建物の基本・次の★で足りないもの・目標・物語のヒントがまとまっています。</p>
+      <h3>事件が起きたら</h3>
+      <p>お知らせ（予告）では速度は変わりません。事件が始まると「見に行きますか？」と聞かれ、「📍 見に行く」で等速になって現場へ移動します。火災・爆破予告では「答えたあと現場を見に行く（等速）」にチェックしておくと、答えたあと現場へ移動します。</p>
       <h3>はじめの一歩</h3>
       <ul>
         <li>「基本」の<b>ロビー</b>を1Fに横長に置く（人の出入口）</li>

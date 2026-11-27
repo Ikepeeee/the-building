@@ -2002,7 +2002,7 @@ test('§16 海辺のリゾート: 開始時の状態と最初の会話', () => {
   assert.equal(s.money, 1500000);
   assert.equal(s.star, 1, '★1 から始まる（§17）');
   assert.deepEqual(s.date, { month: 7, day: 1 });
-  assert.equal(s.minFloor, -2);
+  assert.equal(s.minFloor, -3);
   assert.deepEqual(s.scenario, { id: 'seaside', name: '海辺のリゾート', startDay: 0, deadlineDay: 120, state: 'playing', grade: 0 });
   const g = s.scenarioProgress();
   assert.deepEqual(g.goals.map((x) => x.target), [40, 4.0, 1500]);
@@ -2021,12 +2021,15 @@ test('§16 海辺のリゾート: 開始時の状態と最初の会話', () => {
   // 需要と季節
   assert.ok(s.demandMul('hotelTwin') > 1 && s.demandMul('office') < 1);
   assert.equal(s.seasonMul(), 2, '7月は観光シーズン');
-  // 地下は B2F まで
-  mustBuild(s, 'floor', { f: -1, x: 0, x2: 30 }); mustBuild(s, 'floor', { f: -2, x: 0, x2: 30 });
-  assert.match(s.check('floor', { f: -3, x: 0, x2: 30 }).reason, /地下水位/);
-  assert.match(s.check('elevator', { f: -3, f2: 2, x: 10 }).reason, /地下水位|フロアがありません/);
-  mustBuild(s, 'elevator', { f: -2, f2: 1, x: 20 });
+  // 地下は B3F まで（地下鉄駅が建てられる）
+  for (const f of [-1, -2, -3]) mustBuild(s, 'floor', { f, x: 0, x2: 30 });
+  assert.match(s.check('floor', { f: -4, x: 0, x2: 30 }).reason, /地下水位が高く、B3Fより下は掘れません/);
+  assert.match(s.check('elevator', { f: -4, f2: 2, x: 10 }).reason, /地下水位|フロアがありません/);
+  mustBuild(s, 'elevator', { f: -3, f2: 1, x: 20 });
   assert.match(s.act(s.transportAt(0, 21), 'extendDown').reason, /地下水位/);
+  s.star = 4; s.money = 1e9;
+  for (const f of [0, -1, -2, -3]) s.build('floor', { f, x: 31, x2: 100 });
+  assert.ok(s.check('metro', { f: -3, x: 40 }).ok, s.check('metro', { f: -3, x: 40 }).reason);
 });
 
 test('§16 目標・成績・クリア（★3/★2/★1）と、クリア後も続けられる', () => {
@@ -2141,7 +2144,7 @@ test('§16 シナリオの途中で保存・読み込み（会話は繰り返さ
   const data = JSON.parse(JSON.stringify(s.serialize()));
   assert.equal(data.scenario.id, 'seaside');
   const r = new Tower(); r.restore(data);
-  assert.equal(r.theme, 'seaside'); assert.equal(r.minFloor, -2);
+  assert.equal(r.theme, 'seaside'); assert.equal(r.minFloor, -3);
   assert.equal(r.money, 777777, '初期資金で上書きしない');
   assert.deepEqual(r.date, s.date);
   assert.deepEqual(r.scenario, s.scenario);
@@ -2908,6 +2911,111 @@ test('コピーの費用: 合計で資金を判定（足りればOK・足りな�
   s.money = total;
   assert.ok(s.buildBatch(bp.ops, { f: 0, x: 100 }).ok);
   assert.equal(s.money, 0);
+});
+
+test('§21 eventStart: 事件・催しが実際に始まったときに1回だけ（予告では出さない・保存と復元で重ならない）', () => {
+  const grab = (s) => { const l = []; s.on('eventStart', (e) => l.push(e)); return l; };
+  const shape = (e) => {
+    assert.ok(typeof e.kind === 'string' && typeof e.title === 'string' && e.title && typeof e.text === 'string' && e.text);
+    assert.ok((typeof e.f === 'number' && typeof e.x === 'number') || ['sea', 'building'].includes(e.view), JSON.stringify(e));
+  };
+  // 爆弾: 予告（prompt）では出ず、拒否して仕掛けられたとき（view:'building'）→ 爆発（震源）
+  {
+    const s = securityTower(220, []);
+    const ev = grab(s);
+    let id = null; s.on('prompt', (p) => { id = p.id; });
+    s.trigger('bomb');
+    assert.equal(ev.length, 0, '予告では出さない');
+    s.answer(id, 'refuse');
+    assert.deepEqual(ev.map((e) => e.kind), ['bomb']);
+    assert.equal(ev[0].view, 'building'); assert.equal(ev[0].title, '爆弾が仕掛けられました');
+    const { f, x } = s.bomb;
+    const r = new Tower(); r.restore(JSON.parse(JSON.stringify(s.serialize())));
+    const ev2 = grab(r);
+    for (let i = 0; i < 25; i++) { s.step(8); r.step(8); } // 8倍速相当
+    assert.deepEqual(ev.map((e) => e.kind), ['bomb', 'explosion']);
+    assert.equal(ev[1].f, f); assert.equal(ev[1].x, x);
+    assert.deepEqual(ev2.map((e) => e.kind), ['explosion'], '復元後は爆発だけ');
+    ev.forEach(shape);
+  }
+  // 火災（火元）→ 延焼では増えない → ヘリが着いたとき（火元）
+  {
+    const s = securityTower(221, []);
+    const ev = grab(s);
+    let id = null; s.on('prompt', (p) => { id = p.id; });
+    const o = s.byType.office.find((c) => c.f === 10);
+    s.trigger('fire', o);
+    assert.deepEqual(ev.map((e) => e.kind), ['fire']);
+    assert.equal(ev[0].f, o.f); assert.equal(ev[0].x, o.x + o.w / 2);
+    s.step(30);
+    assert.equal(ev.length, 1, '延焼では出さない');
+    s.answer(id, 'heli');
+    const r = new Tower(); r.restore(JSON.parse(JSON.stringify(s.serialize())));
+    const ev2 = grab(r);
+    for (let i = 0; i < 60; i++) { s.step(8); r.step(8); }
+    assert.deepEqual(ev.map((e) => e.kind), ['fire', 'heli']);
+    assert.equal(ev[1].f, o.f); assert.equal(ev[1].x, o.x + o.w / 2);
+    assert.ok(ev2.filter((e) => e.kind === 'heli').length <= 1 && !ev2.some((e) => e.kind === 'fire'));
+    ev.forEach(shape);
+  }
+  // VIP: 予告では出ず、ロビーに来たとき（ロビーの位置）
+  {
+    const s = new Tower({ seed: 222 });
+    s.money = 1e8; s.star = 3;
+    mustBuild(s, 'lobby', { f: 0, x: 0, x2: 60 });
+    mustBuild(s, 'floor', { f: 1, x: 0, x2: 60 });
+    mustBuild(s, 'stairs', { f: 0, x: 40 });
+    mustBuild(s, 'hotelSuite', { f: 1, x: 0 });
+    const ev = grab(s);
+    s.on('prompt', (p) => s.answer(p.id, 'ok'));
+    assert.ok(s.trigger('vip'));
+    assert.equal(ev.length, 0, 'VIP の予告では出さない');
+    const r = new Tower(); r.restore(JSON.parse(JSON.stringify(s.serialize())));
+    const ev2 = grab(r);
+    stepTo(s, s.day + 3, 0); stepTo(r, r.day + 3, 0);
+    assert.deepEqual(ev.map((e) => e.kind), ['vip']);
+    const lb = s.byType.lobby[0]; assert.equal(ev[0].f, 0); assert.equal(ev[0].x, lb.x + lb.w / 2);
+    assert.deepEqual(ev2.map((e) => e.kind), ['vip'], '復元しても1回');
+    ev.forEach(shape);
+  }
+  // 結婚式（会場の位置）
+  {
+    const s = new Tower({ seed: 223, scenario: 'seaside' });
+    s.money = 1e10; s.star = 5;
+    mustBuild(s, 'lobby', { f: 0, x: 0, x2: 60 });
+    for (let f = 1; f <= 29; f++) mustBuild(s, 'floor', { f, x: 0, x2: 60 });
+    mustBuild(s, 'elevator', { f: 0, f2: 29, x: 2 });
+    mustBuild(s, 'seaChapel', { f: 29, x: 20 });
+    const ev = grab(s);
+    s.on('prompt', (p) => s.answer(p.id, p.choices[0].value));
+    assert.ok(s.trigger('wedding'));
+    const c = s.byType.seaChapel[0];
+    assert.deepEqual(ev.map((e) => [e.kind, e.f, e.x]), [['wedding', 29, c.x + c.w / 2]]);
+    assert.match(ev[0].text, /渚と航/);
+  }
+  // 台風の上陸・花火大会の開始（view:'sea'）。台風の予告・花火の告知では出さない
+  {
+    const s = new Tower({ seed: 224, scenario: 'seaside' });
+    s.scenarioDef = { ...s.scenarioDef, weather: { ...s.scenarioDef.weather, rain: null } };
+    s.money = 1e9; s.star = 3;
+    mustBuild(s, 'lobby', { f: 0, x: 0, x2: 60 });
+    const ev = grab(s);
+    stepTo(s, 2, 12);
+    assert.ok(s.festival && s.festival.state === 'announced');
+    s.announceTyphoon();
+    assert.equal(ev.length, 0, '予告・告知では出さない');
+    const r = new Tower(); r.restore(JSON.parse(JSON.stringify(s.serialize())));
+    const ev2 = grab(r);
+    stepTo(s, 3, 23); stepTo(r, 3, 23);
+    assert.deepEqual(ev.map((e) => [e.kind, e.view, e.title]), [['typhoon', 'sea', '台風が上陸しました']]);
+    assert.deepEqual(ev2.map((e) => e.kind), ['typhoon']);
+    for (const t of [s, r]) t.weather = null;
+    stepTo(s, 5, 23); stepTo(r, 5, 23);
+    const fw = ev.filter((e) => e.kind === 'fireworks');
+    assert.equal(fw.length, 1); assert.equal(fw[0].view, 'sea'); assert.equal(fw[0].title, '花火大会が始まりました');
+    assert.equal(ev2.filter((e) => e.kind === 'fireworks').length, 1);
+    ev.forEach(shape);
+  }
 });
 
 // ====================================================================

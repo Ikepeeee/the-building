@@ -30,9 +30,9 @@ export class SeasidePlayer extends AutoPlayer {
     // ファミリールーム（★2 から、★4 の条件は10室）
     if (s.star >= 2 && s.byType.hotelFamily.length < 10 && this.money() > (this.skill === 'average' ? 800000 : 500000)) return 'family';
     if (s.hotels.length < 48 && f % 2 === 1 && ((sp.hotelFloors || 0) < 4 || s.hotels.length < 44)) return 'hotel';
-    if (!sp.onsen && s.star >= 2 && this.money() > (this.skill === 'average' ? 1200000 : 500000)) return 'onsen';
+    if (!sp.onsen && s.star >= 2 && this.money() > (this.skill === 'average' ? 900000 : 500000)) return 'onsen';
     const avg = this.skill === 'average';
-    if (!sp.aquarium && s.star >= 3 && this.money() > (avg ? 3000000 : 1500000)) return 'aquarium';
+    if (!sp.aquarium && s.star >= 3 && this.money() > (avg ? 2700000 : 1500000)) return 'aquarium';
     // 上手なプレイヤーは、資金に余裕があればさらに人を呼ぶ（水族館・店のフロア）
     if (avg && sp.aquarium && s.byType.aquarium.length < 2 && this.money() > 4200000) return 'aquarium';
     // 普通のプレイヤーも、かなり余裕ができたら店のフロアを足す

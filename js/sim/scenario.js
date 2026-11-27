@@ -185,6 +185,7 @@ export const ScenarioMixin = {
     if (!fe || fe.state === 'done') return;
     if (fe.state === 'announced' && this.time >= fe.start && this.day === fe.day) {
       fe.state = 'live';
+      this.eventStart('fireworks', '花火大会が始まりました', '浜の夜空に花火が上がっています。屋外の店やスカイラウンジがにぎわいます', { view: 'sea' });
       this.effect('fireworks', this.topBuiltFloor() + 6, W / 2, fe.end - fe.start);
       this.sound('fireworks');
     } else if (fe.state === 'live' && this.time >= fe.end) {
@@ -351,6 +352,7 @@ export const ScenarioMixin = {
     }
     this._popDirty = true;
     this.msg(`台風が上陸しました${cancel ? `。ホテルの予約${cancel}件がキャンセルされました` : ''}`, 'event');
+    this.eventStart('typhoon', '台風が上陸しました', `屋外の施設は休業し、観光客が減ります${cancel ? `。ホテルの予約${cancel}件がキャンセルされました` : ''}`, { view: 'sea' });
     this.sound('alarm');
     // 真ん中で最上階付近に被害
     this.at(this.time + hours * 30, () => this.typhoonDamage());
